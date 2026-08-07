@@ -88,7 +88,7 @@ function BookingDrawer({ booking, onClose }) {
   ];
 
   const footer = cur === "pending"
-    ? <><Button variant="danger" onClick={() => setConfirmCancel(true)}>Cancel booking</Button><Button style={{ marginInlineStart: "auto" }} iconStart="check" onClick={() => { setStatus("confirmed"); setToast("Booking " + booking.ref + " confirmed"); }}>Confirm booking</Button></>
+    ? <><Button variant="danger" onClick={() => setConfirmCancel(true)}>Cancel booking</Button><Button style={{ marginInlineStart: "auto" }} iconStart="check" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.confirmBooking(booking.ref), () => { setStatus("confirmed"); setToast("Booking " + booking.ref + " confirmed"); })}>Confirm booking</Button></>
     : cur === "confirmed"
       ? <><Button variant="secondary" iconStart="mail" onClick={() => window.tkToast("Confirmation resent")}>Resend confirmation</Button><Button variant="danger" style={{ marginInlineStart: "auto" }} onClick={() => setConfirmCancel(true)}>Cancel booking</Button></>
       : <Button variant="secondary" style={{ marginInlineStart: "auto" }} onClick={onClose}>Close</Button>;
@@ -125,7 +125,7 @@ function BookingDrawer({ booking, onClose }) {
       <Modal open={confirmCancel} tone="danger" title={"Cancel booking " + booking.ref + "?"}
         description={"This releases " + booking.travellers + " on " + booking.date + ". The customer is emailed automatically."}
         onClose={() => setConfirmCancel(false)}
-        actions={<><Button variant="secondary" onClick={() => setConfirmCancel(false)}>Keep booking</Button><Button variant="danger" onClick={() => { setStatus("cancelled"); setConfirmCancel(false); setToast("Booking " + booking.ref + " cancelled"); }}>Yes, cancel booking</Button></>}>
+        actions={<><Button variant="secondary" onClick={() => setConfirmCancel(false)}>Keep booking</Button><Button variant="danger" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.cancelBooking(booking.ref, reason), () => { setStatus("cancelled"); setConfirmCancel(false); setToast("Booking " + booking.ref + " cancelled"); })}>Yes, cancel booking</Button></>}>
         <FormField id="cancel-reason" label="Reason (recorded in history)" required>
           <Select value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Choose a reason"
             options={[{ value: "Customer request", label: "Customer request" }, { value: "Non-payment", label: "Non-payment" }, { value: "Departure cancelled", label: "Departure cancelled" }, { value: "Duplicate", label: "Duplicate booking" }]} />

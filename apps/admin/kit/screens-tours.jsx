@@ -71,7 +71,7 @@ function ToursAdmin({ go, state, setState }) {
       <Modal open={!!del} tone="danger" title={del ? "Delete " + del.title + "?" : ""}
         description="This removes the tour and its departures from the catalogue. Existing bookings are kept but the tour can no longer be booked. Consider setting it to Draft instead."
         onClose={() => setDel(null)}
-        actions={<><Button variant="secondary" onClick={() => setDel(null)}>Keep tour</Button><Button variant="danger" onClick={() => setDel(null)}>Delete tour</Button></>} />
+        actions={<><Button variant="secondary" onClick={() => setDel(null)}>Keep tour</Button><Button variant="danger" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.deleteTour(del._apiId || del.id), () => { if (window.TK_CONFIG && window.TK_CONFIG.USE_LIVE_API) { const arr = window.TK_DATA.tours, i = arr.findIndex(x => x.id === del.id); if (i > -1) arr.splice(i, 1); window.tkToast("Tour deleted"); } setDel(null); })}>Delete tour</Button></>} />
     </div>
   );
 }
@@ -88,11 +88,30 @@ function TourEdit({ go, state }) {
   const [region, setRegion] = React.useState(t.region || "");
   const [addingRegion, setAddingRegion] = React.useState(false);
   const [newRegion, setNewRegion] = React.useState("");
-  const commitRegion = () => { const v = newRegion.trim(); if (!v) return; window.TK_ADD_REGION(v); setRegions(window.TK_DATA.regions.slice()); setRegion(v); setNewRegion(""); setAddingRegion(false); touch(); setToast("Region “" + v + "” added — now live in browse filters and the Regions page"); };
+  const commitRegion = () => { const v = newRegion.trim(); if (!v) return; window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.createRegion(v), () => { window.TK_ADD_REGION(v); setRegions(window.TK_DATA.regions.slice()); setRegion(v); setNewRegion(""); setAddingRegion(false); touch(); setToast("Region “" + v + "” added — now live in browse filters and the Regions page"); }); };
   const media = (t.image ? [{ id: "m0", src: t.image, alt: t.title }] : []).concat(
     isNew ? [] : [1, 2, 3].map(i => ({ id: "m" + i, src: t.image, alt: "" })));
   const [cover, setCover] = React.useState("m0");
   const touch = () => setDirty(true);
+
+  // Collect the form (DS FormField injects each field's id onto its control, so
+  // the uncontrolled inputs are readable by id) and persist via the write API
+  // when live. USD is the currency of record; the server owns pricing/FX. Flag
+  // off → the optimistic toast path is exactly the prototype's.
+  const val = (id) => { const el = document.getElementById(id); return el ? el.value : ""; };
+  const lines = (id) => val(id).split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  const doSave = () => {
+    const optimistic = () => { setDirty(false); setToast(isNew ? "Tour created" : "Tour saved"); };
+    window.TK_ADMIN_ACT(
+      () => window.TK_ADMIN_API.saveTour({
+        id: isNew ? "new" : (t._apiId || state.editId),
+        title: val("e-title"), region: region, category: val("e-cat"), duration: val("e-dur"),
+        blurb: val("e-blurb"), highlights: lines("e-high"), included: lines("e-inc"), excluded: lines("e-exc"),
+        currency: val("e-cur") || "USD", published: published,
+      }),
+      optimistic
+    );
+  };
 
   const Section = ({ title, hint, children }) => (
     <div className="tk-formsection">
@@ -169,7 +188,7 @@ function TourEdit({ go, state }) {
         <span className="tk-caption">{dirty ? <span style={{ color: "var(--warning-fg)", fontWeight: 600 }}><Icon name="info" size={13} /> Unsaved changes</span> : "All changes saved"}</span>
         <div style={{ display: "flex", gap: 10 }}>
           <Button variant="secondary" onClick={() => go("tours")}>{dirty ? "Discard" : "Back"}</Button>
-          <Button iconStart="check" disabled={!dirty && !isNew} onClick={() => { setDirty(false); setToast(isNew ? "Tour created" : "Tour saved"); }}>{isNew ? "Create tour" : "Save changes"}</Button>
+          <Button iconStart="check" disabled={!dirty && !isNew} onClick={doSave}>{isNew ? "Create tour" : "Save changes"}</Button>
         </div>
       </div>
       {toast && <div style={{ position: "fixed", bottom: 20, insetInline: 0, display: "flex", justifyContent: "center", zIndex: 800 }}><Toast tone="success" onClose={() => setToast(null)}>{toast}</Toast></div>}
@@ -199,7 +218,15 @@ function DeparturesAdmin({ go, state, setState }) {
   const fromPrice = chosenPkg && chosenPkg.tiers && chosenPkg.tiers.length ? chosenPkg.tiers[chosenPkg.tiers.length - 1].price : (chosenTour && chosenTour.tiers && chosenTour.tiers.length ? chosenTour.tiers[chosenTour.tiers.length - 1].price : (chosenTour && chosenTour.price));
   const canSave = form.tourId && form.date && form.capacity > 0;
   React.useEffect(() => { const h = () => openAdd(); window.addEventListener("tk-add-departure", h); return () => window.removeEventListener("tk-add-departure", h); });
-  const save = () => { setAdding(false); setToast("Departure added — " + (chosenTour ? chosenTour.title : "tour") + (chosenPkg ? " · " + chosenPkg.name : "") + (form.date ? " on " + form.date : "") + (form.repeat ? " (+ weekly repeats)" : "")); };
+  const save = () => {
+    const optimistic = () => { setAdding(false); setToast("Departure added — " + (chosenTour ? chosenTour.title : "tour") + (chosenPkg ? " · " + chosenPkg.name : "") + (form.date ? " on " + form.date : "") + (form.repeat ? " (+ weekly repeats)" : "")); };
+    window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.createDeparture({
+      tourId: (chosenTour && chosenTour._apiId) || form.tourId, packageId: form.packageId || undefined,
+      date: form.date, time: form.time, capacity: +form.capacity,
+      price: form.price === "" ? undefined : +form.price, guideId: form.guide || undefined,
+      repeatWeekly: !!form.repeat, notes: form.notes || undefined, currency: "USD",
+    }), optimistic);
+  };
 
   const util = (d) => Math.round((d.booked / d.capacity) * 100);
   const capBar = (d) => {
@@ -292,7 +319,7 @@ function DeparturesAdmin({ go, state, setState }) {
       <Modal open={!!cancelDep} tone="danger" title="Cancel this departure?"
         description={cancelDep ? cancelDep.tour + " on " + cancelDep.date + " has " + cancelDep.booked + " booked traveller" + (cancelDep.booked === 1 ? "" : "s") + "." : ""}
         onClose={() => setCancelDep(null)}
-        actions={<><Button variant="secondary" onClick={() => setCancelDep(null)}>Keep departure</Button><Button variant="danger" onClick={() => { setToast("Departure cancelled — " + (cancelDep ? cancelDep.booked : 0) + " bookings flagged for refund"); setCancelDep(null); }}>Cancel departure</Button></>}>
+        actions={<><Button variant="secondary" onClick={() => setCancelDep(null)}>Keep departure</Button><Button variant="danger" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.cancelDeparture(cancelDep.id, "Departure cancelled"), () => { setToast("Departure cancelled — " + (cancelDep ? cancelDep.booked : 0) + " bookings flagged for refund"); setCancelDep(null); })}>Cancel departure</Button></>}>
         {cancelDep && cancelDep.booked > 0 && <Alert tone="warning" title="This affects existing bookings">All {cancelDep.booked} bookings on this departure will be marked for cancellation and the customers emailed. Refunds are handled in Payments.</Alert>}
       </Modal>
       {toast && <div style={{ position: "fixed", bottom: 20, insetInline: 0, display: "flex", justifyContent: "center", zIndex: 800 }}><Toast tone="success" onClose={() => setToast(null)}>{toast}</Toast></div>}

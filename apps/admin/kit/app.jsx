@@ -91,14 +91,34 @@ function adminRouteFromPath(pathname) {
   return { screen: hit ? hit[0] : "dashboard", editId: null };
 }
 
+// Live-API auth gate (TRI-870). Flag off → LIVE is false and everything below
+// collapses to the fixture/demo prototype (byte-identical). Flag on → the boot
+// gate (tk-boot.js) has already resolved the staff session before first render:
+// TK_ADMIN_SESSION is either the session or {unauthenticated:true}.
+const LIVE = !!(window.TK_CONFIG && window.TK_CONFIG.USE_LIVE_API);
+function tkSession() { return window.TK_ADMIN_SESSION; }
+function tkAuthed() { const s = tkSession(); return !LIVE || (s && !s.unauthenticated); }
+
 function AdminApp() {
   const first = adminRouteFromPath(window.location.pathname);
-  const [screen, setScreen] = React.useState(first.screen);
+  // When live and not signed in, start on the login screen regardless of URL.
+  const initialScreen = (LIVE && !tkAuthed()) ? "login" : first.screen;
+  const [screen, setScreen] = React.useState(initialScreen);
   const [editId, setEditId] = React.useState(first.editId);
   const [detailRef, setDetailRef] = React.useState(null);
   const [demo, setDemo] = React.useState({}); // per-screen view toggles
-  const role = demo.role || "admin";
-  const user = USERS[role];
+  // Role/user come from the live session when signed in; otherwise the demo/
+  // fixture identity (unchanged prototype behaviour).
+  const session = tkSession();
+  const liveAuthed = LIVE && session && !session.unauthenticated;
+  const role = liveAuthed ? (session.role || "admin") : (demo.role || "admin");
+  const user = liveAuthed
+    ? (function () {
+        const s = session.staff || {};
+        const name = s.name || "Staff";
+        return { name, role: (role.charAt(0).toUpperCase() + role.slice(1)), initials: s.initials || name.split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase(), email: s.email || "", greet: (name.split(/\s+/)[0]) };
+      })()
+    : (USERS[role] || USERS.admin);
   const go = (s, payload) => {
     const nextEditId = (s === "tour-edit" || s === "departures") ? (payload || null) : editId;
     if (s === "tour-edit" || s === "departures") setEditId(payload || null);
@@ -118,6 +138,20 @@ function AdminApp() {
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
+  // A mid-session 401 (session expired/revoked) from any write → land on the
+  // session-expired screen (which routes back to /login). Live only.
+  React.useEffect(() => {
+    if (!LIVE) return;
+    const on401 = () => { window.TK_ADMIN_SESSION = { unauthenticated: true }; go("expired"); };
+    window.addEventListener("tk-admin-401", on401);
+    return () => window.removeEventListener("tk-admin-401", on401);
+  }, []);
+  // Sign out: revoke the server session when live, then return to /login.
+  const signOut = () => {
+    if (LIVE && window.TK_ADMIN_API) {
+      window.TK_ADMIN_API.logout().catch(() => {}).then(() => { window.TK_ADMIN_SESSION = { unauthenticated: true }; go("login"); });
+    } else { go("login"); }
+  };
 
   // Accessibility enhancement layer. Applied to the DS components' RENDERED
   // OUTPUT only — design-system/ source stays byte-for-byte pristine. These are
@@ -198,7 +232,7 @@ function AdminApp() {
   return (
     <Frame demo={demo} setDemo={setDemo} screen={screen} go={go}>
       <AppShell groups={navGroups(role)} current={navCurrent} onNavigate={go} notifications={3} notificationItems={notifs}
-        user={user} onSignOut={() => go("login")} onProfile={() => go("admin-profile")} onPreferences={() => go("admin-prefs")} logoSrc="../../assets/logo-badge.png">
+        user={user} onSignOut={signOut} onProfile={() => go("admin-profile")} onPreferences={() => go("admin-prefs")} logoSrc="../../assets/logo-badge.png">
         <PageHeader title={meta.title} subtitle={forbidden ? null : meta.sub} breadcrumbs={crumbs} actions={forbidden ? null : actions} />
         {body}
       </AppShell>

@@ -27,31 +27,68 @@ function AuthFrame({ children, foot }) {
 }
 
 function AdminLogin({ go, state }) {
+  const LIVE = !!(window.TK_CONFIG && window.TK_CONFIG.USE_LIVE_API);
+  const [busy, setBusy] = React.useState(false);
+  const [liveErr, setLiveErr] = React.useState(null); // { title, msg }
   const locked = state.authView === "locked";
-  const wrong = state.authView === "error";
+  const wrong = state.authView === "error" || !!liveErr;
+  // Live sign-in: POST /api/admin/auth/login, then hydrate + land on dashboard
+  // (or the MFA challenge if the server asks for a second factor). Flag off →
+  // the prototype path (straight to the MFA demo screen) is untouched.
+  const submit = (e) => {
+    e.preventDefault();
+    if (!LIVE) { go("mfa"); return; }
+    const form = e.target;
+    const email = (form.querySelector('input[type="email"]') || {}).value || "";
+    const pwEl = form.querySelector('input[type="password"]') || {};
+    const password = pwEl.value || "";
+    const trust = !!(form.querySelector("#a-trust") && form.querySelector("#a-trust").checked);
+    setBusy(true); setLiveErr(null);
+    window.TK_ADMIN_API.login(email, password, { trust }).then((res) => {
+      if (res && (res.mfaRequired || res.mfa_required || res.requiresMfa)) { setBusy(false); go("mfa"); return; }
+      // Logged in — record session + hydrate, then go to the dashboard.
+      Promise.resolve(window.TK_ADMIN_ENTER(res)).then(() => { setBusy(false); go("dashboard"); }, () => { setBusy(false); go("dashboard"); });
+    }, (err) => {
+      setBusy(false);
+      if (err && err.status === 423) setLiveErr({ title: "Account temporarily locked", msg: "Too many failed attempts. Try again later, or contact an administrator to unlock your account." });
+      else if (err && err.status === 401) setLiveErr({ title: "Sign-in failed", msg: "That email and password don't match. Please try again." });
+      else setLiveErr({ title: "Couldn't sign in", msg: (err && err.message) || "We couldn't reach the console service. Please try again." });
+    });
+  };
   return (
     <AuthFrame foot={<p className="tk-caption" style={{ textAlign: "center", marginTop: "var(--space-6)" }}><Icon name="lock" size={12} /> Protected by two-factor authentication</p>}>
       <span className="tk-overline" style={{ color: "var(--gold-700)" }}>Staff sign-in</span>
       <h2 className="tk-h2" style={{ marginTop: 6 }}>Sign in to the console</h2>
       <p className="tk-body-sm tk-muted" style={{ marginTop: 4, marginBottom: "var(--space-6)" }}>Use your TripKoach staff account. Personal customer logins won't work here.</p>
       {locked && <Alert tone="error" title="Account temporarily locked" style={{ marginBottom: "var(--space-4)" }}>Too many failed attempts. Try again in 15 minutes, or contact an administrator to unlock your account.</Alert>}
-      {wrong && <Alert tone="error" title="Sign-in failed" style={{ marginBottom: "var(--space-4)" }}>That email and password don't match. You have 2 attempts left before the account locks.</Alert>}
-      <form className="tk-stack" style={{ gap: "var(--space-4)" }} onSubmit={(e) => { e.preventDefault(); go("mfa"); }}>
+      {liveErr && <Alert tone="error" title={liveErr.title} style={{ marginBottom: "var(--space-4)" }}>{liveErr.msg}</Alert>}
+      {wrong && !liveErr && <Alert tone="error" title="Sign-in failed" style={{ marginBottom: "var(--space-4)" }}>That email and password don't match. You have 2 attempts left before the account locks.</Alert>}
+      <form className="tk-stack" style={{ gap: "var(--space-4)" }} onSubmit={submit}>
         <FormField id="a-email" label="Work email"><Input type="email" autoComplete="username" defaultValue="kwame@tripkoach.com" iconStart="mail" disabled={locked} /></FormField>
         <FormField id="a-pw" label="Password" error={wrong ? "Check your password" : undefined}><PasswordInput id="a-pw" disabled={locked} /></FormField>
         <div className="tk-row" style={{ justifyContent: "space-between" }}>
           <Checkbox id="a-trust" label="Trust this device for 30 days" />
           <Button variant="link" size="sm" type="button" onClick={() => go("reset")}>Forgot password?</Button>
         </div>
-        <Button block size="lg" type="submit" disabled={locked}>Continue</Button>
+        <Button block size="lg" type="submit" disabled={locked || busy}>{busy ? "Signing in…" : "Continue"}</Button>
       </form>
     </AuthFrame>
   );
 }
 
 function MfaChallenge({ go, state }) {
+  const LIVE = !!(window.TK_CONFIG && window.TK_CONFIG.USE_LIVE_API);
   const [code, setCode] = React.useState(["", "", "", "", "", ""]);
-  const err = state.authView === "mfa-error";
+  const [busy, setBusy] = React.useState(false);
+  const [liveErr, setLiveErr] = React.useState(false);
+  const err = state.authView === "mfa-error" || liveErr;
+  const verify = () => {
+    if (!LIVE) { go("dashboard"); return; }
+    setBusy(true); setLiveErr(false);
+    window.TK_ADMIN_API.verifyMfa(code.join("")).then((res) => {
+      Promise.resolve(window.TK_ADMIN_ENTER(res)).then(() => { setBusy(false); go("dashboard"); }, () => { setBusy(false); go("dashboard"); });
+    }, () => { setBusy(false); setLiveErr(true); });
+  };
   const refs = React.useRef([]);
   const setDigit = (i, v) => {
     if (!/^\d?$/.test(v)) return;
@@ -71,7 +108,7 @@ function MfaChallenge({ go, state }) {
             style={{ width: 48, height: 56, textAlign: "center", fontSize: 22, fontWeight: 700, borderRadius: "var(--radius-md)", border: "1px solid " + (err ? "var(--danger-solid)" : "var(--border-input)"), background: "var(--surface-card)", color: "var(--text-strong)", fontVariantNumeric: "tabular-nums" }} />
         ))}
       </div>
-      <Button block size="lg" style={{ marginTop: "var(--space-5)" }} onClick={() => go("dashboard")}>Verify and sign in</Button>
+      <Button block size="lg" style={{ marginTop: "var(--space-5)" }} disabled={busy} onClick={verify}>{busy ? "Verifying…" : "Verify and sign in"}</Button>
       <div className="tk-row" style={{ justifyContent: "center", gap: 6, marginTop: "var(--space-4)" }}>
         <span className="tk-caption">Didn't get a code?</span>
         <Button variant="link" size="sm">Use a backup code</Button>
