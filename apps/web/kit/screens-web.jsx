@@ -461,7 +461,7 @@ function TourWeb({ go, currency }) {
               {t0.packages ? <span className="tk-caption">{t.packageName} package</span> : null}
             </div>
             <DeparturePicker departures={cvtDeps(t.departures, currency)} value={dep} onChange={setDep} currency={currency} legend="Choose a departure" />
-            <Button size="lg" block onClick={() => { window.TK_SEL = { tourId: t0.id, packageId: pkgId, packageName: t.packageName }; go("checkout"); }}>Reserve my spot</Button>
+            <Button size="lg" block onClick={() => { window.TK_SEL = { tourId: t0.id, apiTourId: t0._apiId, packageId: pkgId, packageName: t.packageName, departureId: dep }; go("checkout"); }}>Reserve my spot</Button>
             <p className="tk-caption" style={{ display: "flex", gap: 6 }}><Icon name="wallet" size={14} />Nothing is charged today. Pay before departure.</p>
           </div></div>
           <Alert tone="info" title="Free cancellation">Cancel free until 7 days before departure.</Alert>
@@ -471,16 +471,71 @@ function TourWeb({ go, currency }) {
   );
 }
 
+// Live only when the flag is on AND the booking client is present. Off ⇒ every
+// live branch below is dead and the screen renders/behaves as the prototype.
+const LIVE_BOOK = () => !!(window.TK_CONFIG && window.TK_CONFIG.USE_LIVE_API && window.TK_BOOKING);
+
 function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
   const t0 = window.TK_DATA.tours[0];
   const sel = (window.TK_SEL && window.TK_SEL.tourId === t0.id) ? window.TK_SEL : null;
   const t = (t0.packages && sel) ? pkgTour(t0, sel.packageId) : t0;
-  const d = t.departures[1];
   const [pax, setPax] = React.useState(4);
   const [mode, setMode] = React.useState("later");
+  // Live-checkout state (inert when the flag is off; hooks always run so order is stable).
+  const live = LIVE_BOOK();
+  const [depId, setDepId] = React.useState((window.TK_SEL && window.TK_SEL.departureId) || "d2");
+  const [busy, setBusy] = React.useState(false);
+  const [payState, setPayState] = React.useState("idle");
+  const [err, setErr] = React.useState(null);
+  // Selected departure: live picks the chosen one, falling back to a real API
+  // departure when the prototype default "d2" doesn't exist. Off ⇒ departures[1].
+  const d = (live ? t.departures.find(x => x.id === depId) : null) || t.departures[1] || t.departures[0];
   const unit = window.TK_PRICE.perPerson(t, pax);
   const total = unit * pax;
   const nextTier = window.TK_PRICE.nextTier(t, pax);
+
+  const readVal = (id) => { const el = document.getElementById(id); return el && typeof el.value === "string" ? el.value.trim() : ""; };
+  const buildTravellers = (lead) => {
+    const out = [{ name: lead.name || "Lead traveller", email: lead.email || undefined, phone: lead.phone || undefined, idNumber: lead.idNumber || undefined, lead: true }];
+    const extra = ["w-t2", "w-t3", "w-t4"];
+    for (let i = 1; i < pax; i++) out.push({ name: readVal(extra[i - 1]) || ("Traveller " + (i + 1)), lead: false });
+    return out;
+  };
+  async function onPay() {
+    if (busy) return;
+    setErr(null); setBusy(true); setPayState("processing");
+    try {
+      const lead = { name: readVal("w-name"), email: readVal("w-email"), phone: readVal("w-phone"), idNumber: readVal("w-id") };
+      const bk = await window.TK_BOOKING.create({
+        tourId: (window.TK_SEL && window.TK_SEL.apiTourId) || t0._apiId || t0.id,
+        departureId: d && d.id,
+        packageId: (t0.packages && sel) ? sel.packageId : undefined,
+        partySize: pax,
+        travellers: buildTravellers(lead),
+        lead: lead,
+        specialRequests: readVal("w-notes") || undefined,
+        agreedTerms: true,
+        payMode: mode,
+      });
+      if (!bk || !bk.ref) throw new Error("We couldn't create your booking. Please try again.");
+      window.TK_BOOKING.saveCtx(bk.ref, {
+        ref: bk.ref, tourTitle: t.title, packageName: t0.packages ? t.packageName : null,
+        departureLabel: d ? (d.date + (d.time ? ", " + d.time : "")) : "",
+        partySize: pax, totalUsd: bk.totalUsd != null ? bk.totalUsd : total, email: lead.email, payMode: mode,
+      });
+      if (mode === "now") {
+        const init = await window.TK_BOOKING.initPayment(bk.ref, { callbackUrl: window.location.origin + "/confirm?ref=" + encodeURIComponent(bk.ref) });
+        if (!window.TK_BOOKING.redirect(init)) throw new Error("Payment could not be started. Please try again.");
+        return; // full-page redirect to Paystack — SPA unloads here
+      }
+      go("confirm");
+      try { window.history.replaceState(window.history.state, "", "/confirm?ref=" + encodeURIComponent(bk.ref)); } catch (_) {}
+    } catch (e) {
+      setPayState("failed");
+      setErr((e && e.message) || "Something went wrong. Please try again.");
+      setBusy(false);
+    }
+  }
   return (
     <div className="tk-container" style={{ paddingBlock: "var(--space-8) var(--space-12)", maxWidth: 1000, display: "flex", flexDirection: "column", gap: "var(--space-8)" }}>
       <CheckoutStepper steps={["Departure", "Travellers", "Review", "Payment", "Done"]} current={step} onStepClick={setStep} />
@@ -488,7 +543,7 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
         <div className="tk-stack" style={{ gap: "var(--space-5)" }}>
           {step === 0 && <>
             <h1 className="tk-h2">When would you like to go?</h1>
-            <DeparturePicker departures={cvtDeps(t.departures, currency)} value="d2" onChange={() => {}} currency={currency} />
+            <DeparturePicker departures={cvtDeps(t.departures, currency)} value={live ? depId : "d2"} onChange={live ? setDepId : () => {}} currency={currency} />
             <div className="tk-row" style={{ justifyContent: "space-between", maxWidth: 360 }}>
               <span className="tk-label">Travellers</span><NumberStepper id="pax" value={pax} max={d.spotsLeft} onChange={setPax} />
             </div>
@@ -527,11 +582,12 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
           </>}
           {step === 3 && <>
             <h1 className="tk-h2">How would you like to pay?</h1>
-            <PaymentForm mode={mode} onModeChange={setMode} payNowEnabled amountLabel={money(total, currency)} />
+            <PaymentForm mode={mode} onModeChange={setMode} payNowEnabled amountLabel={money(total, currency)} {...(live ? { state: payState } : {})} />
+            {live && err && <Alert tone="error" title="We couldn't complete that">{err}</Alert>}
           </>}
           <div className="tk-row" style={{ gap: 12, justifyContent: "space-between", paddingTop: "var(--space-4)", borderTop: "1px solid var(--border-subtle)" }}>
             <Button variant="secondary" iconStart="arrow-left" onClick={() => setStep(Math.max(0, step - 1))} disabled={step === 0}>Back</Button>
-            <Button size="lg" iconEnd={step === 3 && mode === "now" ? "external-link" : undefined} onClick={() => { if (step === 3) { window.__payMode = mode; go("confirm"); } else setStep(step + 1); }}>{step === 3 ? (mode === "now" ? "Pay " + money(total, currency) + " with Paystack" : "Confirm booking") : "Continue"}</Button>
+            <Button size="lg" disabled={live ? busy : undefined} iconEnd={step === 3 && mode === "now" ? "external-link" : undefined} onClick={() => { if (step !== 3) { setStep(step + 1); return; } if (live) { onPay(); return; } window.__payMode = mode; go("confirm"); }}>{live && busy ? "Processing…" : (step === 3 ? (mode === "now" ? "Pay " + money(total, currency) + " with Paystack" : "Confirm booking") : "Continue")}</Button>
           </div>
         </div>
         <OrderSummary sticky lines={[{ label: money(unit, currency) + "/person × " + pax + " travellers", amount: cvt(total, currency) }]} total={cvt(total, currency)} currency={currency} payMode={mode}>
@@ -566,7 +622,67 @@ function BookingsWeb({ go, currency = "USD" }) {
   );
 }
 
+// Live confirmation: reconciles the booking after the Paystack redirect. Reads
+// the booking ref (+ any returned txn reference) from the URL / sessionStorage,
+// verifies and polls until the payment reaches a terminal state, and renders the
+// real booking through the same DS ConfirmationPanel. Only reached under the flag.
+function ConfirmWebLive({ go, currency = "USD" }) {
+  const { ConfirmationPanel } = NS;
+  const params = new URLSearchParams(window.location.search || "");
+  const ref = params.get("ref") || window.TK_BOOKING.lastRef();
+  const reference = params.get("reference") || params.get("trxref") || "";
+  const ctx = window.TK_BOOKING.loadCtx(ref) || {};
+  const [bk, setBk] = React.useState(null);
+  const [phase, setPhase] = React.useState(ref ? "loading" : "pending");
+  React.useEffect(() => {
+    let alive = true;
+    if (!ref) return;
+    const settle = (b) => { if (!alive) return; setBk(b); setPhase(window.TK_BOOKING.isPaid(b) ? "paid" : window.TK_BOOKING.isFailed(b) ? "failed" : "pending"); };
+    const p = reference ? window.TK_BOOKING.settle(ref, reference) : window.TK_BOOKING.get(ref);
+    p.then(settle, () => { if (alive) setPhase("pending"); });
+    return () => { alive = false; };
+  }, []);
+  const loading = phase === "loading", paid = phase === "paid", failed = phase === "failed";
+  const tourTitle = (bk && bk.tourTitle) || ctx.tourTitle || "";
+  const departureLabel = (bk && bk.departureLabel) || ctx.departureLabel || "";
+  const partySize = (bk && bk.partySize) || ctx.partySize || "";
+  const totalUsd = (bk && bk.totalUsd != null) ? bk.totalUsd : ctx.totalUsd;
+  const totalStr = totalUsd != null ? money(totalUsd, currency) : "";
+  const email = (bk && bk.email) || ctx.email || "you";
+  const title = loading ? "Finalising your booking…" : paid ? "You're all set" : failed ? "Payment wasn't completed" : "Your spot is reserved";
+  const subtitle = loading
+    ? "Confirming your payment with Paystack…"
+    : (paid ? "We emailed your receipt to " : failed ? "Nothing was charged and your spots are still held. Details sent to " : "We emailed the details to ")
+      + email + (tourTitle ? ". " + tourTitle + (departureLabel ? ", " + departureLabel : "") + "." : ".");
+  return (
+    <div className="tk-container" style={{ paddingBlock: "var(--space-12)", maxWidth: 720 }}>
+      <ConfirmationPanel reference={ref || ""} status={paid ? "confirmed" : "pending"} title={title} subtitle={subtitle}
+        actions={<>
+          {failed
+            ? <Button size="lg" onClick={() => go("checkout")}>Try paying again</Button>
+            : <Button size="lg" onClick={() => go("bookings")}>View in my bookings</Button>}
+          <Button variant="secondary" iconStart="download" onClick={() => window.tkToast("Preparing your booking PDF…")}>Download details</Button>
+        </>}>
+        <div className="tk-card" style={{ width: "100%", textAlign: "start" }}><div className="tk-card__body" style={{ padding: "var(--space-5)" }}>
+          <div className="tk-summary__line"><span>Tour</span><span>{tourTitle || "—"}</span></div>
+          <div className="tk-summary__line"><span>Departure</span><span>{departureLabel || "—"}</span></div>
+          <div className="tk-summary__line"><span>Travellers</span><span>{partySize || "—"}</span></div>
+          <div className="tk-summary__total"><span>{paid ? "Total paid" : "Total due"}</span><span className="tk-num" style={{ fontWeight: 800 }}>{totalStr || "—"}</span></div>
+        </div></div>
+        {loading
+          ? <Alert tone="info" title="Just a moment">We're checking your payment status with Paystack.</Alert>
+          : paid
+          ? <Alert tone="success" title="Payment received">We charged <strong>{totalStr}</strong> via Paystack. Your spots are confirmed — no further action needed.</Alert>
+          : failed
+          ? <Alert tone="warning" title="Payment not completed">Your payment didn't go through and nothing was charged. Your spots are still held under <strong>{ref}</strong> — try again, or switch to pay later.</Alert>
+          : <Alert tone="warning" title="How to pay">Your koach will email payment options (bank transfer, mobile money or card), quoting <strong>{ref}</strong>. Pay at least 5 days before departure to lock in your spots.</Alert>}
+      </ConfirmationPanel>
+    </div>
+  );
+}
+
 function ConfirmWeb({ go, currency = "USD" }) {
+  if (LIVE_BOOK()) return <ConfirmWebLive go={go} currency={currency} />;
   const { ConfirmationPanel } = NS;
   const paid = window.__payMode === "now";
   const totalStr = money(300, currency);
