@@ -26,6 +26,24 @@ export interface Config {
   adminCookieSameSite: 'lax' | 'strict' | 'none';
   /** Idle-timeout for admin sessions, minutes. The console signs staff out after inactivity (sliding). */
   adminSessionIdleMinutes: number;
+  fx: FxConfig;
+}
+
+// Automated daily USD→GHS FX refresh (TRI-873). The cron fetches the mid-market rate, applies the
+// buffer, and writes the effective rate into settings.usd_to_ghs_charge_rate. Vendor is env-swappable.
+export interface FxConfig {
+  /** Provider display name recorded in fx_rate_history.source (swap alongside providerUrl). */
+  providerName: string;
+  /** JSON rates endpoint keyed by ISO currency. Default: exchangerate-api.com free open endpoint (no key). */
+  providerUrl: string;
+  /** Target currency to read from the provider's `rates` map. */
+  targetCurrency: string;
+  /** Buffer % added on top of the mid-market rate → effective charge rate. Default 1.75. */
+  bufferPct: number;
+  /** Reject a fetched rate deviating more than this % from last-known-good. Default 5. */
+  maxDeviationPct: number;
+  /** Network timeout for the provider fetch, ms. */
+  timeoutMs: number;
 }
 
 // Paystack (TEST-only in this slice). Secrets come from env — never code. See .env.example / secret store.
@@ -74,5 +92,13 @@ export function loadConfig(): Config {
     adminCookieSecure: process.env.COOKIE_SECURE ? process.env.COOKIE_SECURE === 'true' : true,
     adminCookieSameSite: (process.env.COOKIE_SAMESITE as 'lax' | 'strict' | 'none') || 'lax',
     adminSessionIdleMinutes: Number(process.env.ADMIN_SESSION_IDLE_MINUTES || 30),
+    fx: {
+      providerName: process.env.FX_PROVIDER_NAME || 'open.er-api.com',
+      providerUrl: process.env.FX_PROVIDER_URL || 'https://open.er-api.com/v6/latest/USD',
+      targetCurrency: process.env.FX_TARGET_CURRENCY || 'GHS',
+      bufferPct: num(process.env.FX_BUFFER_PCT) ?? 1.75,
+      maxDeviationPct: num(process.env.FX_MAX_DEVIATION_PCT) ?? 5,
+      timeoutMs: num(process.env.FX_TIMEOUT_MS) ?? 10_000,
+    },
   };
 }

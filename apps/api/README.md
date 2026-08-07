@@ -122,7 +122,10 @@ GHS **pesewas** (integer) using the configurable charge rate; each payment persi
 `fx_rate_used`, `ghs_amount_minor`, `currency='GHS'`. **TEST mode only** in this slice.
 
 **Charge-rate precedence (env wins):** `PAYSTACK_USD_TO_GHS_RATE` env → `settings.usd_to_ghs_charge_rate`
-→ `settings.usd_to_ghs_display_rate` (15.6). **Seat-hold window:** 30 min (`RESERVATION_HOLD_MINUTES`),
+→ `settings.usd_to_ghs_display_rate` (15.6). In prod the env override is **unset**, so the automated daily
+FX cron (Phase 4 — see below) drives `settings.usd_to_ghs_charge_rate` and thus every charge, with **zero
+change to this payment path**. Each payment also persists `fx_source` + `fx_rate_at` (rate provenance).
+**Seat-hold window:** 30 min (`RESERVATION_HOLD_MINUTES`),
 distinct from `settings.payment_deadline_days` (the offline-invoice deadline).
 
 Seat safety: reservation is an **atomic guarded decrement** (`UPDATE departure SET seats_reserved =
@@ -187,6 +190,59 @@ DevOps owns the same-origin path + `WEBHOOK_URL` wiring.
 ### `POST /api/v1/internal/expire-holds` (cron-callable — DevOps triggers)
 Releases unpaid holds past `reservation_expires_at` (decrements `seats_reserved`, sets the booking
 `cancelled`/`non_payment`). Returns `{ "released": <n>, "refs": ["TK-…"] }`.
+
+---
+
+## Automated daily USD→GHS FX (Phase 4 — TRI-873)
+
+Replaces the static `PAYSTACK_USD_TO_GHS_RATE=15.6` override with a **daily cron** that fetches the
+mid-market USD→GHS rate, applies a buffer, and writes the **effective** rate into
+`settings.usd_to_ghs_charge_rate`. Because the charge-rate precedence is unchanged (env override →
+`settings.usd_to_ghs_charge_rate` → display), in prod the env override is simply **not set** and the
+automated value drives every charge — **no change to the payment path**. Every attempt (success or a
+tripped guard) is written to `fx_rate_history` (migration **010**), and each payment records `fx_source`
++ `fx_rate_at` so a charge is traceable to the exact rate/source that produced it.
+
+### Cron command
+```bash
+# from apps/api, DATABASE_URL in the environment (systemd EnvironmentFile / cron env):
+npm run fx-refresh
+#   ≡ node --experimental-strip-types src/fx-refresh.ts
+# Exit 0 = rate applied ('ok') or override in force; exit 1 = a guard tripped ('fetch_failed' /
+# 'out_of_bounds') — last-known-good was kept and checkout is unaffected, but ops should investigate.
+```
+Board decision: run **daily at 00:00 Africa/Accra** (Accra is UTC±0, so `0 0 * * *` UTC). The process
+opens one DB connection, runs a single refresh, logs the outcome to stdout, and exits — cron/journald
+captures the log line and the exit code is the alert signal.
+
+### Env vars
+| var | default | meaning |
+|---|---|---|
+| `FX_PROVIDER_NAME` | `open.er-api.com` | provider label recorded in `fx_rate_history.source` |
+| `FX_PROVIDER_URL` | `https://open.er-api.com/v6/latest/USD` | JSON rates endpoint (exchangerate-api.com free tier, GHS supported, **no key**); swap to change vendor without code |
+| `FX_TARGET_CURRENCY` | `GHS` | currency read from the provider's `rates` map |
+| `FX_BUFFER_PCT` | `1.75` | % added on top of mid-market → effective charge rate |
+| `FX_MAX_DEVIATION_PCT` | `5` | reject a fetch deviating more than this % from last-known-good |
+| `FX_TIMEOUT_MS` | `10000` | provider fetch timeout |
+| `PAYSTACK_USD_TO_GHS_RATE` | *(unset in prod)* | **ops kill-switch** — when set, pins the rate, bypasses the fetch, recorded as `override`; leave unset so the cron drives the rate |
+
+The provider tolerates the exchangerate-api open shape (`{ result:"success", rates:{ GHS } }`) and the
+`conversion_rates` variant, so most vendors drop in via `FX_PROVIDER_URL` alone.
+
+### Guards (all enforced; smoke-tested per branch)
+1. **Sanity bounds** — a fetch deviating > `FX_MAX_DEVIATION_PCT` from last-known-good is rejected
+   (`out_of_bounds`); the last-known-good stays in `settings`. (First run has no history → seeded from
+   the `settings` default 15.6, so the first fetch is bounded against that.)
+2. **Fallback** — on fetch failure the last-known-good is retained (`fetch_failed`); the cron **never
+   writes 0 and never crashes checkout**.
+3. **Override** — `PAYSTACK_USD_TO_GHS_RATE` pins the rate (recorded `override`); `settings` is not touched.
+4. **Per-txn persistence** — `payment.fx_source` + `payment.fx_rate_at` (010) record where/when the
+   applied rate came from, alongside the 008 `usd_amount_minor` / `fx_rate_used` / `ghs_amount_minor`.
+5. **Log/alert** — every run logs `[fx] OK|OUT_OF_BOUNDS|FETCH_FAILED|override …` to stdout and sets the
+   exit code so cron surfaces a tripped guard.
+
+`fx_rate_history` columns: `id, source, fetched_at, raw_rate, buffer_pct, effective_rate, status
+(ok|out_of_bounds|fetch_failed|override), note`.
 
 ---
 
@@ -279,6 +335,43 @@ Phase 2 (TRI-866) owns `008_write_path_payments_fx.sql`; this phase adds **`009_
 **after** 008 (guaranteed by the runner's lexical sort). The admin payment views read the 008 FX columns
 defensively, so this branch migrates and passes `npm run smoke` **standalone** (008 absent) and needs no
 edit once 008 lands. Keep the sequence monotonic on merge to the shared `tripkoach_dev` DB.
+
+---
+
+## Production migration + seed strategy (Phase 4 — TRI-873)
+
+**Linearized migration set** (applies cleanly on an empty DB in this order — verified by `npm run smoke`
+migrating a fresh PGlite DB → `migrations applied: 10`; no renumbering, no collisions):
+
+```
+001_catalogue → 002_inventory → 003_booking_payments → 004_people → 005_reviews →
+006_staff_rbac_auth → 007_content_leads_config → 008_write_path_payments_fx →
+009_admin_rbac_seed → 010_fx_rate_automation
+```
+008 (Phase 2 FX cols) and 009 (Phase 3 admin) are already integrated on this branch; 010 (FX automation:
+`fx_rate_history` + `payment.fx_source/fx_rate_at`) stacks on top. The runner tracks applied files in
+`schema_migrations` and is idempotent, so re-running is safe.
+
+**Apply migrations (prod):**
+```bash
+DATABASE_URL=… npm run migrate      # applies 001–010 in order; idempotent
+```
+
+**Seed (prod):** catalogue + content/config + reviews **YES**; **NO test bookings/payments** — prod starts
+empty of transactions. `npm run seed` inserts only `region / tour / tour_package / price_tier / departure /
+review` (booking / payment / staff tables are left empty by design):
+```bash
+DATABASE_URL=… npm run seed         # catalogue + content only; no bookings/payments
+```
+
+**Admin user (prod):** seeded from the prod secret via argon2id — **never committed**:
+```bash
+STAFF_EMAIL=… STAFF_PASSWORD='…' STAFF_NAME='…' STAFF_ROLE=admin \
+  DATABASE_URL=… npm run admin-seed  # idempotent by email
+```
+
+**First FX rate:** the singleton `settings` row seeds `usd_to_ghs_charge_rate=15.6`; the first
+`npm run fx-refresh` run bounds its fetch against that default and applies the live effective rate.
 
 ---
 

@@ -57,6 +57,18 @@ export interface BookingService {
   expireHolds(now?: Date): Promise<{ released: number; refs: string[] }>;
   /** Resolve the USD→GHS charge rate: env override → settings.charge_rate → settings.display_rate. */
   resolveChargeRate(): Promise<number>;
+  /** Same precedence as resolveChargeRate, plus the rate's provenance (source + when established),
+   *  persisted per-payment for reconciliation (TRI-873). */
+  resolveChargeRateDetail(): Promise<ChargeRate>;
+}
+
+// Resolved charge rate + provenance. `source` is one of: an FX provider name (e.g. 'open.er-api.com'),
+// 'env_override', 'settings', 'settings_display', or 'fallback_default'. `at` is when that rate was
+// established (fx_rate_history.fetched_at / settings.updated_at / charge time for the env override).
+export interface ChargeRate {
+  rate: number;
+  source: string;
+  at: Date;
 }
 
 export function createBookingService(db: Db, cfg: Config, paystack: PaystackClient): BookingService {
@@ -77,17 +89,41 @@ export function createBookingService(db: Db, cfg: Config, paystack: PaystackClie
     throw new BookingError('ref_collision', 'Could not allocate a unique reference', 500);
   }
 
-  async function resolveChargeRate(): Promise<number> {
-    if (cfg.paystack.chargeRateOverride != null) return cfg.paystack.chargeRateOverride;
-    const { rows } = await db.query<{ charge: string | null; display: string | null }>(
-      `SELECT usd_to_ghs_charge_rate AS charge, usd_to_ghs_display_rate AS display
+  // Resolve the charge rate with provenance. Precedence is unchanged (env override → settings.charge →
+  // settings.display → 15.6); we additionally attribute WHERE the rate came from and WHEN, so each
+  // payment row is auditable. The automated FX cron (TRI-873) writes settings.usd_to_ghs_charge_rate,
+  // so in prod (no env override) `source` reflects the FX provider + its fetch time.
+  async function resolveChargeRateDetail(): Promise<ChargeRate> {
+    // env override wins (ops kill-switch); provenance = the override, established now.
+    if (cfg.paystack.chargeRateOverride != null) {
+      return { rate: cfg.paystack.chargeRateOverride, source: 'env_override', at: new Date() };
+    }
+    const { rows } = await db.query<{ charge: string | null; display: string | null; updated_at: string | null }>(
+      `SELECT usd_to_ghs_charge_rate AS charge, usd_to_ghs_display_rate AS display, updated_at
        FROM settings WHERE singleton = true`);
     const r = rows[0];
+    const settingsAt = r?.updated_at ? new Date(r.updated_at) : new Date();
     const charge = r?.charge != null ? Number(r.charge) : NaN;
-    if (Number.isFinite(charge) && charge > 0) return charge;
+    if (Number.isFinite(charge) && charge > 0) {
+      // Attribute to the FX refresh that produced this rate, if the latest applied effective rate matches.
+      const hist = await db.query<{ source: string; fetched_at: string; effective_rate: string }>(
+        `SELECT source, fetched_at, effective_rate FROM fx_rate_history WHERE status = 'ok'
+         ORDER BY fetched_at DESC LIMIT 1`).catch(() => ({ rows: [] as any[] }));
+      const h = hist.rows[0];
+      if (h && Math.abs(Number(h.effective_rate) - charge) < 5e-5) {
+        return { rate: charge, source: h.source, at: new Date(h.fetched_at) };
+      }
+      return { rate: charge, source: 'settings', at: settingsAt };
+    }
     const display = r?.display != null ? Number(r.display) : NaN;
-    if (Number.isFinite(display) && display > 0) return display;
-    return 15.6; // documented fallback
+    if (Number.isFinite(display) && display > 0) {
+      return { rate: display, source: 'settings_display', at: settingsAt };
+    }
+    return { rate: 15.6, source: 'fallback_default', at: new Date() }; // documented fallback
+  }
+
+  async function resolveChargeRate(): Promise<number> {
+    return (await resolveChargeRateDetail()).rate;
   }
 
   // ── Pricing: departure price overrides; else the tour/package tier step-function on party size. ──
@@ -273,7 +309,8 @@ export function createBookingService(db: Db, cfg: Config, paystack: PaystackClie
     if (!email) throw new BookingError('validation', 'Booking has no contact email for payment', 422);
 
     const usdMinor = Number(b.total_minor);
-    const rate = await resolveChargeRate();
+    const rateInfo = await resolveChargeRateDetail();
+    const rate = rateInfo.rate;
     const ghsMinor = usdMinorToGhsMinor(usdMinor, rate);
     const channel = opts?.channel;
     const channels = channel === 'mobile_money' ? ['mobile_money']
@@ -284,11 +321,11 @@ export function createBookingService(db: Db, cfg: Config, paystack: PaystackClie
       const r = await db.query(
         `INSERT INTO payment
            (ref, booking_id, amount_minor, currency, method, status,
-            usd_amount_minor, fx_rate_used, ghs_amount_minor)
-         VALUES ($1,$2,$3,'GHS',$4,'pending',$5,$6,$7)
+            usd_amount_minor, fx_rate_used, ghs_amount_minor, fx_source, fx_rate_at)
+         VALUES ($1,$2,$3,'GHS',$4,'pending',$5,$6,$7,$8,$9)
          RETURNING id, ref`,
         [payRef, b.id, usdMinor, channel === 'mobile_money' ? 'mobile_money' : 'paystack_card',
-         usdMinor, rate, ghsMinor]);
+         usdMinor, rate, ghsMinor, rateInfo.source, rateInfo.at.toISOString()]);
       return r.rows[0];
     });
 
@@ -451,5 +488,5 @@ export function createBookingService(db: Db, cfg: Config, paystack: PaystackClie
     });
   }
 
-  return { create, getByRef, initPayment, verifyPayment, handleWebhook, expireHolds, resolveChargeRate };
+  return { create, getByRef, initPayment, verifyPayment, handleWebhook, expireHolds, resolveChargeRate, resolveChargeRateDetail };
 }

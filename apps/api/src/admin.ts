@@ -130,6 +130,20 @@ function hasFxColumns(db: Db): Promise<boolean> {
   return p;
 }
 
+// Per-txn FX provenance cols land in migration 010 (TRI-873). Guarded separately so the admin view is
+// safe even against a DB where 008 applied but 010 hasn't.
+const fxProvCache = new WeakMap<Db, Promise<boolean>>();
+function hasFxProvenanceColumns(db: Db): Promise<boolean> {
+  let p = fxProvCache.get(db);
+  if (!p) {
+    p = db.query(
+      `SELECT 1 FROM information_schema.columns WHERE table_name = 'payment' AND column_name = 'fx_source'`,
+    ).then((r) => r.rows.length > 0);
+    fxProvCache.set(db, p);
+  }
+  return p;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 export function createAdminService(db: Db, _cfg: Config) {
   // ── Regions ────────────────────────────────────────────────────────────────
@@ -609,9 +623,12 @@ export function createAdminService(db: Db, _cfg: Config) {
   // ── Payments (admin views + refund FLAG) ────────────────────────────────────
   async function paymentSelect() {
     const fx = await hasFxColumns(db);
+    const prov = await hasFxProvenanceColumns(db);
     const fxCols = fx ? 'p.usd_amount_minor, p.fx_rate_used, p.ghs_amount_minor'
       : 'NULL::int AS usd_amount_minor, NULL::numeric AS fx_rate_used, NULL::int AS ghs_amount_minor';
-    return fxCols;
+    const provCols = prov ? 'p.fx_source, p.fx_rate_at'
+      : 'NULL::text AS fx_source, NULL::timestamptz AS fx_rate_at';
+    return `${fxCols}, ${provCols}`;
   }
   function paymentDTO(r: any) {
     return {
@@ -621,6 +638,8 @@ export function createAdminService(db: Db, _cfg: Config) {
       usdAmount: r.usd_amount_minor == null ? null : fromMinor(r.usd_amount_minor),
       fxRate: r.fx_rate_used == null ? null : Number(r.fx_rate_used),
       ghsAmount: r.ghs_amount_minor == null ? null : Number(r.ghs_amount_minor) / 100,
+      fxSource: r.fx_source ?? null,
+      fxRateAt: r.fx_rate_at ?? null,
       refundIntent: r.raw?.refund_intent ?? null,
     };
   }

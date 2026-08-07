@@ -275,8 +275,11 @@ let paidPaymentRef = '';
   ok('ghs 2340 / pesewas 234000', init.body.amount.ghs === 2340 && init.body.amount.ghsPesewas === 234000, JSON.stringify(init.body.amount));
   ok('paystack.initialize called in GHS pesewas (integer)', initCalls.some((c) => c.reference === paidPaymentRef && c.amountMinor === 234000 && c.currency === 'GHS'));
   // payment row persisted with FX reconciliation
-  const { rows } = await db.query('SELECT amount_minor, currency, usd_amount_minor, fx_rate_used, ghs_amount_minor, status FROM payment WHERE ref = $1', [paidPaymentRef]);
+  const { rows } = await db.query('SELECT amount_minor, currency, usd_amount_minor, fx_rate_used, ghs_amount_minor, status, fx_source, fx_rate_at FROM payment WHERE ref = $1', [paidPaymentRef]);
   ok('payment row GHS + FX cols', rows[0].currency === 'GHS' && Number(rows[0].usd_amount_minor) === 15000 && Number(rows[0].ghs_amount_minor) === 234000 && Number(rows[0].fx_rate_used) === 15.6, JSON.stringify(rows[0]));
+  // TRI-873 per-txn provenance: no FX refresh has run yet, so the rate came straight from settings.
+  ok('payment row FX provenance persisted (source=settings, timestamp set)',
+    rows[0].fx_source === 'settings' && rows[0].fx_rate_at != null, JSON.stringify({ s: rows[0].fx_source, at: rows[0].fx_rate_at }));
   // booking moved to pending, seat hold kept
   const g = await get(`/api/v1/bookings/${paidBookingRef}`);
   ok('booking pending after init, hold kept', g.body.status === 'pending' && g.body.paymentState === 'pending', JSON.stringify({ s: g.body.status, p: g.body.paymentState }));
@@ -480,6 +483,59 @@ console.log('\n[admin session revocation]');
 console.log('\n[consumer read paths still intact]');
 {
   ok('consumer /api/v1/tours still 200, total 11 (created tour left unpublished)', (await call('GET', '/api/v1/tours?pageSize=60')).body.total === 11, 'created tour was unpublished so total stays 11');
+}
+
+console.log('\n[fx: automated daily refresh + guards (TRI-873)]');
+{
+  const { refreshFxRate } = await import('../src/fx.ts');
+  const { createBookingService } = await import('../src/booking.ts');
+  // Stub providers — no network. `rate(n)` returns a mid-market rate; `failing` simulates an outage.
+  const rate = (r: number) => ({ async fetchRate() { return { rate: r, source: 'stub-provider' }; } });
+  const failing = { async fetchRate() { throw new Error('simulated network down'); } };
+  const settingsRate = async () =>
+    Number((await db.query(`SELECT usd_to_ghs_charge_rate AS r FROM settings WHERE singleton=true`)).rows[0].r);
+  const histCount = async (status: string) =>
+    Number((await db.query(`SELECT COUNT(*) n FROM fx_rate_history WHERE status=$1`, [status])).rows[0].n);
+
+  ok('fx: settings starts at default 15.6', (await settingsRate()) === 15.6);
+
+  // A. first-run happy fetch — no history yet; last-known-good seeded from settings default 15.6.
+  const a = await refreshFxRate(db, cfg, { provider: rate(15.0) });
+  ok('fx: first-run status ok', a.status === 'ok', a.note);
+  ok('fx: effective = mid × (1 + 1.75%) = 15.2625', a.effectiveRate === 15.2625, `${a.effectiveRate}`);
+  ok('fx: settings updated to effective rate', (await settingsRate()) === 15.2625);
+  ok('fx: ok history row recorded from provider', (await histCount('ok')) === 1 && a.source === 'stub-provider');
+
+  // B. subsequent in-bounds fetch — applies again.
+  const b2 = await refreshFxRate(db, cfg, { provider: rate(15.2) });
+  ok('fx: second refresh ok → 15.466', b2.status === 'ok' && (await settingsRate()) === 15.466, `${b2.effectiveRate}`);
+
+  // C. out-of-bounds (>5% deviation) — keep last-known-good, settings untouched, alert status.
+  const c = await refreshFxRate(db, cfg, { provider: rate(20.0) });
+  ok('fx: out_of_bounds detected', c.status === 'out_of_bounds', c.note);
+  ok('fx: settings unchanged on out_of_bounds', (await settingsRate()) === 15.466);
+  ok('fx: appliedRate stays last-known-good', c.appliedRate === 15.466);
+  ok('fx: out_of_bounds history row recorded', (await histCount('out_of_bounds')) === 1);
+
+  // D. fetch failure — fallback to last-known-good; never write 0, never throw.
+  const d = await refreshFxRate(db, cfg, { provider: failing });
+  ok('fx: fetch_failed status, raw null', d.status === 'fetch_failed' && d.rawRate === null, d.note);
+  ok('fx: settings unchanged on fetch_failed', (await settingsRate()) === 15.466);
+  ok('fx: fetch_failed history row recorded', (await histCount('fetch_failed')) === 1);
+
+  // E. override kill-switch — env pins the rate; refresh records 'override' and never touches settings.
+  const ovCfg = { ...cfg, paystack: { ...cfg.paystack, chargeRateOverride: 18.0 } };
+  const e = await refreshFxRate(db, ovCfg, { provider: rate(15.5) });
+  ok('fx: override status, no fetch applied', e.status === 'override' && e.effectiveRate === 18.0, e.note);
+  ok('fx: settings untouched under override', (await settingsRate()) === 15.466);
+  ok('fx: override history row recorded', (await histCount('override')) === 1);
+
+  // Charge-rate precedence end-to-end (unchanged payment path): env override wins over settings.
+  const ovDetail = await createBookingService(db, ovCfg, paystackStub).resolveChargeRateDetail();
+  ok('fx: env override wins precedence', ovDetail.rate === 18.0 && ovDetail.source === 'env_override', JSON.stringify(ovDetail));
+  // With no override, settings.usd_to_ghs_charge_rate drives charges and attributes to the FX provider.
+  const setDetail = await createBookingService(db, cfg, paystackStub).resolveChargeRateDetail();
+  ok('fx: settings-driven rate attributes to FX provider', setDetail.rate === 15.466 && setDetail.source === 'stub-provider', JSON.stringify(setDetail));
 }
 
 await app.close();
