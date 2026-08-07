@@ -3,11 +3,13 @@
 // Run: npm run smoke   (no Docker / external Postgres needed)
 
 import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
 import { loadConfig } from '../src/config.ts';
 import { createDb } from '../src/db.ts';
 import { migrate } from '../src/migrate.ts';
 import { seed } from '../src/seed.ts';
 import { buildServer } from '../src/server.ts';
+import type { PaystackClient, PaystackInitRequest } from '../src/paystack.ts';
 
 let passed = 0;
 function ok(name: string, cond: boolean, detail = '') {
@@ -16,18 +18,50 @@ function ok(name: string, cond: boolean, detail = '') {
   console.log(`  ✓ ${name}`);
 }
 
-const cfg = { ...loadConfig(), dbDriver: 'pglite' as const, pgliteData: 'memory://', env: 'test' };
+const base = loadConfig();
+const WEBHOOK_SECRET = 'whsec_test_tripkoach';
+const cfg = {
+  ...base, dbDriver: 'pglite' as const, pgliteData: 'memory://', env: 'test',
+  reservationHoldMinutes: 30,
+  paystack: {
+    ...base.paystack, secretKey: 'sk_test_stub', publicKey: 'pk_test_stub',
+    webhookSecret: WEBHOOK_SECRET, chargeRateOverride: undefined,
+  },
+};
 const db = await createDb(cfg);
 const applied = await migrate(db);
 console.log(`migrations applied: ${applied.length}`);
 await seed(db, undefined, (m) => console.log(`  seed · ${m}`));
 
-const app = buildServer(db, cfg);
+// Stub Paystack: no network. Records init calls; verify returns success unless overridden per reference.
+const initCalls: PaystackInitRequest[] = [];
+const verifyStatus = new Map<string, string>();   // reference → status ('success' by default)
+const paystackStub: PaystackClient = {
+  async initialize(req) {
+    initCalls.push(req);
+    return { authorizationUrl: `https://checkout.paystack.com/stub/${req.reference}`,
+             accessCode: `acc_${req.reference}`, reference: req.reference };
+  },
+  async verify(reference) {
+    const status = verifyStatus.get(reference) ?? 'success';
+    const last = initCalls.find((c) => c.reference === reference);
+    return { status, reference, amountMinor: last?.amountMinor ?? 0, currency: 'GHS',
+             providerRef: `pstk_${reference}`, raw: { reference, status } };
+  },
+};
+
+const app = buildServer(db, cfg, paystackStub);
 await app.ready();
 
 const get = async (url: string) => {
   const res = await app.inject({ method: 'GET', url });
   return { status: res.statusCode, body: res.json() as any };
+};
+const post = async (url: string, payload?: any, headers?: Record<string, string>) => {
+  const res = await app.inject({ method: 'POST', url, payload, headers });
+  let body: any = undefined;
+  try { body = res.json(); } catch { /* empty */ }
+  return { status: res.statusCode, body };
 };
 
 console.log('\n[health]');
@@ -145,6 +179,173 @@ console.log('\n[no-oversell invariant]');
     await db.query('UPDATE departure SET seats_reserved = seats_total + 1');
   } catch { rejected = true; }
   ok('DB rejects seats_reserved > seats_total (departure_no_oversell CHECK)', rejected);
+}
+
+// ── Phase 2 write paths (TRI-866): booking + Paystack payments ──
+// Helper: create a controlled departure with a known capacity for deterministic reserve tests.
+const { rows: tourRows } = await db.query(`SELECT id, currency FROM tour WHERE slug = 'accra-city-tour'`);
+const accraTourId = tourRows[0].id;
+async function makeDeparture(seatsTotal: number): Promise<string> {
+  const { rows } = await db.query(
+    `INSERT INTO departure (tour_id, date_label, time_label, price_minor, currency, seats_total, seats_reserved, status)
+     VALUES ($1, 'Test Departure', '09:00 · Test', 7500, 'USD', $2, 0, 'scheduled') RETURNING id`,
+    [accraTourId, seatsTotal]);
+  return rows[0].id;
+}
+const leadTraveller = { name: 'Ama Mensah', email: 'ama@example.com', phone: '+233200000000', isLead: true };
+const bookOne = (departureId: string, partySize = 1) => post('/api/v1/bookings', {
+  tourSlug: 'accra-city-tour', departureId, partySize, agreedTerms: true,
+  travellers: [{ ...leadTraveller }],
+});
+
+console.log('\n[booking: create + reserve]');
+{
+  const dep = await makeDeparture(5);
+  const r = await bookOne(dep, 2);
+  ok('POST /bookings 201', r.status === 201, JSON.stringify(r.body));
+  ok('ref is TK-…', /^TK-[0-9A-Z]{6}$/.test(r.body.ref), r.body.ref);
+  ok('status reserved / unpaid', r.body.status === 'reserved' && r.body.paymentState === 'unpaid');
+  ok('quote unit 75 total 150 USD', r.body.quote.unitPrice === 75 && r.body.quote.total === 150 && r.body.quote.currency === 'USD', JSON.stringify(r.body.quote));
+  ok('reservationExpiresAt set (future)', new Date(r.body.reservationExpiresAt).getTime() > Date.now());
+  const { rows } = await db.query('SELECT seats_reserved FROM departure WHERE id = $1', [dep]);
+  ok('seats_reserved incremented to 2', Number(rows[0].seats_reserved) === 2, JSON.stringify(rows[0]));
+  // GET booking reflects it
+  const g = await get(`/api/v1/bookings/${r.body.ref}`);
+  ok('GET /bookings/:ref 200', g.status === 200);
+  ok('GET booking travellers has lead', g.body.travellers?.some((t: any) => t.isLead && t.email === 'ama@example.com'), JSON.stringify(g.body.travellers));
+  ok('GET booking payment null pre-init', g.body.payment === null);
+}
+
+console.log('\n[booking: validation]');
+{
+  const dep = await makeDeparture(5);
+  ok('partySize<1 → 422', (await bookOne(dep, 0)).status === 422);
+  ok('no terms → 422', (await post('/api/v1/bookings', { tourSlug: 'accra-city-tour', departureId: dep, partySize: 1, travellers: [leadTraveller] })).status === 422);
+  ok('no lead contact → 422', (await post('/api/v1/bookings', { tourSlug: 'accra-city-tour', departureId: dep, partySize: 1, agreedTerms: true, travellers: [{ name: 'No Contact' }] })).status === 422);
+  ok('unknown tour → 404', (await post('/api/v1/bookings', { tourSlug: 'nope', departureId: dep, partySize: 1, agreedTerms: true, travellers: [leadTraveller] })).status === 404);
+  ok('unknown departure → 404', (await bookOne('00000000-0000-0000-0000-000000000000', 1)).status === 404);
+}
+
+console.log('\n[booking: sequential oversell → 409]');
+{
+  const dep = await makeDeparture(3);
+  ok('fill 2 seats ok', (await bookOne(dep, 2)).status === 201);
+  ok('fill last seat ok', (await bookOne(dep, 1)).status === 201);
+  const over = await bookOne(dep, 1);
+  ok('one seat over → 409 sold_out', over.status === 409 && over.body.error.code === 'sold_out', JSON.stringify(over.body));
+  const { rows } = await db.query('SELECT seats_total, seats_reserved FROM departure WHERE id = $1', [dep]);
+  ok('seats_reserved === seats_total (3), never over', Number(rows[0].seats_reserved) === 3, JSON.stringify(rows[0]));
+}
+
+console.log('\n[booking: concurrent burst never oversells]');
+{
+  const CAP = 5;
+  const dep = await makeDeparture(CAP);
+  const results = await Promise.allSettled(Array.from({ length: 12 }, () => bookOne(dep, 1)));
+  const statuses = results.map((r) => r.status === 'fulfilled' ? (r.value as any).status : 'rej');
+  const successes = statuses.filter((s) => s === 201).length;
+  const { rows } = await db.query('SELECT seats_total, seats_reserved FROM departure WHERE id = $1', [dep]);
+  ok('no oversell: seats_reserved <= seats_total', Number(rows[0].seats_reserved) <= CAP, JSON.stringify(rows[0]));
+  ok('successes never exceed capacity', successes <= CAP, `successes=${successes}`);
+  // bookings that hold seats on this departure == seats_reserved (bookings⇄seats stay consistent)
+  const held = await db.query(`SELECT COUNT(*)::int AS n FROM booking WHERE departure_id = $1 AND status IN ('reserved','pending','confirmed')`, [dep]);
+  ok('reserved-booking count === seats_reserved', Number(held.rows[0].n) === Number(rows[0].seats_reserved), `bookings=${held.rows[0].n} seats=${rows[0].seats_reserved}`);
+  // DB CHECK still rejects a forced oversell on this row
+  let rejected = false;
+  try { await db.query('UPDATE departure SET seats_reserved = seats_total + 1 WHERE id = $1', [dep]); } catch { rejected = true; }
+  ok('DB CHECK rejects forced oversell', rejected);
+}
+
+console.log('\n[payment: init → USD→GHS conversion]');
+let paidBookingRef = '';
+let paidPaymentRef = '';
+{
+  const dep = await makeDeparture(5);
+  const b = await bookOne(dep, 2);           // total USD 150
+  paidBookingRef = b.body.ref;
+  const init = await post(`/api/v1/bookings/${paidBookingRef}/payment/init`);
+  ok('init 200', init.status === 200, JSON.stringify(init.body));
+  ok('reference PAY-…', /^PAY-[0-9A-Z]{6}$/.test(init.body.reference), init.body.reference);
+  paidPaymentRef = init.body.reference;
+  ok('publicKey exposed for inline', init.body.publicKey === 'pk_test_stub');
+  ok('authorizationUrl present', typeof init.body.authorizationUrl === 'string' && init.body.authorizationUrl.length > 0);
+  // 150 USD × 15.6 = 2340 GHS = 234000 pesewas
+  ok('fxRate 15.6 (settings default)', init.body.amount.fxRate === 15.6, JSON.stringify(init.body.amount));
+  ok('ghs 2340 / pesewas 234000', init.body.amount.ghs === 2340 && init.body.amount.ghsPesewas === 234000, JSON.stringify(init.body.amount));
+  ok('paystack.initialize called in GHS pesewas (integer)', initCalls.some((c) => c.reference === paidPaymentRef && c.amountMinor === 234000 && c.currency === 'GHS'));
+  // payment row persisted with FX reconciliation
+  const { rows } = await db.query('SELECT amount_minor, currency, usd_amount_minor, fx_rate_used, ghs_amount_minor, status FROM payment WHERE ref = $1', [paidPaymentRef]);
+  ok('payment row GHS + FX cols', rows[0].currency === 'GHS' && Number(rows[0].usd_amount_minor) === 15000 && Number(rows[0].ghs_amount_minor) === 234000 && Number(rows[0].fx_rate_used) === 15.6, JSON.stringify(rows[0]));
+  // booking moved to pending, seat hold kept
+  const g = await get(`/api/v1/bookings/${paidBookingRef}`);
+  ok('booking pending after init, hold kept', g.body.status === 'pending' && g.body.paymentState === 'pending', JSON.stringify({ s: g.body.status, p: g.body.paymentState }));
+  ok('GET booking now exposes payment', g.body.payment?.reference === paidPaymentRef && g.body.payment.currency === 'GHS');
+}
+
+console.log('\n[payment: webhook signature + idempotency + confirm]');
+{
+  const event = { event: 'charge.success', data: { id: 302012, reference: paidPaymentRef, status: 'success', amount: 234000, currency: 'GHS' } };
+  const rawBody = JSON.stringify(event);
+  const goodSig = createHmac('sha512', WEBHOOK_SECRET).update(rawBody).digest('hex');
+  const jsonHdr = { 'content-type': 'application/json' };
+
+  // Bad signature rejected
+  const bad = await post('/api/v1/payments/webhook', rawBody, { ...jsonHdr, 'x-paystack-signature': 'deadbeef' });
+  ok('bad signature → 401', bad.status === 401, JSON.stringify(bad.body));
+  const stillPending = await get(`/api/v1/bookings/${paidBookingRef}`);
+  ok('booking not confirmed by bad sig', stillPending.body.status === 'pending');
+
+  // Missing signature rejected
+  ok('missing signature → 401', (await post('/api/v1/payments/webhook', rawBody, jsonHdr)).status === 401);
+
+  // Valid signature confirms
+  const good = await post('/api/v1/payments/webhook', rawBody, { ...jsonHdr, 'x-paystack-signature': goodSig });
+  ok('valid signature → 200 received', good.status === 200 && good.body.received === true, JSON.stringify(good.body));
+  const conf = await get(`/api/v1/bookings/${paidBookingRef}`);
+  ok('booking confirmed / paid after webhook', conf.body.status === 'confirmed' && conf.body.paymentState === 'paid', JSON.stringify({ s: conf.body.status, p: conf.body.paymentState }));
+  ok('payment row paid + provider_ref persisted', (await db.query(`SELECT status, provider_ref FROM payment WHERE ref = $1`, [paidPaymentRef])).rows[0].status === 'paid');
+  const seatsAfter = await db.query('SELECT seats_reserved FROM departure d JOIN booking b ON b.departure_id = d.id WHERE b.ref = $1', [paidBookingRef]);
+  ok('seat hold retained on confirm (reserved+confirmed hold)', Number(seatsAfter.rows[0].seats_reserved) === 2, JSON.stringify(seatsAfter.rows[0]));
+
+  // Idempotent replay: same event_id → no-op, single paystack_event row
+  const replay = await post('/api/v1/payments/webhook', rawBody, { ...jsonHdr, 'x-paystack-signature': goodSig });
+  ok('duplicate webhook → 200 no-op', replay.status === 200 && replay.body.received === true);
+  const evCount = await db.query(`SELECT COUNT(*)::int AS n FROM paystack_event WHERE event_id = '302012'`);
+  ok('paystack_event stored once (idempotent)', Number(evCount.rows[0].n) === 1, JSON.stringify(evCount.rows[0]));
+}
+
+console.log('\n[payment: server-side verify + already-paid init guard]');
+{
+  // verify on the already-confirmed booking is idempotent (verified:true, no double-charge)
+  const v = await post(`/api/v1/bookings/${paidBookingRef}/payment/verify`);
+  ok('verify already-paid → verified true', v.status === 200 && v.body.verified === true && v.body.paymentState === 'paid', JSON.stringify(v.body));
+  // init on a paid booking is rejected
+  const reinit = await post(`/api/v1/bookings/${paidBookingRef}/payment/init`);
+  ok('init on paid booking → 409 not_payable', reinit.status === 409 && reinit.body.error.code === 'not_payable', JSON.stringify(reinit.body));
+
+  // fresh booking → verify drives confirmation (webhook-independent path)
+  const dep = await makeDeparture(5);
+  const b = await bookOne(dep, 1);
+  const init = await post(`/api/v1/bookings/${b.body.ref}/payment/init`);
+  verifyStatus.set(init.body.reference, 'success');
+  const v2 = await post(`/api/v1/bookings/${b.body.ref}/payment/verify`);
+  ok('verify success confirms booking', v2.status === 200 && v2.body.status === 'confirmed' && v2.body.verified === true, JSON.stringify(v2.body));
+}
+
+console.log('\n[expiry sweep releases unpaid holds]');
+{
+  const dep = await makeDeparture(5);
+  const b = await bookOne(dep, 3);
+  // Force the hold into the past
+  await db.query(`UPDATE booking SET reservation_expires_at = now() - interval '1 hour' WHERE ref = $1`, [b.body.ref]);
+  const before = await db.query('SELECT seats_reserved FROM departure WHERE id = $1', [dep]);
+  ok('held 3 before sweep', Number(before.rows[0].seats_reserved) === 3);
+  const sweep = await post('/api/v1/internal/expire-holds');
+  ok('sweep released the booking', sweep.status === 200 && sweep.body.refs.includes(b.body.ref), JSON.stringify(sweep.body));
+  const after = await db.query('SELECT seats_reserved FROM departure WHERE id = $1', [dep]);
+  ok('seats released to 0 after sweep', Number(after.rows[0].seats_reserved) === 0, JSON.stringify(after.rows[0]));
+  const g = await get(`/api/v1/bookings/${b.body.ref}`);
+  ok('expired booking cancelled', g.body.status === 'cancelled', JSON.stringify({ s: g.body.status }));
 }
 
 await app.close();

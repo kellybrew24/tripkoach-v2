@@ -5,6 +5,8 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import type { Config } from './config.ts';
 import type { Db } from './db.ts';
 import { listRegions, listTours, getTourBySlug, getAvailability, getReviews } from './catalog.ts';
+import { createBookingService, BookingError, type CreateBookingInput } from './booking.ts';
+import { createPaystackClient, type PaystackClient } from './paystack.ts';
 
 /** Normalise a query value that may be absent, a single string ("a,b"), or an array into string[]. */
 function asArray(v: unknown): string[] | undefined {
@@ -18,8 +20,28 @@ function notFound(reply: any, message: string) {
   return reply.code(404).send({ error: { code: 'not_found', message } });
 }
 
-export function buildServer(db: Db, cfg: Config): FastifyInstance {
+/** Map a thrown BookingError to the shared {error:{code,message}} envelope + its HTTP status. */
+function sendBookingError(reply: any, err: unknown): any {
+  if (err instanceof BookingError) {
+    return reply.code(err.httpStatus).send({ error: { code: err.code, message: err.message } });
+  }
+  reply.log?.error?.(err);
+  return reply.code(500).send({ error: { code: 'internal', message: 'Internal error' } });
+}
+
+export function buildServer(db: Db, cfg: Config, paystack?: PaystackClient): FastifyInstance {
   const app = Fastify({ logger: cfg.env !== 'test' });
+
+  // Keep the raw JSON body available for Paystack webhook HMAC verification, while still parsing JSON
+  // for every other route. (Signature is computed over the exact bytes Paystack sent.)
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body, done) => {
+    (req as any).rawBody = body;
+    if (body === '' || body == null) return done(null, undefined);
+    try { done(null, JSON.parse(body as string)); }
+    catch (e) { (e as any).statusCode = 400; done(e as Error, undefined); }
+  });
+
+  const bookings = createBookingService(db, cfg, paystack ?? createPaystackClient(cfg.paystack));
 
   // Caddy proxies /api/* verbatim (no strip, TRI-862), so the public health check is /api/health.
   // We also expose /health for direct localhost/systemd checks. Both return the same payload.
@@ -62,6 +84,52 @@ export function buildServer(db: Db, cfg: Config): FastifyInstance {
       const { slug } = req.params as { slug: string };
       const out = await getReviews(db, slug);
       return out ?? notFound(reply, `tour "${slug}" not found`);
+    });
+
+    // ── Phase 2 write paths (TRI-866): booking + Paystack payments ──
+    api.post('/bookings', async (req, reply) => {
+      try {
+        const out = await bookings.create(req.body as CreateBookingInput);
+        return reply.code(201).send(out);
+      } catch (e) { return sendBookingError(reply, e); }
+    });
+
+    api.get('/bookings/:ref', async (req, reply) => {
+      const { ref } = req.params as { ref: string };
+      const out = await bookings.getByRef(ref);
+      return out ?? notFound(reply, `booking "${ref}" not found`);
+    });
+
+    api.post('/bookings/:ref/payment/init', async (req, reply) => {
+      try {
+        const { ref } = req.params as { ref: string };
+        const body = (req.body ?? {}) as { channel?: string };
+        return await bookings.initPayment(ref, { channel: body.channel });
+      } catch (e) { return sendBookingError(reply, e); }
+    });
+
+    api.post('/bookings/:ref/payment/verify', async (req, reply) => {
+      try {
+        const { ref } = req.params as { ref: string };
+        const body = (req.body ?? {}) as { reference?: string };
+        return await bookings.verifyPayment(ref, body.reference);
+      } catch (e) { return sendBookingError(reply, e); }
+    });
+
+    // Paystack webhook. HMAC-SHA512 over the raw body; idempotent. FE never calls this.
+    api.post('/payments/webhook', async (req, reply) => {
+      try {
+        const raw = (req as any).rawBody ?? '';
+        const sig = req.headers['x-paystack-signature'] as string | undefined;
+        return await bookings.handleWebhook(raw, sig);
+      } catch (e) { return sendBookingError(reply, e); }
+    });
+
+    // Cron-callable expiry sweep: release unpaid holds past their reservation window. DevOps triggers it.
+    api.post('/internal/expire-holds', async (_req, reply) => {
+      try {
+        return await bookings.expireHolds();
+      } catch (e) { return sendBookingError(reply, e); }
     });
   }, { prefix: cfg.apiPrefix });
 

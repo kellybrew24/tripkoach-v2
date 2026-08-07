@@ -10,7 +10,9 @@ the Phase 0 comment on **TRI-858**. This package delivers **TRI-860** (Backend P
   no-oversell CHECK, booking/payments, people, reviews, staff/RBAC/auth scaffold, content/leads/config).
 - **Seed** (`src/seed.ts`) — populates the dev DB from the v2 consumer SPA fixtures (`apps/web/kit/data.js`).
 - **Smoke** (`test/smoke.ts`) — boots in-process Postgres, migrates, seeds, exercises every endpoint,
-  and proves the no-oversell DB constraint. 50 assertions, no Docker required.
+  and proves the no-oversell DB constraint. Phase 2 (TRI-866) extends it to the booking + Paystack
+  write flow (reserve → concurrent oversell rejection → init/FX → webhook sig+idempotency → confirm →
+  expiry sweep) with a stubbed Paystack client. 98 assertions, no Docker required.
 
 ## Stack & the local-Postgres story
 Phase 0 chose **Node + Fastify + TypeScript + Postgres**, explicit SQL, no ORM magic hiding the lock.
@@ -105,6 +107,85 @@ Public = **approved only** (pending/rejected/spam are filtered).
   "reviews": [ { "id": "<uuid>", "author": "Ama Mensah", "initials": "AM", "rating": 5,
     "date": "18 Aug 2026", "verified": true, "title": "…", "text": "…", "reply": "…" | null } ] }
 ```
+
+---
+
+---
+
+## API contract (Phase 2 write paths, TRI-866) — booking + Paystack payments
+
+Same base (`/api/v1`), same error envelope (`{ "error": { "code", "message" } }`). Money in DTOs is
+**whole-currency** (`150`, not `15000`). **Currency model:** prices are **stored/displayed in USD**
+(currency of record); **Paystack is charged in GHS**. At `payment/init` the USD total is converted to
+GHS **pesewas** (integer) using the configurable charge rate; each payment persists `usd_amount_minor`,
+`fx_rate_used`, `ghs_amount_minor`, `currency='GHS'`. **TEST mode only** in this slice.
+
+**Charge-rate precedence (env wins):** `PAYSTACK_USD_TO_GHS_RATE` env → `settings.usd_to_ghs_charge_rate`
+→ `settings.usd_to_ghs_display_rate` (15.6). **Seat-hold window:** 30 min (`RESERVATION_HOLD_MINUTES`),
+distinct from `settings.payment_deadline_days` (the offline-invoice deadline).
+
+Seat safety: reservation is an **atomic guarded decrement** (`UPDATE departure SET seats_reserved =
+seats_reserved + $n WHERE seats_reserved + $n <= seats_total RETURNING …`) inside a transaction, with the
+`departure_no_oversell` CHECK as the final DB seatbelt. `reserved` **and** `confirmed` bookings hold seats.
+
+### `POST /api/v1/bookings` → `201`
+Reserves seats, prices the quote, persists travellers (lead carries contact).
+```jsonc
+// request
+{ "tourSlug": "accra-city-tour", "departureId": "<uuid>", "packageSlug": "route1"|null,
+  "partySize": 2, "specialRequests": null, "agreedTerms": true,
+  "travellers": [ { "name": "Ama Mensah", "email": "a@x.com", "phone": "+233…", "idNumber": null, "isLead": true } ] }
+// 201
+{ "ref": "TK-8F3K2Q", "status": "reserved", "paymentState": "unpaid",
+  "reservationExpiresAt": "2026-08-07T22:00:00.000Z",
+  "quote": { "unitPrice": 75, "total": 150, "currency": "USD", "partySize": 2 },
+  "tour": { "slug": "accra-city-tour", "title": "Accra City Tour" },
+  "departure": { "id": "<uuid>", "date": "Sat 15 Aug 2026", "time": "09:00 · Hotel pickup, Accra" } }
+```
+Errors: `404 not_found` (tour/departure/package), `409 sold_out`, `409 not_bookable` (departure not
+scheduled), `422 validation` (partySize<1, terms not agreed, no lead traveller / no lead contact).
+
+### `POST /api/v1/bookings/:ref/payment/init` → `200`
+Creates a pending GHS `payment` row (with FX reconciliation), calls Paystack **initialize**, moves the
+booking to `pending` (hold kept). Request body optional: `{ "channel": "card" | "mobile_money" }`.
+```jsonc
+{ "reference": "PAY-7QK2MN", "authorizationUrl": "https://checkout.paystack.com/…",
+  "accessCode": "…", "publicKey": "pk_test_…",
+  "amount": { "usd": 150, "ghs": 2340, "ghsPesewas": 234000, "fxRate": 15.6, "currency": "GHS" } }
+```
+Errors: `404 not_found`, `409 not_payable` (already paid / not in a payable state), `422 validation`
+(no contact email), `5xx paystack_error`.
+
+### `GET /api/v1/bookings/:ref` → `200` (FE polling / confirmation screen)
+```jsonc
+{ "ref": "TK-…", "status": "reserved"|"pending"|"confirmed"|"cancelled"|…,
+  "paymentState": "unpaid"|"pending"|"paid"|"failed"|…, "reservationExpiresAt": "…"|null,
+  "quote": { "unitPrice": 75, "total": 150, "currency": "USD", "partySize": 2 },
+  "tour": { "slug": "…", "title": "…" }, "departure": { "id": "…", "date": "…", "time": "…" },
+  "travellers": [ { "name": "…", "email": "…", "phone": "…", "isLead": true } ],
+  "payment": { "reference": "PAY-…", "status": "pending"|"paid"|…, "currency": "GHS",
+               "usd": 150, "ghs": 2340 } | null }
+```
+`404` unknown ref.
+
+### `POST /api/v1/bookings/:ref/payment/verify` → `200`
+Server-side Paystack **verify** (fallback when the webhook hasn't landed). Idempotent; confirms on
+`success`. Request body optional: `{ "reference": "PAY-…" }`.
+```jsonc
+{ "ref": "TK-…", "status": "confirmed", "paymentState": "paid", "verified": true }   // paid
+{ "ref": "TK-…", "status": "pending",   "paymentState": "pending", "verified": false } // not yet
+```
+
+### `POST /api/v1/payments/webhook` (Paystack only — FE never calls this)
+HMAC-SHA512 over the **raw** body via `x-paystack-signature` (constant-time compare); `401` on
+bad/missing signature. **Idempotent** via `paystack_event(event_id UNIQUE)`. On `charge.success` the
+matching booking is confirmed, the payment marked paid, and `provider_ref` + `raw` persisted. Always
+returns `200 { "received": true }` on a valid signature (including duplicate/no-op deliveries).
+DevOps owns the same-origin path + `WEBHOOK_URL` wiring.
+
+### `POST /api/v1/internal/expire-holds` (cron-callable — DevOps triggers)
+Releases unpaid holds past `reservation_expires_at` (decrements `seats_reserved`, sets the booking
+`cancelled`/`non_payment`). Returns `{ "released": <n>, "refs": ["TK-…"] }`.
 
 ---
 
