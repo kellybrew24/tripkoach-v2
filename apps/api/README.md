@@ -5,14 +5,17 @@ Clean-room Fastify + TypeScript service for the v2 SPAs. Fresh Postgres schema; 
 the Phase 0 comment on **TRI-858**. This package delivers **TRI-860** (Backend Phase 1).
 
 ## What's here
-- **Fastify API** (`src/`) — the six read-only endpoints below. No write/booking/payment routes (Phase 2/3).
+- **Fastify API** (`src/`) — the six consumer read endpoints below **plus** the Phase 3 admin write/auth
+  realm at `/api/admin` (auth, RBAC, catalogue CRUD, booking/payment ops — see the Admin realm section).
 - **Fresh SQL migrations** (`migrations/`) — the full Phase 0 schema (catalogue, inventory with the
   no-oversell CHECK, booking/payments, people, reviews, staff/RBAC/auth scaffold, content/leads/config).
 - **Seed** (`src/seed.ts`) — populates the dev DB from the v2 consumer SPA fixtures (`apps/web/kit/data.js`).
 - **Smoke** (`test/smoke.ts`) — boots in-process Postgres, migrates, seeds, exercises every endpoint,
   and proves the no-oversell DB constraint. Phase 2 (TRI-866) extends it to the booking + Paystack
   write flow (reserve → concurrent oversell rejection → init/FX → webhook sig+idempotency → confirm →
-  expiry sweep) with a stubbed Paystack client. 98 assertions, no Docker required.
+  expiry sweep) with a stubbed Paystack client. Phase 3 (TRI-869) adds the admin realm (login → RBAC →
+  CRUD → consumer read; unauth 401 / wrong-perm 403; booking cancel releases seats; refund flag).
+  134 assertions, no Docker required.
 
 ## Stack & the local-Postgres story
 Phase 0 chose **Node + Fastify + TypeScript + Postgres**, explicit SQL, no ORM magic hiding the lock.
@@ -110,8 +113,6 @@ Public = **approved only** (pending/rejected/spam are filtered).
 
 ---
 
----
-
 ## API contract (Phase 2 write paths, TRI-866) — booking + Paystack payments
 
 Same base (`/api/v1`), same error envelope (`{ "error": { "code", "message" } }`). Money in DTOs is
@@ -186,6 +187,98 @@ DevOps owns the same-origin path + `WEBHOOK_URL` wiring.
 ### `POST /api/v1/internal/expire-holds` (cron-callable — DevOps triggers)
 Releases unpaid holds past `reservation_expires_at` (decrements `seats_reserved`, sets the booking
 `cancelled`/`non_payment`). Returns `{ "released": <n>, "refs": ["TK-…"] }`.
+
+---
+
+## Admin realm (Phase 3 — TRI-869)
+
+Write/auth realm mounted at same-origin **`/api/admin`** (Caddy proxies `/api/*` verbatim →
+`127.0.0.1:3020` on **admin.dev.tripkoach.com**, so the session cookie is same-origin). The consumer
+`/api/v1` read paths are **untouched / flag-off byte-identical**. Money crosses the wire as whole-currency
+numbers with an explicit `currency` (USD), same as the read contract. Errors use the shared
+`{ "error": { "code", "message", "field?" } }` envelope: `400` validation, `401` no/invalid session,
+`403` missing permission, `404` not found, `409` conflict.
+
+### AuthN — session cookie
+- `POST /api/admin/auth/login` — body `{ email, password, trustDevice? }`. Verifies **argon2id** against
+  `staff_user.password_hash`; on success creates a server-side `session` row (`subject_type='staff'`) and
+  sets an **httpOnly + Secure + SameSite=Lax** cookie (`tk_admin_session`, path `/api/admin`). Returns
+  `{ staff: { id, email, name, role, jobTitle }, permissions: string[] }`. `401 invalid_credentials` otherwise.
+- `POST /api/admin/auth/logout` — revokes the current session, clears the cookie → `{ ok: true }`.
+- `GET /api/admin/me` — (auth) → `{ staff, permissions }`.
+- Sessions have a **sliding 30-min idle expiry** (`ADMIN_SESSION_IDLE_MINUTES`) and honour `revoked_at`.
+- MFA (TOTP) schema exists (migration 006) but enforcement is a deliberate **follow-up** — password +
+  server-side session is live now. Account lockout is likewise a follow-up.
+
+### AuthZ — RBAC
+A preHandler resolves session → `staff_user` → role → the `role_permission` matrix and attaches the
+permission set to the request. **Every write is guarded**; no open mutations. `admin` is all-locked-on in
+the app. Default matrix (seeded in migration **009**, editable thereafter):
+
+| permission | admin | operator | viewer |
+|---|:--:|:--:|:--:|
+| tours.view / bookings.view / customers.view | ✓ | ✓ | ✓ |
+| tours.edit | ✓ | ✓ | — |
+| bookings.manage / bookings.cancel | ✓ | ✓ | — |
+| promos.manage | ✓ | ✓ | — |
+| payments.refund / users.manage / settings.manage | ✓ | — | — |
+
+### CRUD & views (permission in brackets)
+**Regions** — `GET /regions` [tours.view] → `{ regions: [{ id, name, slug, note, active, tourCount }] }`;
+`POST /regions` [tours.edit] `{ name, note?, active? }`; `PATCH /regions/:id` [tours.edit];
+`DELETE /regions/:id` [tours.edit] (`409` if tours still reference it).
+
+**Tours** — `GET /tours` [tours.view] → `{ tours: [{ id(slug), uuid, title, region, category, currency,
+price, rating, reviews, published, departures }] }`; `GET /tours/:idOrSlug` [tours.view] → full detail
+(incl. **unpublished**): `{ id, uuid, title, region, regionId, category, categoryEnum, duration, currency,
+price, tag, spotsLeft, image, images[], blurb, highlights[], included[], excluded[], pricing[], itinerary[],
+tiers:[{minPax,price}], packages:[{id,name,tag,blurb,duration,stops[],includes[],tiers[]}], defaultPackage,
+published }`.
+`POST /tours` [tours.edit] — `{ title, region|regionId, category, duration, blurb?, highlights?, included?,
+excluded?, itinerary?, pricing?, images?, image?, currency?='USD', tiers:[{minPax,price}] | price, tag?,
+spotsLeft?, published?=false, packages?, defaultPackage? }` → `201` full detail. The "from" price is the
+cheapest tier. `PATCH /tours/:idOrSlug` [tours.edit] (partial; `tiers`/`packages` are replace-all when
+present). `POST /tours/:idOrSlug/publish` · `/unpublish` [tours.edit]. `DELETE /tours/:idOrSlug` [tours.edit]
+(`409` if bookings exist — unpublish instead).
+
+**Departures** — `GET /departures?tourId=` [tours.view] → `{ departures: [{ id, tourId(slug), tour,
+packageId, date(label), departOn, time, price, currency, capacity, seatsTotal, booked, spotsLeft, status,
+guideId, notes }] }`. `POST /departures` [tours.edit] `{ tourId, packageId?, date:"YYYY-MM-DD", dateLabel?,
+time?, capacity, price?, currency?, status?, guideId?, notes? }` → `201`. `PATCH /departures/:id`
+[tours.edit] (capacity below already-reserved seats → `409`; respects the `departure_no_oversell` CHECK).
+`POST /departures/:id/cancel` [tours.edit].
+
+**Bookings** — `GET /bookings?status=&q=&page=&pageSize=` [bookings.view] → paginated
+`{ items:[{ ref, status, payment, customer, tour, tourId, region, date, travellers, unit, total, currency,
+created }], page, pageSize, total, totalPages }`. `GET /bookings/:ref` [bookings.view] → detail + travellers[]
++ payments[] + `{ customerEmail, customerPhone, specialRequests, cancelReason }`.
+`POST /bookings/:ref/confirm` [bookings.manage] (reserved|pending → confirmed).
+`POST /bookings/:ref/cancel` [bookings.cancel] `{ reason }` (reason ∈ customer_request | non_payment |
+departure_cancelled | duplicate; human labels accepted) → sets `cancelled` + `cancel_reason` and **releases
+held seats** (`departure.seats_reserved`), returning `{ …booking, seatsReleased }`.
+
+**Payments** — `GET /payments?status=&q=&page=&pageSize=` [bookings.view] and `GET /payments/:ref`
+[bookings.view] → `{ ref, bookingRef, customer, amount, currency, method, status, providerRef, created,
+usdAmount, fxRate, ghsAmount, refundIntent }`. The `usd/fx/ghs` fields are surfaced from Phase 2 migration
+**008** when present (read defensively — `null` until 008 lands; see coordination note below).
+`POST /payments/:ref/refund` [payments.refund] `{ reason? }` — **refund FLAG only**: records the intent in
+`payment.raw.refund_intent` + audit; **does not** flip status to `refunded` (actual Paystack refund
+execution is a follow-up) → `{ refundRequested: true, payment }`.
+
+Every mutation writes an **`audit_log`** row (actor from the session, `before`/`after`, action, target, ip).
+
+### Bootstrap a staff user (no hardcoded secret)
+```bash
+STAFF_EMAIL=you@tripkoach.com STAFF_PASSWORD='…' STAFF_NAME='You' STAFF_ROLE=admin \
+  DATABASE_URL=… npm run admin-seed        # idempotent by email; hashes with argon2id
+```
+
+### Migration coordination (Phase 2 ↔ Phase 3)
+Phase 2 (TRI-866) owns `008_write_path_payments_fx.sql`; this phase adds **`009_admin_rbac_seed.sql`**
+(role_permission matrix + settings singleton) only — it does **not** edit or renumber 008. 009 must apply
+**after** 008 (guaranteed by the runner's lexical sort). The admin payment views read the 008 FX columns
+defensively, so this branch migrates and passes `npm run smoke` **standalone** (008 absent) and needs no
+edit once 008 lands. Keep the sequence monotonic on merge to the shared `tripkoach_dev` DB.
 
 ---
 

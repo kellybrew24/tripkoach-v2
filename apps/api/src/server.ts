@@ -1,12 +1,14 @@
-// Fastify app: the six Phase 1 read endpoints. No write/booking/payment routes (Phase 2/3).
-// Consumer routes live under cfg.apiPrefix (default /api/v1); admin realm is added in Phase 3.
+// Fastify app: the six Phase 1 read endpoints (consumer /api/v1) + the Phase 3 admin realm (/api/admin).
+// Consumer read paths are untouched (flag-off byte-identical); the admin realm is an encapsulated plugin.
 
 import Fastify, { type FastifyInstance } from 'fastify';
+import cookie from '@fastify/cookie';
 import type { Config } from './config.ts';
 import type { Db } from './db.ts';
 import { listRegions, listTours, getTourBySlug, getAvailability, getReviews } from './catalog.ts';
 import { createBookingService, BookingError, type CreateBookingInput } from './booking.ts';
 import { createPaystackClient, type PaystackClient } from './paystack.ts';
+import { registerAdmin } from './admin-routes.ts';
 
 /** Normalise a query value that may be absent, a single string ("a,b"), or an array into string[]. */
 function asArray(v: unknown): string[] | undefined {
@@ -40,6 +42,10 @@ export function buildServer(db: Db, cfg: Config, paystack?: PaystackClient): Fas
     try { done(null, JSON.parse(body as string)); }
     catch (e) { (e as any).statusCode = 400; done(e as Error, undefined); }
   });
+
+  // Cookie support for the admin session (parses Cookie header; adds reply.setCookie/clearCookie).
+  // Read-only for consumer routes → /api/v1 responses are unchanged.
+  app.register(cookie);
 
   const bookings = createBookingService(db, cfg, paystack ?? createPaystackClient(cfg.paystack));
 
@@ -132,6 +138,9 @@ export function buildServer(db: Db, cfg: Config, paystack?: PaystackClient): Fas
       } catch (e) { return sendBookingError(reply, e); }
     });
   }, { prefix: cfg.apiPrefix });
+
+  // ── Phase 3 admin write/auth realm (TRI-869), mounted under cfg.adminPrefix (default /api/admin) ──
+  registerAdmin(app, db, cfg);
 
   return app;
 }

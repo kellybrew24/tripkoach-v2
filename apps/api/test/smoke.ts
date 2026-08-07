@@ -10,6 +10,7 @@ import { migrate } from '../src/migrate.ts';
 import { seed } from '../src/seed.ts';
 import { buildServer } from '../src/server.ts';
 import type { PaystackClient, PaystackInitRequest } from '../src/paystack.ts';
+import { upsertStaff } from '../src/admin-seed.ts';
 
 let passed = 0;
 function ok(name: string, cond: boolean, detail = '') {
@@ -346,6 +347,139 @@ console.log('\n[expiry sweep releases unpaid holds]');
   ok('seats released to 0 after sweep', Number(after.rows[0].seats_reserved) === 0, JSON.stringify(after.rows[0]));
   const g = await get(`/api/v1/bookings/${b.body.ref}`);
   ok('expired booking cancelled', g.body.status === 'cancelled', JSON.stringify({ s: g.body.status }));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TRI-869 Phase 3 · admin realm: auth, RBAC, CRUD → consumer read, booking cancel releases seats.
+// ─────────────────────────────────────────────────────────────────────────────
+const COOKIE = cfg.adminCookieName;
+const call = async (method: 'GET' | 'POST' | 'PATCH' | 'DELETE', url: string, opts: { payload?: any; cookie?: string } = {}) => {
+  const res = await app.inject({ method, url, payload: opts.payload, cookies: opts.cookie ? { [COOKIE]: opts.cookie } : undefined });
+  let body: any; try { body = res.json(); } catch { body = res.body; }
+  return { status: res.statusCode, body, cookies: res.cookies as Array<{ name: string; value: string }> };
+};
+
+// Seed staff: an admin (full access) and a viewer (read-only → used for the 403 path).
+await upsertStaff(db, { email: 'admin@tripkoach.com', password: 'Sup3r-Secret!', name: 'Ada Admin', role: 'admin' });
+await upsertStaff(db, { email: 'viewer@tripkoach.com', password: 'Just-Look!', name: 'Vic Viewer', role: 'viewer' });
+
+console.log('\n[admin auth]');
+let adminCookie = '';
+{
+  ok('unauthenticated write → 401', (await call('POST', '/api/admin/tours', { payload: {} })).status === 401);
+  ok('bad password → 401', (await call('POST', '/api/admin/auth/login', { payload: { email: 'admin@tripkoach.com', password: 'wrong' } })).status === 401);
+  const login = await call('POST', '/api/admin/auth/login', { payload: { email: 'admin@tripkoach.com', password: 'Sup3r-Secret!' } });
+  ok('login 200', login.status === 200, JSON.stringify(login.body));
+  ok('login returns role admin', login.body.staff?.role === 'admin', JSON.stringify(login.body.staff));
+  ok('admin has all 10 permissions', Array.isArray(login.body.permissions) && login.body.permissions.length === 10, JSON.stringify(login.body.permissions));
+  adminCookie = login.cookies.find((c) => c.name === COOKIE)?.value ?? '';
+  ok('login set session cookie', !!adminCookie);
+  const me = await call('GET', '/api/admin/me', { cookie: adminCookie });
+  ok('GET /me 200 with session', me.status === 200 && me.body.staff?.email === 'admin@tripkoach.com', JSON.stringify(me.body));
+  ok('/me lists permissions incl tours.edit', me.body.permissions?.includes('tours.edit'));
+}
+
+console.log('\n[admin RBAC]');
+{
+  const login = await call('POST', '/api/admin/auth/login', { payload: { email: 'viewer@tripkoach.com', password: 'Just-Look!' } });
+  const viewerCookie = login.cookies.find((c) => c.name === COOKIE)?.value ?? '';
+  ok('viewer login 200', login.status === 200);
+  ok('viewer permissions are read-only', !login.body.permissions.includes('tours.edit') && login.body.permissions.includes('tours.view'), JSON.stringify(login.body.permissions));
+  ok('viewer CAN read tours (tours.view)', (await call('GET', '/api/admin/tours', { cookie: viewerCookie })).status === 200);
+  ok('viewer create tour → 403 (missing tours.edit)', (await call('POST', '/api/admin/tours', { cookie: viewerCookie, payload: { title: 'x', region: 'Central', category: 'Adventure', duration: '1 day', price: 10 } })).status === 403);
+}
+
+console.log('\n[admin CRUD → consumer read]');
+let createdSlug = '';
+{
+  const created = await call('POST', '/api/admin/tours', { cookie: adminCookie, payload: {
+    title: 'Smoke Test Safari', region: 'Central', category: 'Adventure', duration: '2 days',
+    blurb: 'A tour created by the admin smoke test.', highlights: ['One', 'Two'],
+    tiers: [{ minPax: 1, price: 300 }, { minPax: 4, price: 250 }], published: true,
+  } });
+  ok('admin create tour → 201', created.status === 201, JSON.stringify(created.body));
+  ok('created "from" price is cheapest tier (250)', created.body.price === 250, `got ${created.body.price}`);
+  createdSlug = created.body.id;
+  ok('created tour has a slug', !!createdSlug, createdSlug);
+
+  // The freshly-created, published tour must appear via the untouched consumer read API.
+  const pub = await call('GET', `/api/v1/tours/${createdSlug}`);
+  ok('created tour visible on consumer /api/v1 read', pub.status === 200 && pub.body.title === 'Smoke Test Safari', JSON.stringify(pub.body?.title));
+  ok('consumer read shows USD whole-currency price 250', pub.body.price === 250 && pub.body.currency === 'USD');
+
+  // unpublish → drops out of the consumer read
+  ok('unpublish → 200', (await call('POST', `/api/admin/tours/${createdSlug}/unpublish`, { cookie: adminCookie })).status === 200);
+  ok('unpublished tour → 404 on consumer read', (await call('GET', `/api/v1/tours/${createdSlug}`)).status === 404);
+
+  // validation: missing required field → 400
+  ok('create tour missing title → 400 validation', (await call('POST', '/api/admin/tours', { cookie: adminCookie, payload: { region: 'Central', category: 'Adventure', duration: '1 day', price: 5 } })).status === 400);
+}
+
+console.log('\n[admin booking cancel releases seats]');
+{
+  // Build a seat-holding booking directly (Phase 1 seed has no bookings), then cancel via the admin API.
+  const dep = (await db.query(`SELECT d.id, d.seats_total, d.seats_reserved, d.tour_id FROM departure d WHERE d.seats_total - d.seats_reserved >= 2 LIMIT 1`)).rows[0];
+  const cust = (await db.query(`INSERT INTO customer (name, email) VALUES ('Cancel Tester','cancel@example.com') RETURNING id`)).rows[0];
+  await db.query(`UPDATE departure SET seats_reserved = seats_reserved + 2 WHERE id = $1`, [dep.id]);
+  const before = Number((await db.query(`SELECT seats_reserved FROM departure WHERE id=$1`, [dep.id])).rows[0].seats_reserved);
+  await db.query(
+    `INSERT INTO booking (ref, customer_id, tour_id, departure_id, party_size, unit_price_minor, total_minor, currency, status, payment_state)
+     VALUES ('TK-SMOKE1', $1, $2, $3, 2, 10000, 20000, 'USD', 'confirmed', 'paid')`,
+    [cust.id, dep.tour_id, dep.id]);
+
+  const list = await call('GET', '/api/admin/bookings', { cookie: adminCookie });
+  ok('admin bookings list includes TK-SMOKE1', list.status === 200 && list.body.items.some((b: any) => b.ref === 'TK-SMOKE1'), JSON.stringify(list.body.total));
+  const detail = await call('GET', '/api/admin/bookings/TK-SMOKE1', { cookie: adminCookie });
+  ok('admin booking detail 200 with travellers/payments arrays', detail.status === 200 && Array.isArray(detail.body.travellers) && Array.isArray(detail.body.payments));
+
+  const cancel = await call('POST', '/api/admin/bookings/TK-SMOKE1/cancel', { cookie: adminCookie, payload: { reason: 'Customer request' } });
+  ok('cancel booking → 200', cancel.status === 200, JSON.stringify(cancel.body));
+  ok('cancel reports 2 seats released', cancel.body.seatsReleased === 2, `got ${cancel.body.seatsReleased}`);
+  const after = Number((await db.query(`SELECT seats_reserved FROM departure WHERE id=$1`, [dep.id])).rows[0].seats_reserved);
+  ok('departure seats_reserved dropped by 2', after === before - 2, `before ${before} after ${after}`);
+  ok('booking now cancelled with cancel_reason', cancel.body.status === 'cancelled' && cancel.body.cancelReason === 'customer_request', JSON.stringify({ s: cancel.body.status, r: cancel.body.cancelReason }));
+
+  // audit_log recorded the mutation
+  const audits = Number((await db.query(`SELECT COUNT(*)::int AS n FROM audit_log WHERE action='booking.cancel'`)).rows[0].n);
+  ok('audit_log row written for booking.cancel', audits >= 1, `got ${audits}`);
+}
+
+console.log('\n[admin payments view + refund FLAG]');
+{
+  // Attach a paid payment to the cancelled smoke booking so the payment views have a row to return.
+  const bk = (await db.query(`SELECT id FROM booking WHERE ref='TK-SMOKE1'`)).rows[0];
+  await db.query(
+    `INSERT INTO payment (ref, booking_id, amount_minor, currency, method, status, provider_ref)
+     VALUES ('PAY-SMOKE1', $1, 20000, 'USD', 'paystack_card', 'paid', 'ps_ref_smoke')`, [bk.id]);
+
+  const list = await call('GET', '/api/admin/payments', { cookie: adminCookie });
+  ok('admin payments list 200 incl PAY-SMOKE1', list.status === 200 && list.body.items.some((p: any) => p.ref === 'PAY-SMOKE1'), JSON.stringify(list.body.total));
+  const one = list.body.items.find((p: any) => p.ref === 'PAY-SMOKE1');
+  ok('payment DTO exposes usd/fx/ghs fields (null pre-008)', one && 'usdAmount' in one && 'fxRate' in one && 'ghsAmount' in one, JSON.stringify(one));
+
+  // refund is FLAG-only: 200, intent recorded, status NOT flipped to refunded.
+  const refund = await call('POST', '/api/admin/payments/PAY-SMOKE1/refund', { cookie: adminCookie, payload: { reason: 'duplicate charge' } });
+  ok('admin refund-flag → 200 refundRequested', refund.status === 200 && refund.body.refundRequested === true, JSON.stringify(refund.body));
+  ok('refund flag records intent, keeps status=paid', refund.body.payment.status === 'paid' && refund.body.payment.refundIntent?.reason === 'duplicate charge', JSON.stringify(refund.body.payment));
+  const refundAudits = Number((await db.query(`SELECT COUNT(*)::int AS n FROM audit_log WHERE action='payment.refund_requested'`)).rows[0].n);
+  ok('audit_log row written for payment.refund_requested', refundAudits >= 1, `got ${refundAudits}`);
+
+  // wrong-permission: viewer lacks payments.refund → 403
+  const vlogin = await call('POST', '/api/admin/auth/login', { payload: { email: 'viewer@tripkoach.com', password: 'Just-Look!' } });
+  const vcookie = vlogin.cookies.find((c) => c.name === COOKIE)?.value ?? '';
+  ok('viewer refund → 403 (missing payments.refund)', (await call('POST', '/api/admin/payments/PAY-SMOKE1/refund', { cookie: vcookie, payload: {} })).status === 403);
+}
+
+console.log('\n[admin session revocation]');
+{
+  const logout = await call('POST', '/api/admin/auth/logout', { cookie: adminCookie });
+  ok('logout → 200', logout.status === 200);
+  ok('revoked session → /me 401', (await call('GET', '/api/admin/me', { cookie: adminCookie })).status === 401);
+}
+
+console.log('\n[consumer read paths still intact]');
+{
+  ok('consumer /api/v1/tours still 200, total 11 (created tour left unpublished)', (await call('GET', '/api/v1/tours?pageSize=60')).body.total === 11, 'created tour was unpublished so total stays 11');
 }
 
 await app.close();

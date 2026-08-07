@@ -16,6 +16,16 @@ export interface Config {
   /** Online seat-hold window in minutes (booking.reservation_expires_at = now() + this). */
   reservationHoldMinutes: number;
   paystack: PaystackConfig;
+  /** Admin write/auth realm mount point (Caddy proxies /api/* verbatim on admin.dev.tripkoach.com). */
+  adminPrefix: string;
+  /** Session cookie name for the admin realm (httpOnly + Secure + SameSite). */
+  adminCookieName: string;
+  /** Secure flag on the admin session cookie. True everywhere the SPA is served over HTTPS (the dev box
+   *  is HTTPS via Caddy). Set COOKIE_SECURE=false only for local plain-HTTP testing. */
+  adminCookieSecure: boolean;
+  adminCookieSameSite: 'lax' | 'strict' | 'none';
+  /** Idle-timeout for admin sessions, minutes. The console signs staff out after inactivity (sliding). */
+  adminSessionIdleMinutes: number;
 }
 
 // Paystack (TEST-only in this slice). Secrets come from env — never code. See .env.example / secret store.
@@ -59,5 +69,10 @@ export function loadConfig(): Config {
       baseUrl: process.env.PAYSTACK_BASE_URL || 'https://api.paystack.co',
       chargeRateOverride: num(process.env.PAYSTACK_USD_TO_GHS_RATE),
     },
+    adminPrefix: process.env.ADMIN_PREFIX || '/api/admin',
+    adminCookieName: process.env.ADMIN_COOKIE_NAME || 'tk_admin_session',
+    adminCookieSecure: process.env.COOKIE_SECURE ? process.env.COOKIE_SECURE === 'true' : true,
+    adminCookieSameSite: (process.env.COOKIE_SAMESITE as 'lax' | 'strict' | 'none') || 'lax',
+    adminSessionIdleMinutes: Number(process.env.ADMIN_SESSION_IDLE_MINUTES || 30),
   };
 }
