@@ -76,15 +76,17 @@ function makeFetchMock(state) {
   const TOURS = { tours: [{ slug: "accra-city-tour", id: "uuid-tour-1", title: "Accra City Tour", region: "Greater Accra", duration: "Half day", price: 65, currency: "USD", rating: 4.8, reviews: 12, spotsLeft: 8, featured: true, image: "x.jpg", blurb: "See Accra." }] };
   const DETAIL = { highlights: ["Independence Arch", "Makola Market"], included: ["Guide", "Water"], excluded: ["Lunch"], itinerary: [["09:00", "Pickup"], ["12:00", "Return"]] };
   const AVAIL = { departures: [{ id: "dep-1", date: "2026-08-22", time: "09:00", price: 65, spotsLeft: 8 }, { id: "dep-2", date: "2026-08-29", time: "09:00", price: 65, spotsLeft: 6 }] };
-  const PAID = { ref: "TK-9001", status: "confirmed", payment_state: "paid", currency: "USD", unit_price_minor: 6500, total_minor: 26000, party_size: 4, tour_title: "Accra City Tour", departure_label: "Fri 29 Aug 2026, 09:00", email: "ama@example.com" };
+  // Deployed Backend (TRI-866) shape: camelCase, money nested under `quote` in
+  // MAJOR units, tour/departure sub-objects, travellers with isLead.
+  const PAID = { ref: "TK-9001", status: "confirmed", paymentState: "paid", reservationExpiresAt: "2026-08-08T00:00:00.000Z", quote: { unitPrice: 65, total: 260, currency: "USD", partySize: 4 }, tour: { slug: "accra-city-tour", title: "Accra City Tour" }, departure: { id: "dep-2", date: "Fri 29 Aug 2026", time: "09:00" }, travellers: [{ name: "Ama", email: "ama@example.com", isLead: true }] };
   const json = (body, ok = true, status = 200) => Promise.resolve({
     ok, status, headers: { get: (h) => (/content-type/i.test(h) ? "application/json" : null) },
     json: () => Promise.resolve(body), text: () => Promise.resolve(JSON.stringify(body)),
   });
   return function (url, init) {
     const u = String(url); const method = (init && init.method) || "GET";
-    if (method === "POST" && /\/bookings$/.test(u)) { state.bookingBody = JSON.parse(init.body); return json({ ref: "TK-9001", status: "reserved", payment_state: "unpaid", currency: "USD", unit_price_minor: 6500, total_minor: 26000, party_size: state.bookingBody.partySize }); }
-    if (method === "POST" && /\/payment\/init$/.test(u)) { state.initBody = JSON.parse(init.body); return json({ authorization_url: "https://checkout.paystack.com/xyz", access_code: "acc_1", reference: "ps_ref_1", public_key: "pk_test_1" }); }
+    if (method === "POST" && /\/bookings$/.test(u)) { state.bookingBody = JSON.parse(init.body); return json({ ref: "TK-9001", status: "reserved", paymentState: "unpaid", reservationExpiresAt: "2026-08-08T00:00:00.000Z", quote: { unitPrice: 65, total: 65 * state.bookingBody.partySize, currency: "USD", partySize: state.bookingBody.partySize }, tour: { slug: "accra-city-tour", title: "Accra City Tour" }, departure: { id: "dep-2", date: "Fri 29 Aug 2026", time: "09:00" } }); }
+    if (method === "POST" && /\/payment\/init$/.test(u)) { state.initBody = JSON.parse(init.body); return json({ reference: "PAY-1", authorizationUrl: "https://checkout.paystack.com/xyz", accessCode: "acc_1", publicKey: "pk_test_1", amount: { usd: 260, ghs: 4056, ghsPesewas: 405600, fxRate: 15.6, currency: "GHS" } }); }
     if (method === "POST" && /\/payment\/verify$/.test(u)) { state.verifyBody = JSON.parse(init.body); return json(PAID); }
     if (/\/bookings\/TK-9001$/.test(u)) return json(PAID);
     if (/\/regions$/.test(u)) return json(["Greater Accra"]);
@@ -135,7 +137,8 @@ async function testLiveCheckout() {
   const b = state.bookingBody || {};
   const checks = [
     ["POST /bookings sent", !!state.bookingBody],
-    ["tourId = uuid-tour-1", b.tourId === "uuid-tour-1"],
+    ["tourSlug = accra-city-tour (Backend resolves by slug)", b.tourSlug === "accra-city-tour"],
+    ["tourId = uuid-tour-1 (kept for tolerance)", b.tourId === "uuid-tour-1"],
     ["departureId resolved to real dep-2", b.departureId === "dep-2"],
     ["partySize = 4", b.partySize === 4],
     ["travellers length = 4", Array.isArray(b.travellers) && b.travellers.length === 4],

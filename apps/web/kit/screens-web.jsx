@@ -507,6 +507,9 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
     try {
       const lead = { name: readVal("w-name"), email: readVal("w-email"), phone: readVal("w-phone"), idNumber: readVal("w-id") };
       const bk = await window.TK_BOOKING.create({
+        // Backend (TRI-866, deployed) resolves the tour by SLUG; keep the uuid
+        // too for tolerance. t0.id / TK_SEL.tourId is the slug; apiTourId the uuid.
+        tourSlug: (window.TK_SEL && window.TK_SEL.tourId) || t0.id,
         tourId: (window.TK_SEL && window.TK_SEL.apiTourId) || t0._apiId || t0.id,
         departureId: d && d.id,
         packageId: (t0.packages && sel) ? sel.packageId : undefined,

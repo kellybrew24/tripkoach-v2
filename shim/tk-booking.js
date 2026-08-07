@@ -55,14 +55,18 @@
     if (!b || typeof b !== "object") return null;
     var body = b.booking && typeof b.booking === "object" ? b.booking : b;
     var dep = body.departure && typeof body.departure === "object" ? body.departure : {};
+    // Deployed Backend (TRI-866) nests money/currency/party under `quote`
+    // ({unitPrice,total,currency,partySize} in MAJOR units); older/flat shapes
+    // are still honoured so the mapper stays tolerant.
+    var q = body.quote && typeof body.quote === "object" ? body.quote : {};
     return {
       ref: pick(body.ref, body.reference, body.bookingRef, body.booking_ref) || "",
       status: pick(body.status) || "",
       paymentState: pick(body.paymentState, body.payment_state, body.paymentStatus, body.payment_status) || "",
-      currency: pick(body.currency) || "USD",
-      unitUsd: majorFromMinor(pick(body.unitPriceMinor, body.unit_price_minor), pick(body.unitPriceUsd, body.unit_price_usd, body.unitPrice)),
-      totalUsd: majorFromMinor(pick(body.totalMinor, body.total_minor), pick(body.totalUsd, body.total_usd, body.total)),
-      partySize: pick(body.partySize, body.party_size, body.travellers && body.travellers.length),
+      currency: pick(body.currency, q.currency) || "USD",
+      unitUsd: majorFromMinor(pick(body.unitPriceMinor, body.unit_price_minor, q.unitPriceMinor, q.unit_price_minor), pick(body.unitPriceUsd, body.unit_price_usd, body.unitPrice, q.unitPrice, q.unit_price_usd)),
+      totalUsd: majorFromMinor(pick(body.totalMinor, body.total_minor, q.totalMinor, q.total_minor), pick(body.totalUsd, body.total_usd, body.total, q.total, q.totalUsd)),
+      partySize: pick(body.partySize, body.party_size, q.partySize, q.party_size, body.travellers && body.travellers.length),
       tourTitle: pick(body.tourTitle, body.tour_title, body.tour && (body.tour.title || body.tour), dep.tourTitle),
       departureLabel: pick(body.departureLabel, body.departure_label, dep.label, dep.date && dep.time ? dep.date + ", " + dep.time : dep.date),
       email: pick(body.email, body.leadEmail, body.lead_email, body.lead && body.lead.email),
