@@ -9,6 +9,7 @@
     "build:web": "node scripts/build.mjs web",
     "build:admin": "node scripts/build.mjs admin",
     "smoke": "node scripts/smoke.mjs",
+    "smoke:live": "node scripts/smoke-live.mjs",
     "verify": "npm run build && npm run smoke",
     "clean": "rm -rf apps/web/dist apps/admin/dist"
   },

@@ -212,4 +212,8 @@ function AdminApp() {
 function Frame({ children }) {
   return <>{children}</>;
 }
-ReactDOM.createRoot(document.getElementById("root")).render(<AdminApp />);
+// Render through the boot gate (TRI-861) — see web/kit/app.jsx. Admin renders
+// from fixtures for now; the gate is in place for live read wiring to drop in.
+(window.TK_BOOT || ((fn) => fn()))(() =>
+  ReactDOM.createRoot(document.getElementById("root")).render(<AdminApp />)
+);

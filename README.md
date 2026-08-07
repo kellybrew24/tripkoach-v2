@@ -68,6 +68,42 @@ all three kit apps **plus** three `ReactDOM.createRoot(#root).render(...)` calls
 that fight over `#root`. We consume it only for the component namespace and strip
 those preview-only auto-renders at build time.
 
+## API-client shim + live read paths (TRI-861)
+
+The apps read their data from window-globals (`window.TK_DATA.tours`,
+`window.TK_REVIEWS`, `window.TK_DATA.regions`, per-tour `t.departures`). Today
+those come from the `data/*.js` fixtures. A thin runtime shim lets the **read**
+screens hydrate from the live API instead — **behind a flag, DS screens verbatim,
+still esbuild-static (no Vite)**:
+
+```
+shim/config.js     window.TK_CONFIG = { apiBase:"/api/v1", env, USE_LIVE_API }
+                   Loaded first. Ships with USE_LIVE_API OFF (built app == fixture
+                   prototype). DevOps overwrites this one file per host at deploy
+                   to flip the flag on — no rebuild.
+shim/tk-api.js     window.TK_API — dependency-free fetch wrapper. Same-origin,
+                   credentials:"include" (session cookie), normalised errors.
+apps/web/kit/tk-boot.js    Consumer read-path loader: fetches /regions, /tours,
+                   /tours/:slug, /tours/:id/availability, /tours/:id/reviews,
+                   maps API → the fixture global shape, then mounts the app.
+                   DS-consistent loading + error(retry) states.
+apps/admin/kit/tk-boot.js  Admin boot gate (scaffold): shim wired, live read
+                   integration is a follow-up; renders from fixtures for now.
+```
+
+`app.jsx` renders through `window.TK_BOOT(render)` (the one entrypoint edit) —
+flag off ⇒ immediate fixture render; flag on ⇒ hydrate-then-render. Screen files
+are otherwise untouched.
+
+```
+npm run smoke:live   # stands up a mock API, flips the flag on, asserts the web
+                     # read screens (home/browse/tour-detail) render from live
+                     # data + the error state renders on API failure.
+```
+
+When the flag is off, `npm run smoke` render output is byte-identical to before
+the shim — fixture behaviour is unchanged.
+
 ## Deploy
 
 Static output ships over the existing dev design-system hosts (two independent

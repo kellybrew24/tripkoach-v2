@@ -29,8 +29,14 @@ function Section({ children, style }) {
 
 function HomeWeb({ go }) {
   const tours = window.TK_DATA.tours;
-  const popular = ["discover-ghana-in-10-days", "accra-city-tour", "a-christmas-like-no-other"]
+  const curated = ["discover-ghana-in-10-days", "accra-city-tour", "a-christmas-like-no-other"]
     .map(id => tours.find(t => t.id === id)).filter(Boolean);
+  // Live catalogues won't carry the fixture slugs, so fall back to the first
+  // tours (prefer any flagged featured) — keeps the "popular" rail filled from
+  // live data. With fixtures all three curated slugs resolve, so this is a no-op
+  // and the prototype render is unchanged.
+  const featured = tours.filter(t => t.featured);
+  const popular = curated.length ? curated : (featured.length ? featured : tours).slice(0, 3);
 
   return (
     <div>
