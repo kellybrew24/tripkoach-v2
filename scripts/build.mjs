@@ -104,6 +104,19 @@ function buildApp(name) {
   for (const p of ["styles.css", "tokens", "css", "assets"]) {
     cpSync(join(DS, p), join(dist, p), { recursive: true });
   }
+  // 1a. Self-host Manrope. The DS ships tokens/fonts.css with a Google-Fonts
+  //     @import (a third-party round trip on every load). We keep design-system/
+  //     pristine and instead rewrite the COPY in dist: vendor the Manrope latin
+  //     subset (one variable woff2, weights 400–800) and swap the @import for a
+  //     local @font-face. Same precedent as stripping the bundle's auto-renders.
+  mkdirSync(join(dist, "fonts"), { recursive: true });
+  cpSync(join(ROOT, "vendor/fonts/manrope-latin.woff2"), join(dist, "fonts/manrope-latin.woff2"));
+  const fontsCssPath = join(dist, "tokens", "fonts.css");
+  const fontFace = `@font-face{font-family:"Manrope";font-style:normal;font-weight:400 800;font-display:swap;src:url("../fonts/manrope-latin.woff2") format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}`;
+  const fontsCss = readFileSync(fontsCssPath, "utf8")
+    .replace(/^\s*@import\s+url\([^)]*\);\s*$/m, fontFace);
+  if (!fontsCss.includes("@font-face")) throw new Error("[build] failed to self-host Manrope: @import not found in tokens/fonts.css");
+  writeFileSync(fontsCssPath, fontsCss);
   // 1b. Component namespace: the DS ships _ds_bundle.js as an all-in-one PREVIEW
   //     bundle — the ~60 primitives PLUS all three click-through kit apps PLUS
   //     three `ReactDOM.createRoot(#root).render(...)` calls that fire on load and
@@ -134,7 +147,9 @@ function buildApp(name) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<base href="/">
 <title>${cfg.title}</title>
+<link rel="preload" href="fonts/manrope-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="styles.css">
 <style>body{margin:0;background:${cfg.bodyBg}}
 ${cfg.headCss}</style>

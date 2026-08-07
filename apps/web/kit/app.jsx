@@ -9,17 +9,58 @@ window.tkToast = (msg) => {
   setTimeout(() => { el.style.opacity = "0"; el.style.transform = "translateY(8px)"; setTimeout(() => el.remove(), 250); }, 2600);
 };
 
+// --- Real URL routing (History API, hashless) ------------------------------
+// Each screen maps to a real, shareable path. Deep links, refresh and browser
+// back/forward all work: dev.tripkoach.com serves index.html for any path
+// (SPA try_files fallback) and <base href="/"> keeps asset URLs absolute
+// regardless of route depth. Blog posts are dynamic: /blog/:slug.
+const ROUTES = [
+  ["home", "/"], ["browse", "/browse"], ["tour", "/tour"], ["checkout", "/checkout"],
+  ["confirm", "/confirm"], ["bookings", "/bookings"], ["reviews", "/reviews"],
+  ["login", "/login"], ["forgot", "/forgot"], ["profile", "/profile"],
+  ["notifications", "/notifications"], ["account-settings", "/account/settings"],
+  ["regions", "/regions"], ["marketplace", "/shop"], ["esim", "/esim"],
+  ["pickup", "/pickup"], ["club", "/club"], ["about", "/about"],
+  ["contact", "/contact"], ["blog", "/blog"], ["review", "/review"],
+];
+const PATH_BY_SCREEN = Object.fromEntries(ROUTES.map(([s, p]) => [s, p]));
+function pathForScreen(screen, slug) {
+  if (screen === "post") return "/blog/" + encodeURIComponent(slug || "");
+  return PATH_BY_SCREEN[screen] || "/";
+}
+function routeFromPath(pathname) {
+  const path = (pathname || "/").replace(/\/+$/, "") || "/";
+  const m = path.match(/^\/blog\/(.+)$/);
+  if (m) return { screen: "post", slug: decodeURIComponent(m[1]) };
+  const hit = ROUTES.find(([, p]) => p === path);
+  return { screen: hit ? hit[0] : "home", slug: null };
+}
+
 function WebApp() {
-  const [screen, setScreen] = React.useState("home");
-  const [slug, setSlug] = React.useState(null);
+  const first = routeFromPath(window.location.pathname);
+  const [screen, setScreen] = React.useState(first.screen);
+  const [slug, setSlug] = React.useState(first.slug);
   const [currency, setCurrency] = React.useState("USD");
   const [step, setStep] = React.useState(1);
   const [view, setView] = React.useState("results");
   const go = (s, payload) => {
-    if (s === "post" && payload) setSlug(payload);
+    const nextSlug = s === "post" ? payload : slug;
+    if (s === "post") setSlug(payload);
     setScreen(s === "post" ? "post" : s);
+    const url = pathForScreen(s, nextSlug);
+    if (url !== window.location.pathname) window.history.pushState({ screen: s, slug: nextSlug }, "", url);
     window.scrollTo({ top: 0 });
   };
+  React.useEffect(() => {
+    const onPop = () => {
+      const r = routeFromPath(window.location.pathname);
+      setScreen(r.screen);
+      setSlug(r.slug);
+      window.scrollTo({ top: 0 });
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
   const body = {
     home: <HomeWeb go={go} />,
     browse: <BrowseWeb go={go} currency={currency} view={view} />,
@@ -45,35 +86,8 @@ function WebApp() {
     review: <ReviewInvitePage go={go} />,
   }[screen] || <HomeWeb go={go} />;
 
-  const TABS = [
-    ["home", "Home"], ["browse", "Browse"], ["tour", "Tour"], ["checkout", "Checkout"], ["confirm", "Confirm"],
-    ["bookings", "Bookings"], ["reviews", "My reviews"], ["login", "Sign in"], ["forgot", "Forgot pw"], ["profile", "Profile"], ["notifications", "Notifications"], ["account-settings", "Acct settings"], ["regions", "Regions"], ["esim", "eSIM"], ["pickup", "Pickup"],
-    ["about", "About"], ["contact", "Contact"], ["blog", "Blog"], ["marketplace", "Shop"], ["club", "Club"], ["review", "Review invite"],
-  ];
-
   const AUTH = screen === "login" || screen === "forgot";
-  return (
-    <>
-      <div style={{ position: "fixed", insetInline: 0, bottom: 0, zIndex: 900, display: "flex", justifyContent: "flex-start", gap: 6, alignItems: "center",
-        padding: "10px 12px", background: "var(--bg-inverse)", overflowX: "auto", whiteSpace: "nowrap" }}>
-        <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--n-500)", flex: "none", paddingRight: 4 }}>Screens</span>
-        {TABS.map(([id, l]) => (
-          <button key={id} type="button" onClick={() => go(id)} className="tk-chip"
-            style={{ flex: "none", minHeight: 32, fontSize: 12, background: screen === id ? "var(--gold-300)" : "transparent",
-              color: screen === id ? "var(--n-950)" : "var(--n-100)", borderColor: screen === id ? "var(--gold-300)" : "rgba(255,255,255,.3)" }}>{l}</button>
-        ))}
-        {screen === "browse" && ["results", "loading", "empty"].map(v => (
-          <button key={v} type="button" onClick={() => setView(v)} className="tk-chip"
-            style={{ flex: "none", minHeight: 32, fontSize: 12, background: "transparent", color: view === v ? "var(--gold-300)" : "var(--n-400)", borderColor: "rgba(255,255,255,.2)" }}>{v}</button>
-        ))}
-        {screen === "checkout" && [0,1,2,3].map(s => (
-          <button key={s} type="button" onClick={() => setStep(s)} className="tk-chip"
-            style={{ flex: "none", minHeight: 32, fontSize: 12, background: "transparent", color: step === s ? "var(--gold-300)" : "var(--n-400)", borderColor: "rgba(255,255,255,.2)" }}>Step {s + 1}</button>
-        ))}
-      </div>
-      {AUTH ? body : <Shell currency={currency} setCurrency={setCurrency} go={go}>{body}</Shell>}
-    </>
-  );
+  return AUTH ? body : <Shell currency={currency} setCurrency={setCurrency} go={go}>{body}</Shell>;
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<WebApp />);

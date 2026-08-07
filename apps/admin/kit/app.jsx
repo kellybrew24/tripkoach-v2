@@ -63,19 +63,85 @@ const META = {
 
 const AUTH_SCREENS = ["login", "mfa", "reset", "expired"];
 
+// --- Real URL routing (History API, hashless) ------------------------------
+// The console home is the dashboard (/). Auth screens live at their own paths;
+// with no auth backend wired (fixtures only) they are reached explicitly, e.g.
+// on sign-out. Tour editing is dynamic: /tours/:id (id = "new" or a tour id).
+// admin.dev.tripkoach.com serves index.html for any path (SPA fallback) and
+// <base href="/"> keeps asset URLs absolute regardless of route depth.
+const ADMIN_ROUTES = [
+  ["dashboard", "/"], ["bookings", "/bookings"], ["departures", "/departures"],
+  ["customers", "/customers"], ["guides", "/guides"], ["reviews", "/reviews"],
+  ["payments", "/payments"], ["tours", "/tours"], ["promos", "/promos"],
+  ["users", "/staff"], ["settings", "/settings"], ["admin-profile", "/profile"],
+  ["admin-prefs", "/preferences"], ["login", "/login"], ["mfa", "/mfa"],
+  ["reset", "/reset"], ["expired", "/expired"], ["forbidden", "/403"],
+];
+const ADMIN_PATH_BY_SCREEN = Object.fromEntries(ADMIN_ROUTES.map(([s, p]) => [s, p]));
+function adminPathForScreen(screen, editId) {
+  if (screen === "tour-edit") return "/tours/" + encodeURIComponent(editId || "new");
+  return ADMIN_PATH_BY_SCREEN[screen] || "/";
+}
+function adminRouteFromPath(pathname) {
+  const path = (pathname || "/").replace(/\/+$/, "") || "/";
+  if (path === "/") return { screen: "dashboard", editId: null };
+  const te = path.match(/^\/tours\/(.+)$/);
+  if (te) return { screen: "tour-edit", editId: decodeURIComponent(te[1]) };
+  const hit = ADMIN_ROUTES.find(([, p]) => p === path);
+  return { screen: hit ? hit[0] : "dashboard", editId: null };
+}
+
 function AdminApp() {
-  const [screen, setScreen] = React.useState("login");
-  const [editId, setEditId] = React.useState(null);
+  const first = adminRouteFromPath(window.location.pathname);
+  const [screen, setScreen] = React.useState(first.screen);
+  const [editId, setEditId] = React.useState(first.editId);
   const [detailRef, setDetailRef] = React.useState(null);
   const [demo, setDemo] = React.useState({}); // per-screen view toggles
   const role = demo.role || "admin";
   const user = USERS[role];
   const go = (s, payload) => {
+    const nextEditId = (s === "tour-edit" || s === "departures") ? (payload || null) : editId;
     if (s === "tour-edit" || s === "departures") setEditId(payload || null);
     if (s === "bookings" || s === "customers") setDetailRef(payload || null);
-    if (AUTH_SCREENS.includes(s) || s === "dashboard") { setScreen(s); window.scrollTo({ top: 0 }); return; }
-    setScreen(s); window.scrollTo({ top: 0 });
+    setScreen(s);
+    const url = adminPathForScreen(s, s === "tour-edit" ? payload : nextEditId);
+    if (url !== window.location.pathname) window.history.pushState({ screen: s, payload }, "", url);
+    window.scrollTo({ top: 0 });
   };
+  React.useEffect(() => {
+    const onPop = () => {
+      const r = adminRouteFromPath(window.location.pathname);
+      setScreen(r.screen);
+      setEditId(r.editId);
+      window.scrollTo({ top: 0 });
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  // Accessibility enhancement layer. Applied to the DS components' RENDERED
+  // OUTPUT only — design-system/ source stays byte-for-byte pristine. These are
+  // additive ARIA annotations (never restyle): the AppShell renders its content
+  // region as a plain <div class="tk-shell__main"> (no main landmark); card
+  // section titles use <h3 class="tk-h5"> directly under the page <h1> (skips
+  // h2); and collapsed icon-rail nav buttons hide their text label (no
+  // accessible name). We annotate after every commit so it survives re-renders
+  // and route changes. Residual DS gaps (e.g. --text-subtle chart-label
+  // contrast) are tracked upstream against tripv2-DS.
+  React.useEffect(() => {
+    const main = document.querySelector(".tk-shell__main");
+    if (main && !main.getAttribute("role")) main.setAttribute("role", "main");
+    document.querySelectorAll(".tk-shell__main h3.tk-h5").forEach((h) => {
+      if (h.getAttribute("aria-level") !== "2") { h.setAttribute("role", "heading"); h.setAttribute("aria-level", "2"); }
+    });
+    document.querySelectorAll(".tk-navitem").forEach((b) => {
+      // Use the button's full visible text (label + any badge, e.g. "Bookings 5")
+      // so the accessible name still contains the visible label when the icon
+      // rail hides it — and never mismatches it.
+      const name = b.textContent.replace(/\s+/g, " ").trim();
+      if (name && !b.getAttribute("aria-label")) b.setAttribute("aria-label", name);
+    });
+  });
   const state = { ...demo, editId, detailRef,
     authView: demo.authView, dashView: demo.dashView, bookingsView: demo.bookingsView };
   const setState = (p) => {
@@ -140,27 +206,10 @@ function AdminApp() {
   );
 }
 
-/* Demo control bar — not part of the product */
-function Frame({ children, demo, setDemo, screen, go }) {
-  const set = (k, v) => setDemo(d => ({ ...d, [k]: d[k] === v ? undefined : v }));
-  const chip = (label, active, onClick) => (
-    <button type="button" onClick={onClick} className="tk-chip" style={{ flex: "none", minHeight: 30, fontSize: 12, background: active ? "var(--gold-300)" : "transparent", color: active ? "var(--n-950)" : "var(--n-100)", borderColor: active ? "var(--gold-300)" : "rgba(255,255,255,.3)" }}>{label}</button>
-  );
-  const NAV = [["login", "Login"], ["mfa", "MFA"], ["reset", "Reset"], ["expired", "Expired"], ["dashboard", "Dashboard"], ["bookings", "Bookings"], ["departures", "Departures"], ["tours", "Tours"], ["tour-edit", "Tour edit"], ["customers", "Customers"], ["guides", "Guides"], ["reviews", "Reviews"], ["payments", "Payments"], ["promos", "Promos"], ["users", "Staff & roles"], ["settings", "Settings"], ["admin-profile", "My profile"], ["admin-prefs", "Preferences"], ["forbidden", "403"]];
-  return (
-    <>
-      <div style={{ position: "fixed", insetInline: 0, bottom: 0, zIndex: 950, display: "flex", alignItems: "center", gap: 6, padding: "8px 12px", background: "var(--bg-inverse)", overflowX: "auto", whiteSpace: "nowrap" }}>
-        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--n-500)", flex: "none", paddingRight: 2 }}>Admin</span>
-        {NAV.map(([id, l]) => <React.Fragment key={id}>{chip(l, screen === id, () => go(id === "tour-edit" ? "tour-edit" : id, id === "tour-edit" ? "accra-city-tour" : undefined))}</React.Fragment>)}
-        <span style={{ width: 1, height: 20, background: "rgba(255,255,255,.2)", flex: "none", margin: "0 4px" }} />
-        {!AUTH_SCREENS.includes(screen) && <><span className="tk-caption" style={{ color: "var(--n-500)", flex: "none" }}>Role</span>{chip("Admin (CEO)", (demo.role || "admin") === "admin", () => setDemo(d => ({ ...d, role: "admin" })))}{chip("Operator", demo.role === "operator", () => setDemo(d => ({ ...d, role: "operator" })))}<span style={{ width: 1, height: 20, background: "rgba(255,255,255,.2)", flex: "none", margin: "0 4px" }} /></>}
-        {screen === "login" && <>{chip("error", demo.authView === "error", () => set("authView", "error"))}{chip("locked", demo.authView === "locked", () => set("authView", "locked"))}</>}
-        {screen === "mfa" && chip("bad code", demo.authView === "mfa-error", () => set("authView", "mfa-error"))}
-        {screen === "dashboard" && <>{chip("loading", demo.dashView === "loading", () => set("dashView", "loading"))}{chip("empty", demo.dashView === "empty", () => set("dashView", "empty"))}</>}
-        {screen === "bookings" && chip("loading", demo.bookingsView === "loading", () => set("bookingsView", "loading"))}
-      </div>
-      {children}
-    </>
-  );
+/* App frame. The prototype's demo control bar (screen switcher + role/view
+   toggles) has been removed for production — navigation is real URL routing
+   and screens render their real (loaded, non-error) state by default. */
+function Frame({ children }) {
+  return <>{children}</>;
 }
 ReactDOM.createRoot(document.getElementById("root")).render(<AdminApp />);
