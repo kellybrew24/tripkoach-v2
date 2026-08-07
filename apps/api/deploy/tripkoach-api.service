@@ -1,0 +1,28 @@
+# systemd unit for the TripKoach v2 API (dev box). DevOps: install to /etc/systemd/system/,
+# adjust WorkingDirectory/User, load the secret env, then: systemctl daemon-reload && systemctl enable --now tripkoach-api
+#
+# Runs via Node's native TypeScript stripping (no build step). Requires Node >= 22.
+# Migrations are applied by the deploy step (`npm run migrate`), not on boot, when using real Postgres.
+
+[Unit]
+Description=TripKoach v2 API (Fastify, read paths — TRI-860)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=tripkoach
+WorkingDirectory=/opt/tripkoach-v2/apps/api
+# Secret env (DATABASE_URL etc.) from the secret store — chmod 600, never in git:
+EnvironmentFile=/etc/tripkoach/tripkoach-v2-dev.env
+Environment=NODE_ENV=production
+Environment=PORT=3020
+Environment=HOST=127.0.0.1
+Environment=DB_DRIVER=pg
+ExecStart=/usr/bin/node --experimental-strip-types src/index.ts
+Restart=on-failure
+RestartSec=2
+# Bound to localhost; Caddy is the only public edge.
+
+[Install]
+WantedBy=multi-user.target
