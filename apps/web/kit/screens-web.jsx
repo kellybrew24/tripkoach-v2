@@ -1,0 +1,591 @@
+const NS = window.TripKoachDesignSystem_c9e4af;
+const { Header, Footer, Breadcrumbs, TourCard, SearchField, Chip, Button, Icon, Select, Pagination, CurrencyToggle,
+  Rating, Badge, AvailabilityBadge, DeparturePicker, Accordion, Alert, Price, OrderSummary, PromoCode, CheckoutStepper,
+  FormField, Input, Textarea, NumberStepper, PaymentForm, Checkbox, BookingRow, StatusBadge, Tabs, EmptyState, Skeleton, IconButton, Modal, Toast } = NS;
+
+/* Amounts in TK_DATA are the currency of record (USD). The header toggle converts
+   for display only; GHS rate is an assumption pending a live FX feed. */
+const TK_FX = { USD: 1, GHS: 15.6 };
+const TK_SYM = { USD: "$", GHS: "GH₵" };
+function cvt(usd, cur) { return cur === "GHS" ? Math.round((usd || 0) * TK_FX.GHS) : (usd || 0); }
+function money(usd, cur) { return TK_SYM[cur] + cvt(usd, cur).toLocaleString(); }
+function cvtDeps(deps, cur) { return (deps || []).map(d => ({ ...d, price: cvt(d.price, cur) })); }
+
+function Stars({ value, size = 15 }) {
+  return <span style={{ display: "inline-flex", gap: 1 }} aria-label={value + " out of 5"}>{[1,2,3,4,5].map(i => <Icon key={i} name="star" size={size} style={{ color: i <= Math.round(value) ? "#f5b301" : "var(--border-strong)", fill: i <= Math.round(value) ? "#f5b301" : "transparent" }} />)}</span>;
+}
+function StarInput({ value, onChange }) {
+  const [hover, setHover] = React.useState(0);
+  return (
+    <div role="radiogroup" aria-label="Your rating" style={{ display: "inline-flex", gap: 4 }} onMouseLeave={() => setHover(0)}>
+      {[1,2,3,4,5].map(i => (
+        <button key={i} type="button" role="radio" aria-checked={value === i} aria-label={i + " star" + (i > 1 ? "s" : "")} onMouseEnter={() => setHover(i)} onClick={() => onChange(i)}
+          style={{ background: "none", border: 0, padding: 4, cursor: "pointer", lineHeight: 0 }}>
+          <Icon name="star" size={30} style={{ color: i <= (hover || value) ? "#f5b301" : "var(--border-strong)", fill: i <= (hover || value) ? "#f5b301" : "transparent" }} />
+        </button>
+      ))}
+    </div>
+  );
+}
+function ReviewCard({ r }) {
+  return (
+    <div className="tk-card" style={{ boxShadow: "none", border: "1px solid var(--border-subtle)" }}><div className="tk-card__body" style={{ gap: "var(--space-2)", padding: "var(--space-4)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span style={{ width: 38, height: 38, borderRadius: "50%", background: "var(--brand-wash)", color: "var(--brand-ink)", display: "grid", placeItems: "center", fontWeight: 700, fontSize: 14, flex: "none" }}>{r.initials}</span>
+        <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.3 }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700 }}>{r.author}{r.verified && <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 11.5, fontWeight: 700, color: "var(--success-fg)" }}><Icon name="circle-check-big" size={13} />Verified traveller</span>}</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 8 }}><Stars value={r.rating} /><span className="tk-caption">{r.date}</span></span>
+        </div>
+      </div>
+      {r.title && <strong style={{ fontSize: 15 }}>{r.title}</strong>}
+      <p className="tk-body" style={{ margin: 0, color: "var(--text-body)" }}>{r.text}</p>
+      {r.reply && <div style={{ marginTop: 6, padding: "10px 12px", background: "var(--bg-sunken)", borderRadius: "var(--radius-md)", borderInlineStart: "3px solid var(--brand)" }}><span style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 700, fontSize: 12.5, color: "var(--brand-ink)" }}><img src="../../assets/logo-badge.png" width="16" height="16" alt="" />Response from TripKoach</span><p className="tk-body-sm" style={{ margin: "4px 0 0" }}>{r.reply}</p></div>}
+    </div></div>
+  );
+}
+function ReviewModal({ tour, onClose }) {
+  const [rating, setRating] = React.useState(0);
+  const [title, setTitle] = React.useState("");
+  const [text, setText] = React.useState("");
+  const ok = rating > 0 && text.trim().length >= 10;
+  return (
+    <Modal open title={"Review " + tour.title} description="Share your experience. Reviews are checked by our team before they appear publicly — usually within a day." onClose={onClose}
+      actions={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button disabled={!ok} iconStart="check" onClick={() => { onClose(); window.tkToast && window.tkToast("Thanks! Your review is awaiting approval."); }}>Submit review</Button></>}>
+      <div style={{ display: "grid", gap: "var(--space-4)" }}>
+        <div><span className="tk-label" style={{ display: "block", marginBottom: 4 }}>Your rating</span><StarInput value={rating} onChange={setRating} /></div>
+        <FormField id="rv-title" label="Title" optional><Input id="rv-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Sum it up in a few words" /></FormField>
+        <FormField id="rv-text" label="Your review" required hint="At least 10 characters. Please keep it about the tour."><Textarea id="rv-text" rows={4} value={text} onChange={(e) => setText(e.target.value)} placeholder="What did you enjoy? How was your guide?" /></FormField>
+      </div>
+    </Modal>
+  );
+}
+function ReviewsSection({ tour, onWrite }) {
+  const reviews = (window.TK_REVIEWS_FOR ? window.TK_REVIEWS_FOR(tour.id) : []);
+  const stats = window.TK_REVIEW_STATS ? window.TK_REVIEW_STATS(tour.id) : { count: 0, avg: 0 };
+  return (
+    <div id="reviews">
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, marginBottom: "var(--space-4)" }}>
+        <h2 className="tk-h3" style={{ margin: 0 }}>Traveller reviews</h2>
+        <span className="tk-caption" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Icon name="shield-check" size={14} style={{ color: "var(--success-fg)" }} />From travellers we've hosted</span>
+      </div>
+      {stats.count ? (
+        <>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: "var(--space-4)" }}>
+            <span style={{ fontSize: 40, fontWeight: 800, lineHeight: 1, color: "var(--text-strong)" }}>{stats.avg}</span>
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}><Stars value={stats.avg} size={18} /><span className="tk-caption">Based on {stats.count} verified review{stats.count > 1 ? "s" : ""}</span></div>
+          </div>
+          <div style={{ display: "grid", gap: "var(--space-3)" }}>{reviews.map(r => <ReviewCard key={r.id} r={r} />)}</div>
+        </>
+      ) : (
+        <div className="tk-card" style={{ boxShadow: "none", border: "1px dashed var(--border-strong)" }}><div className="tk-card__body" style={{ padding: "var(--space-5)", textAlign: "center", gap: 6 }}>
+          <Stars value={0} size={18} />
+          <strong>No reviews yet</strong>
+          <p className="tk-body-sm tk-muted" style={{ margin: 0 }}>Reviews open to travellers after their departure — we email each guest a private link.</p>
+        </div></div>
+      )}
+    </div>
+  );
+}
+function ReviewInvitePage({ go }) {
+  const inv = window.TK_INVITE || {};
+  const tour = (window.TK_DATA.tours.find(t => t.id === inv.tourId)) || { title: inv.tour, image: null };
+  const [rating, setRating] = React.useState(0);
+  const [title, setTitle] = React.useState("");
+  const [text, setText] = React.useState("");
+  const [done, setDone] = React.useState(false);
+  const ok = rating > 0 && text.trim().length >= 10;
+  return (
+    <div className="tk-container" style={{ paddingBlock: "var(--space-9) var(--space-12)", maxWidth: 620 }}>
+      {done ? (
+        <div className="tk-card" style={{ boxShadow: "var(--elev-2)" }}><div className="tk-card__body" style={{ padding: "var(--space-7)", textAlign: "center", gap: "var(--space-3)", alignItems: "center" }}>
+          <span style={{ width: 56, height: 56, borderRadius: "50%", background: "var(--success-bg)", color: "var(--success-fg)", display: "grid", placeItems: "center" }}><Icon name="circle-check-big" size={28} /></span>
+          <h1 className="tk-h2" style={{ margin: 0 }}>Thank you, {String(inv.name || "").split(" ")[0]}!</h1>
+          <p className="tk-body" style={{ margin: 0, color: "var(--text-muted)", maxWidth: "40ch" }}>Your review is with our team. Once it's approved it'll appear on the {tour.title} page — usually within a day.</p>
+          <Button style={{ marginTop: 8 }} onClick={() => go("tour")}>Back to the tour</Button>
+        </div></div>
+      ) : (
+        <div className="tk-card" style={{ boxShadow: "var(--elev-2)" }}><div className="tk-card__body" style={{ padding: "var(--space-6)", gap: "var(--space-4)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 60, height: 60, borderRadius: "var(--radius-md)", overflow: "hidden", flex: "none" }}><TourImage src={tour.image} alt={tour.title} label={tour.title} gi={0} showLabel={false} /></div>
+            <div><span className="tk-overline" style={{ color: "var(--brand-ink)" }}>How was your trip?</span><h1 className="tk-h3" style={{ margin: "2px 0 0" }}>{tour.title}</h1></div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", background: "var(--success-bg)", borderRadius: "var(--radius-md)" }}><Icon name="shield-check" size={16} style={{ color: "var(--success-fg)" }} /><span className="tk-body-sm">Verified — you travelled on <strong>{inv.date}</strong> (booking {inv.ref}).</span></div>
+          <div><span className="tk-label" style={{ display: "block", marginBottom: 4 }}>Your rating</span><StarInput value={rating} onChange={setRating} /></div>
+          <FormField id="iv-title" label="Title" optional><Input id="iv-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Sum it up in a few words" /></FormField>
+          <FormField id="iv-text" label="Your review" required hint="At least 10 characters."><Textarea id="iv-text" rows={5} value={text} onChange={(e) => setText(e.target.value)} placeholder="What did you enjoy? How was your guide?" /></FormField>
+          <Button size="lg" block disabled={!ok} iconStart="check" onClick={() => setDone(true)}>Submit review</Button>
+          <p className="tk-caption" style={{ textAlign: "center", margin: 0 }}>Only you can use this link. Reviews are checked before they appear publicly.</p>
+        </div></div>
+      )}
+    </div>
+  );
+}
+Object.assign(window, { Stars, StarInput, ReviewCard, ReviewModal, ReviewsSection, ReviewInvitePage });
+
+const NAV = [{ label: "Tours", href: "#browse" }, { label: "Regions", href: "#regions" }, { label: "Marketplace", href: "#marketplace" }, { label: "Stories", href: "#blog" }, { label: "About", href: "#about" }];
+
+// Warm brand gradients so a broken/absent CDN photo still reads as an intentional, on-brand panel.
+const TK_GRADS = [
+  "linear-gradient(145deg,#c67d2a 0%,#9a5a1f 55%,#5c3413 100%)",
+  "linear-gradient(145deg,#3f7a63 0%,#255043 100%)",
+  "linear-gradient(145deg,#b3702f 0%,#6b3d18 100%)",
+  "linear-gradient(145deg,#5a7d8f 0%,#2f4b58 100%)",
+  "linear-gradient(145deg,#a8562f 0%,#5e2c18 100%)",
+];
+function TourImage({ src, alt, label, gi = 0, showLabel = true }) {
+  const [err, setErr] = React.useState(false);
+  if (err || !src) {
+    return (
+      <div aria-label={alt} role="img" style={{ position: "absolute", inset: 0, background: TK_GRADS[gi % TK_GRADS.length], display: "grid", placeItems: "center" }}>
+        <span style={{ position: "absolute", inset: 0, background: "radial-gradient(120% 90% at 20% 15%, rgba(255,255,255,.16), transparent 60%)" }} />
+        {showLabel && <span style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 7, color: "rgba(255,255,255,.94)", fontWeight: 700, fontSize: 13.5, letterSpacing: ".01em", textShadow: "0 1px 4px rgba(0,0,0,.35)" }}><Icon name="map-pin" size={16} />{label || "Ghana"}</span>}
+      </div>
+    );
+  }
+  return <img src={src} alt={alt} loading="lazy" decoding="async" onError={() => setErr(true)} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />;
+}
+function tourGallery(t) {
+  const caps = (t.highlights && t.highlights.length) ? t.highlights : [t.region + ", Ghana"];
+  const out = [{ src: t.image, caption: t.title, gi: 0 }];
+  for (let i = 1; i < 8; i++) out.push({ src: t.image ? window.TK_IMG(t.id, "gallery-" + i) : null, caption: caps[(i - 1) % caps.length], gi: i % TK_GRADS.length });
+  return out;
+}
+function Lightbox({ photos, index, setIndex, onClose }) {
+  React.useEffect(() => {
+    const h = (e) => {
+      if (e.key === "Escape") onClose();
+      else if (e.key === "ArrowRight") setIndex((index + 1) % photos.length);
+      else if (e.key === "ArrowLeft") setIndex((index - 1 + photos.length) % photos.length);
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [index, photos.length]);
+  const p = photos[index];
+  const nav = (d) => setIndex((index + d + photos.length) % photos.length);
+  const arrow = { position: "absolute", top: "50%", transform: "translateY(-50%)", width: 48, height: 48, borderRadius: "50%", border: "1px solid rgba(255,255,255,.4)", background: "rgba(20,19,18,.5)", color: "#fff", display: "grid", placeItems: "center", cursor: "pointer", zIndex: 2 };
+  return (
+    <div role="dialog" aria-modal="true" aria-label={"Photo gallery, " + (index + 1) + " of " + photos.length} style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(14,13,12,.95)", display: "flex", flexDirection: "column" }} onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "var(--space-4) var(--space-5)", color: "#fff" }}>
+        <span style={{ fontWeight: 700, fontSize: 14, letterSpacing: ".02em" }}>{index + 1} / {photos.length}</span>
+        <button type="button" onClick={onClose} aria-label="Close gallery" style={{ width: 44, height: 44, borderRadius: "50%", border: "1px solid rgba(255,255,255,.35)", background: "rgba(255,255,255,.08)", color: "#fff", display: "grid", placeItems: "center", cursor: "pointer" }}><Icon name="x" size={20} /></button>
+      </div>
+      <div style={{ position: "relative", flex: 1, minHeight: 0, margin: "0 var(--space-5)" }}>
+        <button type="button" onClick={() => nav(-1)} aria-label="Previous photo" style={{ ...arrow, insetInlineStart: 8 }}><Icon name="chevron-left" size={24} /></button>
+        <div style={{ position: "absolute", inset: 0, borderRadius: "var(--radius-card)", overflow: "hidden" }}>
+          {(!p.src) ? <div role="img" aria-label={p.caption} style={{ position: "absolute", inset: 0, background: TK_GRADS[p.gi % TK_GRADS.length], display: "grid", placeItems: "center" }}><span style={{ display: "inline-flex", alignItems: "center", gap: 8, color: "rgba(255,255,255,.94)", fontWeight: 700, fontSize: 16, textShadow: "0 1px 6px rgba(0,0,0,.4)" }}><Icon name="map-pin" size={18} />{p.caption}</span></div>
+            : <LightboxPhoto src={p.src} alt={p.caption} caption={p.caption} gi={p.gi} />}
+        </div>
+        <button type="button" onClick={() => nav(1)} aria-label="Next photo" style={{ ...arrow, insetInlineEnd: 8 }}><Icon name="chevron-right" size={24} /></button>
+      </div>
+      <div style={{ color: "rgba(255,255,255,.9)", textAlign: "center", fontSize: 14, fontWeight: 500, padding: "var(--space-4) var(--space-5) 0" }}>{p.caption}</div>
+      <div style={{ display: "flex", gap: 6, overflowX: "auto", padding: "var(--space-4) var(--space-5) var(--space-5)", justifyContent: "center" }}>
+        {photos.map((ph, i) => (
+          <button key={i} type="button" onClick={() => setIndex(i)} aria-label={"Photo " + (i + 1)} aria-current={i === index} style={{ position: "relative", flex: "0 0 auto", width: 74, height: 52, borderRadius: "var(--radius-sm)", overflow: "hidden", border: i === index ? "2px solid var(--gold-500)" : "2px solid transparent", padding: 0, cursor: "pointer", opacity: i === index ? 1 : .62 }}>
+            {ph.src ? <img src={ph.src} alt="" onError={(e) => { e.currentTarget.style.display = "none"; }} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} /> : null}
+            <span style={{ position: "absolute", inset: 0, background: TK_GRADS[ph.gi % TK_GRADS.length], zIndex: -1 }} />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+function LightboxPhoto({ src, alt, caption, gi }) {
+  const [err, setErr] = React.useState(false);
+  if (err) return <div role="img" aria-label={caption} style={{ position: "absolute", inset: 0, background: TK_GRADS[gi % TK_GRADS.length], display: "grid", placeItems: "center" }}><span style={{ display: "inline-flex", alignItems: "center", gap: 8, color: "rgba(255,255,255,.94)", fontWeight: 700, fontSize: 16, textShadow: "0 1px 6px rgba(0,0,0,.4)" }}><Icon name="map-pin" size={18} />{caption}</span></div>;
+  return <img src={src} alt={alt} onError={() => setErr(true)} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain", background: "#0e0d0c" }} />;
+}
+function TourHero({ t, go }) {
+  const photos = tourGallery(t);
+  const [lb, setLb] = React.useState(null);
+  const open = (i) => setLb(i);
+  const thumbs = [
+    { name: "gallery-1", label: t.highlights && t.highlights[0] },
+    { name: "gallery-2", label: t.highlights && t.highlights[1] },
+    { name: "gallery-3", label: t.highlights && t.highlights[2] },
+    { name: "gallery-4", label: t.highlights && t.highlights[3] },
+  ];
+  return (
+    <>
+    <div style={{ borderRadius: "var(--radius-card)", overflow: "hidden", boxShadow: "var(--elev-2)", border: "1px solid var(--border-subtle)" }}>
+      <div style={{ position: "relative", aspectRatio: "21/9", minHeight: 320, cursor: "pointer", background: TK_GRADS[0] }} onClick={() => open(0)}>
+        <TourImage src={t.image} alt={t.title} label={t.region + ", Ghana"} gi={0} showLabel={true} />
+        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(20,19,18,.86) 0%, rgba(20,19,18,.42) 34%, rgba(20,19,18,.05) 60%, rgba(20,19,18,.18) 100%)" }} />
+        <div style={{ position: "absolute", insetInline: 0, top: 0, padding: "var(--space-5)", display: "flex", justifyContent: "flex-end" }}>
+          <button type="button" onClick={(e) => { e.stopPropagation(); open(0); }}
+            style={{ display: "inline-flex", alignItems: "center", gap: 8, minHeight: 40, padding: "0 16px", border: "1px solid rgba(255,255,255,.55)", borderRadius: "var(--radius-pill)", background: "rgba(20,19,18,.4)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", color: "#fff", fontWeight: 700, fontSize: 13.5, cursor: "pointer" }}>
+            <Icon name="image" size={16} />View all {photos.length} photos
+          </button>
+        </div>
+        <div style={{ position: "absolute", insetInline: 0, bottom: 0, padding: "var(--space-7) var(--space-6) var(--space-6)", display: "flex", flexDirection: "column", gap: "var(--space-3)", color: "#fff" }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 16, fontSize: 13.5, fontWeight: 600, color: "rgba(255,255,255,.92)" }}>
+            <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}><Icon name="map-pin" size={15} />{t.region}, Ghana</span>
+            <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}><Icon name="clock" size={15} />{t.duration}</span>
+            <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}><Icon name="tag" size={15} />{t.category}</span>
+          </div>
+          <h1 className="tk-display" style={{ color: "#fff", maxWidth: "20ch", textShadow: "0 2px 14px rgba(0,0,0,.4)", margin: 0 }}>{t.title}</h1>
+          <div className="tk-row" style={{ gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+            {t.rating ? <span style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,.16)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)", borderRadius: "var(--radius-pill)", padding: "5px 12px", fontWeight: 700, fontSize: 13.5 }}><Icon name="star" size={15} style={{ color: "#f5b301" }} />{t.rating} <span style={{ opacity: .8, fontWeight: 500 }}>({t.reviews})</span></span> : null}
+            {t.tag ? <span style={{ background: "var(--gold-500)", color: "#2b1c0b", fontWeight: 800, fontSize: 12.5, borderRadius: "var(--radius-pill)", padding: "5px 12px" }}>{t.tag}</span> : null}
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(25,120,75,.9)", color: "#fff", fontWeight: 700, fontSize: 12.5, borderRadius: "var(--radius-pill)", padding: "5px 12px" }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "#8ff0b8" }} />{t.spotsLeft} spots left</span>
+          </div>
+        </div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 3, background: "var(--bg-surface)" }}>
+        {thumbs.map((th, i) => (
+          <button key={i} type="button" onClick={() => open(i + 1)} style={{ position: "relative", aspectRatio: "3/2", border: 0, padding: 0, cursor: "pointer", overflow: "hidden" }}>
+            <TourImage src={t.image ? window.TK_IMG(t.id, th.name) : null} alt={th.label || t.title} label={th.label} gi={i + 1} />
+            {i === 3 && <span style={{ position: "absolute", inset: 0, background: "rgba(20,19,18,.5)", display: "grid", placeItems: "center", color: "#fff", fontWeight: 800, fontSize: 16 }}>+{photos.length - 4}</span>}
+          </button>
+        ))}
+      </div>
+    </div>
+    {lb !== null && <Lightbox photos={photos} index={lb} setIndex={setLb} onClose={() => setLb(null)} />}
+    </>
+  );
+}
+const FOOT = [
+  { title: "Travel", links: [{ label: "Regions", href: "#regions" }, { label: "Tour packages", href: "#browse" }, { label: "Marketplace", href: "#marketplace" }, { label: "eSIM", href: "#esim" }, { label: "Airport pickup", href: "#pickup" }, { label: "Tourism clubs", href: "#club" }] },
+  { title: "Company", links: [{ label: "About", href: "#about" }, { label: "Blog", href: "#blog" }, { label: "Contact", href: "#contact" }] },
+];
+
+const KNOWN_SCREENS = ["home", "browse", "tour", "checkout", "confirm", "bookings", "reviews", "login", "forgot", "profile", "notifications", "account-settings", "regions", "marketplace", "esim", "pickup", "club", "about", "blog", "contact", "review"];
+
+function MobileMenu({ onClose, go }) {
+  const links = [...NAV, { label: "My bookings", href: "#bookings" }, { label: "Sign in", href: "#login" }];
+  return (
+    <div onClick={(e) => e.target === e.currentTarget && onClose()} style={{ position: "fixed", inset: 0, zIndex: 90, background: "rgba(20,19,18,.45)", backdropFilter: "blur(2px)", display: "flex", justifyContent: "flex-end" }}>
+      <nav aria-label="Menu" style={{ width: "min(84vw,320px)", background: "var(--bg-surface)", height: "100%", padding: "var(--space-5)", display: "flex", flexDirection: "column", gap: 2, boxShadow: "var(--elev-4)", overflowY: "auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--space-4)" }}>
+          <img src="../../assets/logo-badge.png" width="34" height="34" alt="TripKoach" />
+          <IconButton icon="x" label="Close menu" variant="ghost" onClick={onClose} />
+        </div>
+        {links.map(l => <a key={l.href} href={l.href} onClick={onClose} className="tk-navlink" style={{ minHeight: 48, fontSize: 16, paddingInline: "var(--space-2)" }}>{l.label}</a>)}
+        <Button style={{ marginTop: "var(--space-4)" }} block onClick={() => { onClose(); go && go("contact"); }}>Plan a trip</Button>
+      </nav>
+    </div>
+  );
+}
+
+function Shell({ children, currency, setCurrency, go }) {
+  const [menu, setMenu] = React.useState(false);
+  const onNav = (e) => {
+    const accountBtn = e.target.closest('button[aria-label="Your account"]');
+    if (accountBtn) { e.preventDefault(); go && go("profile"); return; }
+    const a = e.target.closest("a");
+    if (!a) return;
+    if (a.getAttribute("aria-label") === "TripKoach home") { e.preventDefault(); go && go("home"); return; }
+    const href = a.getAttribute("href") || "";
+    if (href.startsWith("#") && KNOWN_SCREENS.includes(href.slice(1))) { e.preventDefault(); go && go(href.slice(1)); }
+  };
+  return (
+    <div style={{ background: "var(--bg-page)", minHeight: "100%" }} onClick={onNav}>
+      <Header items={NAV} current="#browse" signedIn logoSrc="../../assets/logo-badge.png"
+        right={<>
+          <CurrencyToggle value={currency} onChange={setCurrency} />
+          <IconButton icon="menu" label="Open menu" variant="ghost" className="tk-only-mobile" onClick={() => setMenu(true)} />
+          <Button variant="ghost" size="sm" className="tk-hide-mobile" onClick={() => go && go("login")}>Sign in</Button>
+          <Button variant="primary" size="sm" className="tk-hide-mobile" onClick={() => go && go("contact")}>Plan a trip</Button>
+        </>} />
+      <main>{children}</main>
+      <Footer columns={FOOT} logoSrc="../../assets/logo-badge.png" />
+      {menu && <MobileMenu go={go} onClose={() => setMenu(false)} />}
+    </div>
+  );
+}
+
+const PRICE_BANDS = [{ label: "Under $200", test: p => p < 200 }, { label: "$200–600", test: p => p >= 200 && p <= 600 }, { label: "$600–1,200", test: p => p > 600 && p <= 1200 }, { label: "$1,200+", test: p => p > 1200 }];
+const DURATIONS = [{ label: "Half day", test: d => /half day|hrs/i.test(d) }, { label: "Full day", test: d => /full day/i.test(d) }, { label: "Multi-day", test: d => /days|nights?/i.test(d) }];
+function matchesFilters(t, f) {
+  if (f.region.length && !f.region.includes(t.region)) return false;
+  if (f.category.length && !f.category.includes(t.category)) return false;
+  if (f.price.length && !f.price.some(l => (PRICE_BANDS.find(b => b.label === l) || {}).test?.(t.price))) return false;
+  if (f.duration.length && !f.duration.some(l => (DURATIONS.find(b => b.label === l) || {}).test?.(t.duration))) return false;
+  return true;
+}
+
+function FilterPanel({ tours, filters, toggle, onClear }) {
+  const regions = [...new Set(tours.map(t => t.region))];
+  const cats = [...new Set(tours.map(t => t.category))];
+  const groups = [["Region", "region", regions], ["Price from", "price", PRICE_BANDS.map(b => b.label)], ["Duration", "duration", DURATIONS.map(b => b.label)], ["Category", "category", cats]];
+  const anyActive = filters.region.length || filters.price.length || filters.duration.length || filters.category.length;
+  return (
+    <aside aria-label="Filters" style={{ display: "flex", flexDirection: "column", gap: "var(--space-6)", position: "sticky", top: "calc(var(--header-h) + 24px)" }}>
+      {groups.map(([title, key, opts]) => (
+        <div key={title} className="tk-stack" style={{ gap: "var(--space-3)" }}>
+          <h3 className="tk-h6">{title}</h3>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {opts.map(o => { const on = filters[key].includes(o); return <Chip key={o} active={on} onClick={() => toggle(key, o)} onRemove={on ? () => toggle(key, o) : undefined}>{o}</Chip>; })}
+          </div>
+        </div>
+      ))}
+      <div className="tk-stack" style={{ gap: "var(--space-3)" }}>
+        <h3 className="tk-h6">Departing</h3>
+        <Select options={[{ value: "any", label: "Any date" }, { value: "m", label: "This month" }, { value: "n", label: "Next month" }]} />
+      </div>
+      {anyActive ? <Button variant="ghost" size="sm" style={{ alignSelf: "flex-start" }} onClick={onClear}>Clear all filters</Button> : null}
+    </aside>
+  );
+}
+
+function BrowseWeb({ go, currency, view }) {
+  const tours = window.TK_DATA.tours;
+  const [filters, setFilters] = React.useState({ region: [], price: [], duration: [], category: [] });
+  const [query, setQuery] = React.useState("");
+  const toggle = (key, val) => setFilters(f => ({ ...f, [key]: f[key].includes(val) ? f[key].filter(x => x !== val) : [...f[key], val] }));
+  const clear = () => setFilters({ region: [], price: [], duration: [], category: [] });
+  const shown = tours.filter(t => matchesFilters(t, filters) && (!query || (t.title + t.region + t.category).toLowerCase().includes(query.toLowerCase())));
+  return (
+    <>
+      <section style={{ position: "relative", borderBottom: "1px solid var(--border-subtle)", overflow: "hidden", background: "var(--brand-wash)" }}>
+        {/* PLACEHOLDER hero image — swap this URL for the real browse hero when ready */}
+        <img src="https://picsum.photos/seed/tripkoach-browse-hero/1600/700" alt="" aria-hidden="true"
+          style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
+        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(90deg, rgba(20,19,18,.82) 0%, rgba(20,19,18,.62) 45%, rgba(20,19,18,.28) 100%)" }} />
+        <div className="tk-container" style={{ position: "relative", paddingBlock: "var(--space-12)", display: "flex", flexDirection: "column", gap: "var(--space-5)", maxWidth: 1200 }}>
+          <div className="tk-stack" style={{ gap: "var(--space-3)", maxWidth: "22ch" }}>
+            <span className="tk-overline" style={{ color: "var(--gold-300)" }}>Ghana · {window.TK_REGION_COUNT()} regions</span>
+            <h1 className="tk-display" style={{ color: "#fff" }}>Ghana, shown by the people who live there</h1>
+          </div>
+          <p className="tk-body-lg" style={{ maxWidth: "52ch", color: "rgba(255,255,255,.9)" }}>
+            Guided day trips and multi-day journeys with local guides. Reserve your spot now and pay before you travel.
+          </p>
+          <div style={{ display: "flex", gap: 12, maxWidth: 640 }}>
+            <SearchField value={query} onChange={(e) => setQuery(e.target.value)} onClear={() => setQuery("")} />
+            <Button size="lg" onClick={() => window.tkToast(shown.length + " tours match")}>Search</Button>
+          </div>
+        </div>
+      </section>
+
+      <div className="tk-container" style={{ paddingBlock: "var(--space-10)", display: "grid", gridTemplateColumns: "240px 1fr", gap: "var(--space-10)", maxWidth: 1200 }}>
+        <FilterPanel tours={tours} filters={filters} toggle={toggle} onClear={clear} />
+        <div className="tk-stack" style={{ gap: "var(--space-5)" }}>
+          <div className="tk-row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+            <h2 className="tk-h3">{shown.length} {shown.length === 1 ? "tour" : "tours"} across Ghana</h2>
+            <Select aria-label="Sort" style={{ width: 200 }}
+              options={[{ value: "pop", label: "Sort: Most popular" }, { value: "p", label: "Sort: Price low to high" }, { value: "s", label: "Sort: Departing soon" }]} />
+          </div>
+          {view === "loading" ? (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: "var(--space-5)" }} aria-busy="true">
+              {[0,1,2,3,4,5].map(i => <div className="tk-card" key={i}><Skeleton height={160} radius="0" /><div className="tk-card__body"><Skeleton height={10} width="45%" /><Skeleton height={16} /><Skeleton height={16} width="65%" /></div></div>)}
+            </div>
+          ) : shown.length === 0 ? (
+            <EmptyState icon="compass" title="No tours match those filters" body="Try widening the price range or clearing a region." action={<Button variant="secondary" onClick={clear}>Clear filters</Button>} />
+          ) : (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: "var(--space-5)" }}>
+                {shown.map(t => <div key={t.id} onClick={() => go("tour")}><TourCard {...t} price={cvt(t.price, currency)} currency={currency} reviewCount={t.reviews} /></div>)}
+              </div>
+              <Pagination page={1} pages={1} resultsLabel={"Showing " + shown.length + " of " + tours.length + " tours"} />
+            </>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function pkgTour(t, pkgId) {
+  const p = (t.packages || []).find(x => x.id === pkgId);
+  if (!p) return t;
+  return { ...t, tiers: p.tiers, price: p.tiers[p.tiers.length - 1].price, included: (p.includes || t.included), stops: p.stops, packageName: p.name, packageId: p.id, duration: p.duration || t.duration };
+}
+function TourWeb({ go, currency }) {
+  const t0 = window.TK_DATA.tours[0];
+  const [pkgId, setPkgId] = React.useState(t0.defaultPackage || (t0.packages && t0.packages[0].id));
+  const t = t0.packages ? pkgTour(t0, pkgId) : t0;
+  const [dep, setDep] = React.useState("d2");
+  const d = t.departures.find(x => x.id === dep);
+  return (
+    <div className="tk-container" style={{ paddingBlock: "var(--space-6) var(--space-12)", maxWidth: 1200, display: "flex", flexDirection: "column", gap: "var(--space-5)" }}>
+      <Breadcrumbs items={[{ label: "Tours", href: "#" }, { label: t.region, href: "#" }, { label: t.title }]} />
+      <TourHero t={t} go={go} />
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: "var(--space-10)", alignItems: "start" }}>
+        <div className="tk-stack" style={{ gap: "var(--space-6)" }}>
+          <p className="tk-body-lg" style={{ maxWidth: "62ch", marginTop: "var(--space-2)" }}>{t.blurb}</p>
+          {t0.packages ? (
+            <div className="tk-stack" style={{ gap: "var(--space-3)" }}>
+              <h2 className="tk-h3">Choose your route</h2>
+              <p className="tk-body" style={{ color: "var(--text-muted)", marginTop: -6 }}>Same great guide, three ways to spend your half day. Group pricing is the same on every route.</p>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(" + t0.packages.length + ",1fr)", gap: "var(--space-3)" }} role="radiogroup" aria-label="Tour package">
+                {t0.packages.map(p => { const on = p.id === pkgId; const from = p.tiers[p.tiers.length - 1].price;
+                  return (
+                    <button key={p.id} type="button" role="radio" aria-checked={on} onClick={() => setPkgId(p.id)} className="tk-card"
+                      style={{ textAlign: "start", cursor: "pointer", padding: 0, borderColor: on ? "var(--brand-ink)" : "var(--border-subtle)", borderWidth: on ? 2 : 1, borderStyle: "solid", boxShadow: on ? "var(--elev-2)" : "none", background: on ? "var(--brand-wash)" : "var(--bg-surface)" }}>
+                      <div className="tk-card__body" style={{ gap: 6, padding: "var(--space-4)" }}>
+                        <span style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}><strong style={{ fontSize: 15 }}>{p.name}</strong>{on && <Icon name="circle-check-big" size={18} style={{ color: "var(--brand-ink)" }} />}</span>
+                        <span className="tk-overline" style={{ color: "var(--gold-700)" }}>{p.tag}</span>
+                        <span className="tk-caption">{p.blurb}</span>
+                        <span style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2, fontSize: 12, color: "var(--text-muted)", fontWeight: 600 }}><Icon name="map-pin" size={13} />{p.stops.length} stops · {p.duration}</span>
+                      </div>
+                    </button>
+                  ); })}
+              </div>
+            </div>
+          ) : null}
+          <div className="tk-stack" style={{ gap: "var(--space-3)" }}>
+            <h2 className="tk-h3">Group pricing</h2>
+            <p className="tk-body" style={{ color: "var(--text-muted)", marginTop: -6 }}>{"Per person, in " + currency + ". The bigger your group, the less each traveller pays — the price updates automatically at checkout."}</p>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(" + (t.tiers ? t.tiers.length : 1) + ", 1fr)", gap: "var(--space-4)" }}>
+              {(t.tiers || []).map((tier, i) => (
+                <div key={i} className="tk-card" style={{ borderColor: i === (t.tiers.length - 1) ? "var(--brand-ink)" : undefined }}><div className="tk-card__body" style={{ padding: "var(--space-5)", gap: 4, alignItems: "flex-start" }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--text-muted)", fontWeight: 600, fontSize: 13 }}><Icon name="users" size={15} />{window.TK_PRICE.band(t.tiers, i)} {window.TK_PRICE.band(t.tiers, i) === "1" ? "traveller" : "travellers"}</span>
+                  <span style={{ display: "flex", alignItems: "baseline", gap: 4 }}><span className="tk-num" style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 26, letterSpacing: "-0.02em" }}>{money(tier.price, currency)}</span><span className="tk-caption">/person</span></span>
+                  {i === (t.tiers.length - 1) && <span className="tk-badge tk-badge--confirmed">Best value</span>}
+                </div></div>
+              ))}
+            </div>
+          </div>
+          <div className="tk-stack" style={{ gap: "var(--space-3)" }}>
+            <h2 className="tk-h3">Highlights</h2>
+            <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              {(t.stops ? t.stops.filter(s => !/pickup|drop-?off/i.test(s)).slice(0, 4) : t.highlights).map(h => <li key={h} style={{ display: "flex", gap: 10, fontSize: 15 }}><Icon name="check" size={17} style={{ color: "var(--success-fg)", marginTop: 2 }} />{h}</li>)}
+            </ul>
+          </div>
+          <div>
+            <h2 className="tk-h3" style={{ marginBottom: "var(--space-3)" }}>Details</h2>
+            <Accordion defaultOpen={["itin"]} items={[
+              { id: "itin", title: t.stops ? "Route · stop by stop" : ((t.itinerary && t.itinerary[0] && String(t.itinerary[0][0]).startsWith("Day")) ? "Day by day" : "Itinerary"), content: t.stops ? <ol style={{ margin: 0, paddingInlineStart: 18, display: "grid", gap: 6 }}>{t.stops.map(s => <li key={s}>{s}</li>)}</ol> : <ol style={{ margin: 0, paddingInlineStart: 18, display: "grid", gap: 6 }}>{(t.itinerary || []).map(([time, what]) => <li key={time + what}><strong>{time}</strong> — {what}</li>)}</ol> },
+              { id: "inc", title: "What's included", content: <div style={{ display: "grid", gap: 8 }}>{t.included.map(i => <span key={i} style={{ display: "flex", gap: 8 }}><Icon name="check" size={15} style={{ color: "var(--success-fg)" }} />{i}</span>)}{t.excluded.map(i => <span key={i} style={{ display: "flex", gap: 8, color: "var(--text-muted)" }}><Icon name="x" size={15} />{i}</span>)}</div> },
+              { id: "meet", title: "Meeting point & getting there", content: <p>Your koach confirms the pickup point when you book — hotel pickup within Accra for day tours, airport pickup at KIA for multi-day trips.</p> },
+              { id: "pol", title: "Cancellation policy", content: <p>Free cancellation until 7 days before departure. Between 7 and 2 days, half the total is held. Inside 48 hours the booking is non-refundable.</p> },
+            ]} />
+          </div>
+          <ReviewsSection tour={t0} />
+        </div>
+
+        <div style={{ position: "sticky", top: "calc(var(--header-h) + 24px)", display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
+          <div className="tk-card" style={{ boxShadow: "var(--elev-3)" }}><div className="tk-card__body" style={{ gap: "var(--space-4)", padding: "var(--space-5)" }}>
+            <div className="tk-stack" style={{ gap: 2 }}>
+              <Price amount={cvt(t.price, currency)} currency={currency} size="lg" from unit="per person" />
+              {t0.packages ? <span className="tk-caption">{t.packageName} package</span> : null}
+            </div>
+            <DeparturePicker departures={cvtDeps(t.departures, currency)} value={dep} onChange={setDep} currency={currency} legend="Choose a departure" />
+            <Button size="lg" block onClick={() => { window.TK_SEL = { tourId: t0.id, packageId: pkgId, packageName: t.packageName }; go("checkout"); }}>Reserve my spot</Button>
+            <p className="tk-caption" style={{ display: "flex", gap: 6 }}><Icon name="wallet" size={14} />Nothing is charged today. Pay before departure.</p>
+          </div></div>
+          <Alert tone="info" title="Free cancellation">Cancel free until 7 days before departure.</Alert>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
+  const t0 = window.TK_DATA.tours[0];
+  const sel = (window.TK_SEL && window.TK_SEL.tourId === t0.id) ? window.TK_SEL : null;
+  const t = (t0.packages && sel) ? pkgTour(t0, sel.packageId) : t0;
+  const d = t.departures[1];
+  const [pax, setPax] = React.useState(4);
+  const [mode, setMode] = React.useState("later");
+  const unit = window.TK_PRICE.perPerson(t, pax);
+  const total = unit * pax;
+  const nextTier = window.TK_PRICE.nextTier(t, pax);
+  return (
+    <div className="tk-container" style={{ paddingBlock: "var(--space-8) var(--space-12)", maxWidth: 1000, display: "flex", flexDirection: "column", gap: "var(--space-8)" }}>
+      <CheckoutStepper steps={["Departure", "Travellers", "Review", "Payment", "Done"]} current={step} onStepClick={setStep} />
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 360px", gap: "var(--space-10)", alignItems: "start" }}>
+        <div className="tk-stack" style={{ gap: "var(--space-5)" }}>
+          {step === 0 && <>
+            <h1 className="tk-h2">When would you like to go?</h1>
+            <DeparturePicker departures={cvtDeps(t.departures, currency)} value="d2" onChange={() => {}} currency={currency} />
+            <div className="tk-row" style={{ justifyContent: "space-between", maxWidth: 360 }}>
+              <span className="tk-label">Travellers</span><NumberStepper id="pax" value={pax} max={d.spotsLeft} onChange={setPax} />
+            </div>
+          </>}
+          {step === 1 && <>
+            <h1 className="tk-h2">Who is travelling?</h1>
+            <div className="tk-card"><div className="tk-card__body" style={{ gap: "var(--space-4)", padding: "var(--space-5)" }}>
+              <span className="tk-overline">Lead traveller</span>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-4)" }}>
+                <FormField id="w-name" label="Full name" required><Input defaultValue="Ama Mensah" /></FormField>
+                <FormField id="w-email" label="Email address" required><Input defaultValue="ama@example.com" /></FormField>
+                <FormField id="w-phone" label="Phone number" required><Input defaultValue="024 555 0142" /></FormField>
+                <FormField id="w-id" label="ID number" optional><Input placeholder="Ghana Card or passport" /></FormField>
+              </div>
+            </div></div>
+            <div className="tk-card"><div className="tk-card__body" style={{ gap: "var(--space-4)", padding: "var(--space-5)" }}>
+              <span className="tk-overline">Travellers 2–4</span>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-4)" }}>
+                <FormField id="w-t2" label="Traveller 2" required><Input placeholder="Full name" /></FormField>
+                <FormField id="w-t3" label="Traveller 3" required error="Enter a name for traveller 3"><Input /></FormField>
+                <FormField id="w-t4" label="Traveller 4" required><Input placeholder="Full name" /></FormField>
+              </div>
+            </div></div>
+            <FormField id="w-notes" label="Special requests" optional><Textarea rows={3} placeholder="Dietary needs, mobility, celebrations…" /></FormField>
+          </>}
+          {step === 2 && <>
+            <h1 className="tk-h2">Check everything over</h1>
+            <div className="tk-card"><div className="tk-card__body" style={{ padding: "var(--space-5)" }}>
+              <strong className="tk-h4">{t.title}</strong>
+              {t0.packages ? <div className="tk-summary__line"><span>Package</span><span>{t.packageName}</span></div> : null}
+              <div className="tk-summary__line"><span>Departure</span><span>{d.date}, {d.time}</span></div>
+              <div className="tk-summary__line"><span>Travellers</span><span>{pax}</span></div>
+              <div className="tk-summary__line"><span>Lead traveller</span><span>Ama Mensah · ama@example.com</span></div>
+            </div></div>
+            <Checkbox id="w-agree" label="I agree to the booking terms and cancellation policy" />
+          </>}
+          {step === 3 && <>
+            <h1 className="tk-h2">How would you like to pay?</h1>
+            <PaymentForm mode={mode} onModeChange={setMode} payNowEnabled amountLabel={money(total, currency)} />
+          </>}
+          <div className="tk-row" style={{ gap: 12, justifyContent: "space-between", paddingTop: "var(--space-4)", borderTop: "1px solid var(--border-subtle)" }}>
+            <Button variant="secondary" iconStart="arrow-left" onClick={() => setStep(Math.max(0, step - 1))} disabled={step === 0}>Back</Button>
+            <Button size="lg" iconEnd={step === 3 && mode === "now" ? "external-link" : undefined} onClick={() => { if (step === 3) { window.__payMode = mode; go("confirm"); } else setStep(step + 1); }}>{step === 3 ? (mode === "now" ? "Pay " + money(total, currency) + " with Paystack" : "Confirm booking") : "Continue"}</Button>
+          </div>
+        </div>
+        <OrderSummary sticky lines={[{ label: money(unit, currency) + "/person × " + pax + " travellers", amount: cvt(total, currency) }]} total={cvt(total, currency)} currency={currency} payMode={mode}>
+          {t0.packages ? <p className="tk-help" style={{ display: "flex", gap: 6 }}><Icon name="ticket" size={14} />{t.packageName} package</p> : null}
+          {nextTier && <p className="tk-help" style={{ display: "flex", gap: 6, color: "var(--success-fg)" }}><Icon name="users" size={14} />Add {nextTier.minPax - pax} more and everyone pays {money(nextTier.price, currency)}/person.</p>}
+          <PromoCode state="idle" />
+        </OrderSummary>
+      </div>
+    </div>
+  );
+}
+
+function BookingsWeb({ go, currency = "USD" }) {
+  const [tab, setTab] = React.useState("all");
+  const [reviewFor, setReviewFor] = React.useState(null);
+  const all = window.TK_DATA.bookings;
+  const tourFor = (b) => (window.TK_DATA.tours.find(t => t.title === b.tour) || { id: b.ref, title: b.tour });
+  return (
+    <AccountShell current="bookings" go={go} title="Your bookings">
+      <Tabs value={tab} onChange={setTab} tabs={[{ id: "all", label: "All", count: 3 }, { id: "pending", label: "Pending", count: 1 }, { id: "confirmed", label: "Confirmed", count: 1 }, { id: "cancelled", label: "Cancelled", count: 1 }]} />
+      <Alert tone="warning" title="One booking is waiting for payment" action={<Button variant="link" size="sm" onClick={() => window.tkToast("Pay by card or mobile money — instructions are in your confirmation email")}>See how to pay</Button>}>TK-4821 is held until 7 Sep.</Alert>
+      <div style={{ display: "grid", gap: 12 }}>
+        {(tab === "all" ? all : all.filter(b => b.status === tab)).map(b => (
+          <div key={b.ref} style={{ display: "grid", gap: 8 }}>
+            <BookingRow reference={b.ref} title={b.tour} date={b.date} travellers={b.travellers} total={cvt(b.total, currency)} currency={currency} status={b.status} onClick={() => go("bookings")} />
+            {b.status === "confirmed" && <div style={{ display: "flex", justifyContent: "flex-end" }}><Button variant="secondary" size="sm" iconStart="pencil" onClick={() => setReviewFor(tourFor(b))}>Leave a review</Button></div>}
+          </div>
+        ))}
+      </div>
+      {reviewFor && <ReviewModal tour={reviewFor} onClose={() => setReviewFor(null)} />}
+    </AccountShell>
+  );
+}
+
+function ConfirmWeb({ go, currency = "USD" }) {
+  const { ConfirmationPanel } = NS;
+  const paid = window.__payMode === "now";
+  const totalStr = money(300, currency);
+  return (
+    <div className="tk-container" style={{ paddingBlock: "var(--space-12)", maxWidth: 720 }}>
+      <ConfirmationPanel reference="TK-4821" status={paid ? "confirmed" : "pending"} title={paid ? "You're all set" : "Your spot is reserved"}
+        subtitle={"We emailed " + (paid ? "your receipt" : "the details") + " to ama@example.com. Accra City Tour, Sat 22 Aug 2026."}
+        actions={<><Button size="lg" onClick={() => go("bookings")}>View in my bookings</Button><Button variant="secondary" iconStart="download" onClick={() => window.tkToast("Preparing your booking PDF…")}>Download details</Button></>}>
+        <div className="tk-card" style={{ width: "100%", textAlign: "start" }}><div className="tk-card__body" style={{ padding: "var(--space-5)" }}>
+          <div className="tk-summary__line"><span>Tour</span><span>Accra City Tour</span></div>
+          <div className="tk-summary__line"><span>Departure</span><span>Sat 22 Aug 2026, 09:00</span></div>
+          <div className="tk-summary__line"><span>Travellers</span><span>4</span></div>
+          <div className="tk-summary__total"><span>{paid ? "Total paid" : "Total due"}</span><span className="tk-num" style={{ fontWeight: 800 }}>{totalStr}</span></div>
+        </div></div>
+        {paid
+          ? <Alert tone="success" title="Payment received">We charged your card <strong>{totalStr}</strong> via Paystack. Your spots are confirmed — no further action needed.</Alert>
+          : <Alert tone="warning" title="How to pay">Your koach will email payment options (bank transfer, mobile money or card), quoting <strong>TK-4821</strong>. Pay at least 5 days before departure to lock in your spots.</Alert>}
+      </ConfirmationPanel>
+    </div>
+  );
+}
+Object.assign(window, { Shell, BrowseWeb, TourWeb, CheckoutWeb, BookingsWeb, ConfirmWeb, FilterPanel });

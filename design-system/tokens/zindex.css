@@ -1,0 +1,4 @@
+:root{
+  --z-base:0;/* @kind other */--z-raised:10;/* @kind other */--z-sticky:100;/* @kind other */--z-header:200;/* @kind other */--z-drawer:300;/* @kind other */
+  --z-scrim:400;/* @kind other */--z-modal:500;/* @kind other */--z-popover:600;/* @kind other */--z-toast:700;/* @kind other */--z-tooltip:800;/* @kind other */
+}

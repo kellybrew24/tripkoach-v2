@@ -1,0 +1,20 @@
+/* Base palette. Warm neutrals + Kente gold, drawn from the TripKoach badge (#303030 / #D08028). */
+:root{
+  --n-0:#FFFFFF;--n-25:#FDFBF8;--n-50:#F8F5F0;--n-100:#F1EDE6;--n-200:#E4DFD6;--n-300:#D2CBBF;
+  --n-400:#A8A096;--n-450:#8A837A;--n-500:#6F675E;--n-600:#57504A;--n-700:#3E3934;--n-800:#2B2724;--n-900:#1E1C1A;--n-950:#121110;
+
+  --gold-50:#FDF7EE;--gold-100:#FAEBD4;--gold-200:#F2D5A5;--gold-300:#E8B871;--gold-400:#DC9A43;
+  --gold-500:#D08028;--gold-600:#AE6413;--gold-700:#8A4E0F;--gold-800:#5F360B;--gold-900:#3B2207;
+
+  --green-50:#E9F5F0;--green-100:#CDE9DF;--green-200:#A6D6C5;--green-300:#6FBFA3;--green-500:#1B8A67;
+  --green-600:#0E6E52;--green-700:#0A543F;--green-900:#05291F;
+
+  --red-50:#FDECEA;--red-100:#FAD6D2;--red-200:#F3B3AC;--red-500:#D2372C;--red-600:#B3261E;
+  --red-700:#8C1B15;--red-900:#4A0D0A;
+
+  --blue-50:#EAF2F8;--blue-100:#D0E3F0;--blue-200:#A9CCE4;--blue-500:#2A7FB8;--blue-600:#1A5F8A;
+  --blue-700:#134766;--blue-900:#0A2635;
+
+  --alpha-ink-08:rgba(30,28,26,.08);--alpha-ink-16:rgba(30,28,26,.16);--alpha-ink-60:rgba(30,28,26,.60);
+  --alpha-white-16:rgba(255,255,255,.16);
+}

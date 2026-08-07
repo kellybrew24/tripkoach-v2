@@ -1,0 +1,11 @@
+/* Motion is subtle and cheap: opacity + small transforms only. Never animate layout or shadow. */
+:root{
+  --dur-instant:0ms;/* @kind other */--dur-fast:120ms;/* @kind other */--dur-base:180ms;/* @kind other */--dur-slow:260ms;/* @kind other */--dur-slower:400ms;/* @kind other */
+  --ease-standard:cubic-bezier(.2,.6,.2,1);/* @kind other */
+  --ease-enter:cubic-bezier(0,.6,.3,1);/* @kind other */
+  --ease-exit:cubic-bezier(.4,0,1,.6);/* @kind other */
+  --transition-control:background-color var(--dur-fast) var(--ease-standard),border-color var(--dur-fast) var(--ease-standard),color var(--dur-fast) var(--ease-standard);/* @kind other */
+}
+@media (prefers-reduced-motion:reduce){
+  :root{--dur-fast:0ms;/* @kind other */--dur-base:0ms;/* @kind other */--dur-slow:0ms;/* @kind other */--dur-slower:0ms;/* @kind other */}
+}

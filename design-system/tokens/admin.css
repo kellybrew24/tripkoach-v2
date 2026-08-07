@@ -1,0 +1,35 @@
+/* Admin console tokens — data-dense back office. Shares the palette; adds
+   table neutrals and a compact type scale. */
+:root{
+  /* Table + data surfaces */
+  --table-header-bg:var(--n-50);--table-header-fg:var(--n-600);
+  --table-row-bg:var(--n-0);--table-row-alt-bg:var(--n-25);
+  --table-row-hover:var(--gold-50);--table-row-selected:var(--gold-100);
+  --table-border:var(--n-200);--table-border-strong:var(--n-300);
+
+  /* App shell */
+  --shell-nav-bg:var(--n-950);--shell-nav-fg:var(--n-300);--shell-nav-fg-active:var(--n-0);
+  --shell-nav-active-bg:rgba(255,255,255,.08);--shell-nav-accent:var(--gold-400);
+  --shell-nav-w:248px;--shell-nav-w-collapsed:68px;--shell-topbar-h:60px;
+  --shell-topbar-bg:var(--n-0);--shell-content-bg:var(--n-25);--shell-content-max:1440px;
+
+  /* Dense type (admin tables + compact UI) */
+  --text-dense-size:13px;--text-dense-lh:1.35;
+  --text-dense-sm-size:12px;--text-dense-sm-lh:1.3;
+  --text-kpi-size:34px;--text-kpi-lh:1.05;/* @kind font */
+
+  /* Chart palette — sequenced, distinguishable without relying on hue alone */
+  --chart-1:var(--gold-500);--chart-2:var(--blue-600);--chart-3:var(--green-600);
+  --chart-4:var(--n-500);--chart-5:var(--gold-700);--chart-6:var(--red-500);
+  --chart-grid:var(--n-200);--chart-axis:var(--n-400);
+}
+[data-theme="dark"]{
+  --table-header-bg:#1B1917;--table-header-fg:#B0A99F;
+  --table-row-bg:#211E1C;--table-row-alt-bg:#1B1917;
+  --table-row-hover:#2A2012;--table-row-selected:#33260F;
+  --table-border:#332F2B;--table-border-strong:#443F3A;
+  --shell-nav-bg:#0C0B0A;--shell-nav-fg:#B0A99F;--shell-nav-fg-active:#F7F4EF;
+  --shell-nav-active-bg:rgba(255,255,255,.06);
+  --shell-topbar-bg:#211E1C;--shell-content-bg:#141312;
+  --chart-grid:#332F2B;--chart-axis:#6E665D;
+}

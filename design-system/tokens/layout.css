@@ -1,0 +1,10 @@
+/* Mobile-first breakpoints. Design at 390px, verify at 768 / 1280. */
+:root{
+  --bp-sm:480px;--bp-md:768px;--bp-lg:1024px;--bp-xl:1280px;--bp-2xl:1440px;
+  --container-sm:100%;--container-md:720px;--container-lg:960px;--container-xl:1200px;
+  --grid-cols-mobile:4;/* @kind other */--grid-cols-tablet:8;/* @kind other */--grid-cols-desktop:12;/* @kind other */
+  --page-pad:var(--space-4);
+  --header-h:56px;--bottomnav-h:64px;--sticky-cta-h:76px;
+}
+@media (min-width:768px){:root{--page-pad:var(--space-6);--header-h:72px;}}
+@media (min-width:1280px){:root{--page-pad:var(--space-10);}}

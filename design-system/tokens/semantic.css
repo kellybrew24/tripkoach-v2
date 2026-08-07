@@ -1,0 +1,69 @@
+/* Semantic aliases. Components reference ONLY these, never the raw palette. */
+:root{
+  --bg-page:var(--n-25);--bg-subtle:var(--n-50);--bg-sunken:var(--n-100);--bg-inverse:var(--n-900);
+  --surface-card:var(--n-0);--surface-raised:var(--n-0);--surface-overlay:var(--n-0);--surface-scrim:var(--alpha-ink-60);
+
+  --text-strong:var(--n-900);--text-body:var(--n-800);--text-muted:var(--n-500);--text-subtle:var(--n-400);
+  --text-inverse:var(--n-0);--text-on-accent:var(--n-0);--text-link:var(--gold-700);--text-link-hover:var(--gold-800);
+
+  --border-subtle:var(--n-200);--border-default:var(--n-300);--border-input:var(--n-450);--border-strong:var(--n-600);--border-focus:var(--n-900);
+
+  /* Brand */
+  --brand-ink:var(--n-900);--brand-gold:var(--gold-500);--brand-gold-deep:var(--gold-700);
+  --brand-wash:var(--gold-50);
+
+  /* Actions */
+  --action-primary-bg:var(--n-900);--action-primary-bg-hover:var(--n-800);--action-primary-bg-active:var(--n-950);
+  --action-primary-fg:var(--n-0);
+  --action-secondary-bg:var(--n-0);--action-secondary-bg-hover:var(--n-50);--action-secondary-fg:var(--n-900);
+  --action-secondary-border:var(--n-300);
+  --action-ghost-bg-hover:var(--n-100);--action-ghost-fg:var(--n-800);
+  --action-accent-bg:var(--gold-600);--action-accent-bg-hover:var(--gold-700);--action-accent-fg:var(--n-0);
+  --action-danger-bg:var(--red-600);--action-danger-bg-hover:var(--red-700);--action-danger-fg:var(--n-0);
+  --action-disabled-bg:var(--n-100);--action-disabled-fg:var(--n-400);
+
+  /* Feedback */
+  --success-bg:var(--green-50);--success-border:var(--green-200);--success-fg:var(--green-600);--success-solid:var(--green-600);
+  --warning-bg:var(--gold-50);--warning-border:var(--gold-200);--warning-fg:var(--gold-700);--warning-solid:var(--gold-600);
+  --danger-bg:var(--red-50);--danger-border:var(--red-200);--danger-fg:var(--red-600);--danger-solid:var(--red-600);
+  --info-bg:var(--blue-50);--info-border:var(--blue-200);--info-fg:var(--blue-600);--info-solid:var(--blue-600);
+
+  /* Booking + payment status. Gold = waiting on the customer, green = settled,
+     neutral = closed without fault, red = something went wrong. */
+  --status-pending-bg:var(--gold-50);--status-pending-fg:var(--gold-700);--status-pending-border:var(--gold-200);--status-pending-dot:var(--gold-500);
+  --status-confirmed-bg:var(--green-50);--status-confirmed-fg:var(--green-600);--status-confirmed-border:var(--green-200);--status-confirmed-dot:var(--green-500);
+  --status-cancelled-bg:var(--n-100);--status-cancelled-fg:var(--n-600);--status-cancelled-border:var(--n-300);--status-cancelled-dot:var(--n-500);
+  --status-paid-bg:var(--green-100);--status-paid-fg:var(--green-700);--status-paid-border:var(--green-300);--status-paid-dot:var(--green-600);
+  --status-failed-bg:var(--red-50);--status-failed-fg:var(--red-600);--status-failed-border:var(--red-200);--status-failed-dot:var(--red-500);
+  --status-refunded-bg:var(--blue-50);--status-refunded-fg:var(--blue-600);--status-refunded-border:var(--blue-200);--status-refunded-dot:var(--blue-500);
+
+  /* Availability */
+  --avail-open-fg:var(--green-600);--avail-low-fg:var(--gold-700);--avail-sold-fg:var(--n-500);
+
+  --focus-ring:var(--n-900);--focus-ring-inverse:var(--gold-300);--focus-ring-width:3px;--focus-ring-offset:2px;
+}
+[data-theme="dark"]{
+  --bg-page:#141312;--bg-subtle:#1B1917;--bg-sunken:#100F0E;--bg-inverse:var(--n-50);
+  --surface-card:#211E1C;--surface-raised:#2A2724;--surface-overlay:#211E1C;--surface-scrim:rgba(0,0,0,.72);
+  --text-strong:#F7F4EF;--text-body:#E7E2DA;--text-muted:#B0A99F;--text-subtle:#8B847B;
+  --text-inverse:var(--n-900);--text-link:var(--gold-300);--text-link-hover:var(--gold-200);
+  --border-subtle:#332F2B;--border-default:#443F3A;--border-strong:#6E665D;--border-focus:var(--gold-300);
+  --brand-wash:#2A2018;
+  --action-primary-bg:var(--gold-300);--action-primary-bg-hover:var(--gold-200);--action-primary-bg-active:var(--gold-400);
+  --action-primary-fg:var(--n-950);
+  --action-secondary-bg:transparent;--action-secondary-bg-hover:#2A2724;--action-secondary-fg:#F7F4EF;--action-secondary-border:#4A443E;
+  --action-ghost-bg-hover:#2A2724;--action-ghost-fg:#E7E2DA;
+  --action-accent-bg:var(--gold-400);--action-accent-fg:var(--n-950);--action-accent-bg-hover:var(--gold-300);
+  --action-disabled-bg:#2A2724;--action-disabled-fg:#6E665D;
+  --success-bg:#0E241C;--success-border:#1B4A38;--success-fg:#6FBFA3;--success-solid:var(--green-500);
+  --warning-bg:#2A2012;--warning-border:#5A4318;--warning-fg:var(--gold-300);--warning-solid:var(--gold-400);
+  --danger-bg:#2C110E;--danger-border:#5C231D;--danger-fg:#F3B3AC;--danger-solid:var(--red-500);
+  --info-bg:#0D1F2B;--info-border:#1C4257;--info-fg:#A9CCE4;--info-solid:var(--blue-500);
+  --status-pending-bg:#2A2012;--status-pending-fg:var(--gold-300);--status-pending-border:#5A4318;
+  --status-confirmed-bg:#0E241C;--status-confirmed-fg:#6FBFA3;--status-confirmed-border:#1B4A38;
+  --status-cancelled-bg:#26221F;--status-cancelled-fg:#B0A99F;--status-cancelled-border:#443F3A;
+  --status-paid-bg:#0E241C;--status-paid-fg:#A6D6C5;--status-paid-border:#1B4A38;
+  --status-failed-bg:#2C110E;--status-failed-fg:#F3B3AC;--status-failed-border:#5C231D;
+  --status-refunded-bg:#0D1F2B;--status-refunded-fg:#A9CCE4;--status-refunded-border:#1C4257;
+  --focus-ring:var(--gold-300);--focus-ring-inverse:var(--n-900);
+}

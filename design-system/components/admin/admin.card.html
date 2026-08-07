@@ -1,0 +1,49 @@
+<!-- @dsCard group="Components" viewport="760x520" name="Admin data & shell" subtitle="Data table, filter bar, KPI, chart, drawer, role matrix, audit timeline" -->
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Admin components</title>
+<link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+<style>body{padding:20px;background:var(--shell-content-bg)}.lbl{font-size:11px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;color:var(--text-subtle);margin:14px 0 8px}</style>
+</head><body><div id="root"></div>
+<script type="text/babel">
+const NS = window.TripKoachDesignSystem_c9e4af;
+const { StatCard, MiniChart, DataTable, FilterBar, StatusBadge, Price, IconButton, RoleMatrix, AuditTimeline, Button } = NS;
+function Card(){
+  const [sel,setSel]=React.useState(["TK-4821"]);
+  const [sort,setSort]=React.useState({key:"ref",dir:"asc"});
+  const rows=[
+    {ref:"TK-4821",customer:"Ama Mensah",total:300,status:"pending"},
+    {ref:"TK-4390",customer:"Kojo Asante",total:880,status:"confirmed"},
+    {ref:"TK-4102",customer:"Ama Mensah",total:1080,status:"cancelled"}];
+  return <div>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12}}>
+      <StatCard label="Bookings this week" value="38" icon="ticket" delta="+12%" deltaDir="up" hint="vs last week"/>
+      <StatCard label="Expected revenue" value="$24,180" icon="wallet" delta="+8%" deltaDir="up"/>
+      <div className="tk-chartcard"><MiniChart type="line" height={92} ariaLabel="Bookings rising" data={[{label:"M",value:4},{label:"T",value:6},{label:"W",value:5},{label:"T",value:8},{label:"F",value:7},{label:"S",value:9}]}/></div>
+    </div>
+    <div className="lbl">Data table · filter bar · bulk select</div>
+    <div className="tk-tablewrap">
+      <FilterBar facets={[{id:"s",label:"Status",active:true,onClick:()=>{}},{id:"t",label:"Tour",onClick:()=>{}}]} applied={[{id:"p",label:"Status: Pending",onRemove:()=>{}}]} onClear={()=>{}}/>
+      {sel.length>0 && <div className="tk-bulkbar"><span>{sel.length} selected</span><Button size="sm" variant="secondary" iconStart="download">Export</Button></div>}
+      <DataTable density="compact" selectable selected={sel} onSelectedChange={setSel} sort={sort} onSortChange={setSort}
+        columns={[{key:"ref",header:"Reference",strong:true,sortable:true},{key:"customer",header:"Customer",sortable:true},
+          {key:"total",header:"Amount",align:"end",sortable:true,render:r=><Price amount={r.total} currency="USD" size="sm"/>},
+          {key:"status",header:"Status",render:r=><StatusBadge status={r.status} size="sm"/>}]}
+        rows={rows} getRowId={r=>r.ref} rowActions={r=><IconButton icon="ellipsis" label="Actions" variant="ghost" size="sm"/>}/>
+    </div>
+    <div style={{display:"grid",gridTemplateColumns:"1.3fr 1fr",gap:16,marginTop:14}}>
+      <div><div className="lbl">Role matrix</div>
+        <RoleMatrix roles={[{id:"admin",label:"Admin",locked:true},{id:"op",label:"Operator"},{id:"view",label:"Read-only"}]}
+          permissions={[{id:"a",label:"Edit tours"},{id:"b",label:"Cancel bookings",hint:"Destructive"},{id:"c",label:"Issue refunds",hint:"Destructive"}]}
+          value={{a:{admin:true,op:true,view:false},b:{admin:true,op:true,view:false},c:{admin:true,op:false,view:false}}} onToggle={()=>{}}/></div>
+      <div><div className="lbl">Audit timeline</div>
+        <AuditTimeline events={[{type:"created",text:"Booking created",actor:"System",time:"22 Aug, 09:14"},
+          {type:"confirmed",text:"Marked <strong>Confirmed</strong>",actor:"Kofi A.",time:"10:02",tone:"success"},
+          {type:"email",text:"Confirmation resent",actor:"Ama O.",time:"10:03"}]}/></div>
+    </div>
+  </div>;
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<Card/>);
+</script></body></html>

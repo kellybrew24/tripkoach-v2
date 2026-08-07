@@ -1,0 +1,19 @@
+{
+  "name": "tripkoach-v2",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "TripKoach v2 — customer web + staff admin apps, built from the tripv2 design system.",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "build:web": "node scripts/build.mjs web",
+    "build:admin": "node scripts/build.mjs admin",
+    "smoke": "node scripts/smoke.mjs",
+    "verify": "npm run build && npm run smoke",
+    "clean": "rm -rf apps/web/dist apps/admin/dist"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.2",
+    "jsdom": "^30.0.1"
+  }
+}
