@@ -657,9 +657,14 @@ function TourWeb({ go, currency, slug }) {
 const LIVE_BOOK = () => !!(window.TK_CONFIG && window.TK_CONFIG.USE_LIVE_API && window.TK_BOOKING);
 
 function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
-  const t0 = window.TK_DATA.tours[0];
-  const sel = (window.TK_SEL && window.TK_SEL.tourId === t0.id) ? window.TK_SEL : null;
-  const t = (t0.packages && sel) ? pkgTour(t0, sel.packageId) : t0;
+  // Resolve the SELECTED tour (TRI-930). The prototype hardcoded tours[0], so in
+  // live mode every tour showed the LEAD tour's price at checkout no matter which
+  // one the customer chose. TK_SEL.tourId is the tour slug (set on the detail
+  // page's "Reserve my spot"); match it against the hydrated catalogue so pricing
+  // reflects the real selection. Flag off / no selection ⇒ tours[0] (byte-identical).
+  const sel = window.TK_SEL || null;
+  const t0 = (sel && window.TK_DATA.tours.find(x => x.id === sel.tourId || x.slug === sel.tourId)) || window.TK_DATA.tours[0];
+  const t = (t0.packages && sel && sel.packageId) ? pkgTour(t0, sel.packageId) : t0;
   // Traveller count (TRI-922). The prototype defaulted to 4 AND only exposed the
   // count stepper on step 0 (Departure) — which the user never lands on, since
   // checkout opens on step 1 — so it "assumed 4 travellers" with no way to change
@@ -704,9 +709,16 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
   React.useEffect(() => {
     if (live && pax > paxMax) setPax(paxMax);
   }, [live, paxMax, pax]);
-  const unit = window.TK_PRICE.perPerson(t, pax);
+  // Live pricing mirrors the backend exactly (TRI-930): booking.ts charges the
+  // selected departure's price × pax (unitPriceMinor returns the departure override
+  // ahead of any group tier), so surface that same number here — otherwise the
+  // checkout would display the tier step-function price while Paystack charged the
+  // flat departure price. Falls back to the tier function when a departure carries
+  // no explicit price. Flag off ⇒ prototype tier step-function (byte-identical).
+  const depPriced = live && d && d.price != null;
+  const unit = depPriced ? d.price : window.TK_PRICE.perPerson(t, pax);
   const total = unit * pax;
-  const nextTier = window.TK_PRICE.nextTier(t, pax);
+  const nextTier = depPriced ? null : window.TK_PRICE.nextTier(t, pax);
 
   const readVal = (id) => { const el = document.getElementById(id); return el && typeof el.value === "string" ? el.value.trim() : ""; };
   const buildTravellers = (lead) => {
