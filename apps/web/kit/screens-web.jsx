@@ -370,6 +370,19 @@ function MobileMenu({ onClose, go }) {
   );
 }
 
+// Account dropdown item (TRI-927 port of the TRI-920 in-nav Settings / Sign out
+// menu). `danger` tone colours the Sign out row; hover uses a subtle surface tint.
+const ACCT_ITEM = { display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "9px 12px", background: "none", border: 0, borderRadius: "var(--radius-sm, 8px)", cursor: "pointer", font: "inherit", fontSize: 14, fontWeight: 600, color: "var(--text-default)", textAlign: "start" };
+function AcctItem({ icon, label, tone, onClick }) {
+  const [hov, setHov] = React.useState(false);
+  return (
+    <button role="menuitem" onClick={onClick} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+      style={{ ...ACCT_ITEM, color: tone === "danger" ? "var(--danger-fg, #b42318)" : ACCT_ITEM.color, background: hov ? "var(--bg-subtle, rgba(0,0,0,.05))" : "none" }}>
+      <Icon name={icon} size={16} />{label}
+    </button>
+  );
+}
+
 function Shell({ children, currency, setCurrency, go }) {
   const [menu, setMenu] = React.useState(false);
   // Reactive session state (TRI-922). The prototype hardcoded `signedIn` on the
@@ -391,14 +404,25 @@ function Shell({ children, currency, setCurrency, go }) {
     window.TK_AUTH.me().then(() => { if (alive) forceRender((n) => n + 1); }, () => {});
     return () => { alive = false; };
   }, [live, authed]);
+  // Account dropdown (TRI-927): `acct` holds the viewport anchor (or null when
+  // closed). Only opened for a resolved authed user; guests still route to login.
+  const [acct, setAcct] = React.useState(null);
+  React.useEffect(() => {
+    if (!acct) return undefined;
+    const onKey = (e) => { if (e.key === "Escape") setAcct(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [acct]);
   const onNav = (e) => {
     const accountBtn = e.target.closest('button[aria-label="Your account"]');
     if (accountBtn) {
       e.preventDefault();
       if (!live) { go && go("profile"); return; } // byte-identical flag-off
-      // Authed → profile; guest (or brief unknown window) → login. The TRI-920
-      // Settings/Sign out dropdown is intentionally out of this port's scope.
-      go && go(authed === true ? "profile" : "login");
+      // Authed → open the Settings / Sign out dropdown anchored under the avatar
+      // (TRI-927). Guest / brief unknown window → login, no dropdown.
+      if (authed !== true) { setAcct(null); go && go("login"); return; }
+      const r = accountBtn.getBoundingClientRect();
+      setAcct((cur) => cur ? null : { top: Math.round(r.bottom + 8), right: Math.max(12, Math.round(window.innerWidth - r.right)) });
       return;
     }
     // Guest auth CTAs the DS <Header> renders when signedIn is false (TRI-922):
@@ -427,6 +451,15 @@ function Shell({ children, currency, setCurrency, go }) {
       <main>{children}</main>
       <Footer columns={FOOT} logoSrc="../../assets/logo-badge.png" />
       {menu && <MobileMenu go={go} onClose={() => setMenu(false)} />}
+      {acct && <>
+        <div onClick={() => setAcct(null)} style={{ position: "fixed", inset: 0, zIndex: 60 }} />
+        <div role="menu" aria-label="Account" style={{ position: "fixed", top: acct.top, right: acct.right, zIndex: 61, minWidth: 190, padding: 6, background: "var(--bg-surface, #fff)", border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-md, 12px)", boxShadow: "var(--shadow-lg, 0 12px 32px rgba(16,24,40,.16))", display: "flex", flexDirection: "column", gap: 2 }}>
+          <AcctItem icon="user" label="Profile" onClick={() => { setAcct(null); go && go("profile"); }} />
+          <AcctItem icon="settings" label="Settings" onClick={() => { setAcct(null); go && go("account-settings"); }} />
+          <div style={{ height: 1, background: "var(--border-subtle)", margin: "4px 6px" }} />
+          <AcctItem icon="log-out" label="Sign out" tone="danger" onClick={async () => { setAcct(null); try { if (window.TK_AUTH) await window.TK_AUTH.logout(); } catch (_) {} go && go("login"); }} />
+        </div>
+      </>}
     </div>
   );
 }
