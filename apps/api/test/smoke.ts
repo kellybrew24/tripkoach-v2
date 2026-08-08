@@ -29,6 +29,8 @@ const cfg = {
     ...base.paystack, secretKey: 'sk_test_stub', publicKey: 'pk_test_stub',
     webhookSecret: WEBHOOK_SECRET, chargeRateOverride: undefined,
   },
+  // A From (but no API key) mirrors an env with the transport not-yet-wired: emails render + log 'skipped'.
+  email: { ...base.email, from: 'TripKoach <bookings@send.tripkoach.com>', apiKey: undefined, dryRun: false },
 };
 const db = await createDb(cfg);
 const applied = await migrate(db);
@@ -474,6 +476,70 @@ console.log('\n[admin payments view + refund FLAG]');
   ok('viewer refund → 403 (missing payments.refund)', (await call('POST', '/api/admin/payments/PAY-SMOKE1/refund', { cookie: vcookie, payload: {} })).status === 403);
 }
 
+// TRI-892 P2 · Reviews write: admin invite issuance (A5) → consumer tokenized redeem→submit (C15).
+console.log('\n[reviews: invite issuance → redeem → submit (TRI-892)]');
+{
+  // Build a paid, confirmed booking on a fresh departure with a lead traveller who carries an email.
+  const dep = (await db.query(`SELECT id, tour_id FROM departure WHERE seats_total - seats_reserved >= 2 LIMIT 1`)).rows[0];
+  const cust = (await db.query(`INSERT INTO customer (name, email) VALUES ('Reviewer One','rev1@example.com') RETURNING id`)).rows[0];
+  const bk = (await db.query(
+    `INSERT INTO booking (ref, customer_id, tour_id, departure_id, party_size, unit_price_minor, total_minor, currency, status, payment_state)
+     VALUES ('TK-REVIEW1', $1, $2, $3, 1, 10000, 10000, 'USD', 'confirmed', 'paid') RETURNING id`,
+    [cust.id, dep.tour_id, dep.id]).then((r) => r.rows[0]));
+  await db.query(
+    `INSERT INTO booking_traveller (booking_id, is_lead, name, email) VALUES ($1, true, 'Kofi Reviewer', 'kofi.review@example.com')`,
+    [bk.id]);
+  // A cancelled booking on the same departure must NOT be invited.
+  await db.query(
+    `INSERT INTO booking (ref, customer_id, tour_id, departure_id, party_size, unit_price_minor, total_minor, currency, status, payment_state)
+     VALUES ('TK-REVIEWX', $1, $2, $3, 1, 10000, 10000, 'USD', 'cancelled', 'unpaid')`,
+    [cust.id, dep.tour_id, dep.id]);
+
+  // Admin issues invites (email transport disabled in smoke → 'skipped', invite still created).
+  const issue = await call('POST', `/api/admin/departures/${dep.id}/request-reviews`, { cookie: adminCookie });
+  ok('request-reviews → 200', issue.status === 200, JSON.stringify(issue.body));
+  ok('exactly 1 invite issued (cancelled booking excluded)', issue.body.issued?.length === 1, JSON.stringify(issue.body));
+  ok('invite email logged skipped (transport off)', issue.body.issued?.[0]?.emailStatus === 'skipped', JSON.stringify(issue.body.issued));
+  ok('departure ended → completed', issue.body.departureStatus === 'completed', JSON.stringify(issue.body.departureStatus));
+  ok('unauthenticated request-reviews → 401', (await call('POST', `/api/admin/departures/${dep.id}/request-reviews`)).status === 401);
+
+  // Idempotent: re-running issues nothing new, reports the booking as already invited.
+  const again = await call('POST', `/api/admin/departures/${dep.id}/request-reviews`, { cookie: adminCookie });
+  ok('re-request issues 0, marks already_invited', again.body.issued?.length === 0 && again.body.skipped?.some((s: any) => s.reason === 'already_invited'), JSON.stringify(again.body));
+  const inviteCount = Number((await db.query(`SELECT COUNT(*)::int n FROM review_invite WHERE booking_id=$1`, [bk.id])).rows[0].n);
+  ok('only one invite row exists for the booking', inviteCount === 1, `got ${inviteCount}`);
+
+  const token = (await db.query(`SELECT token FROM review_invite WHERE booking_id=$1`, [bk.id])).rows[0].token;
+
+  // Redeem context: valid unredeemed token → tour + traveller prefill.
+  const ctx = await get(`/api/v1/reviews/redeem/${token}`);
+  ok('GET redeem context → 200 with tour + prefill', ctx.status === 200 && !!ctx.body.tour?.slug && ctx.body.prefill?.name === 'Kofi Reviewer', JSON.stringify(ctx.body));
+  ok('GET redeem unknown token → 404', (await get('/api/v1/reviews/redeem/nope-not-a-token')).status === 404);
+
+  // Submit: bad ratings rejected 422; a valid submit creates a verified pending review + burns the token.
+  ok('submit rating=6 → 422', (await post(`/api/v1/reviews/redeem/${token}`, { rating: 6, text: 'x' })).status === 422);
+  ok('submit rating=0 → 422', (await post(`/api/v1/reviews/redeem/${token}`, { rating: 0, text: 'x' })).status === 422);
+  ok('submit missing rating → 422', (await post(`/api/v1/reviews/redeem/${token}`, { text: 'no rating' })).status === 422);
+
+  const submit = await post(`/api/v1/reviews/redeem/${token}`, { rating: 5, title: 'A trip to remember (TRI-892)', text: 'Best day in Ghana.' });
+  ok('submit → 200 pending verified review', submit.status === 200 && submit.body.status === 'pending' && submit.body.verified === true, JSON.stringify(submit.body));
+  const rev = (await db.query(`SELECT r.rating, r.status, r.verified, r.author_name, r.booking_id, r.title FROM review r WHERE r.booking_id=$1`, [bk.id])).rows[0];
+  ok('review row: pending, verified, rating 5, author + booking linked', rev && rev.status === 'pending' && rev.verified === true && Number(rev.rating) === 5 && rev.author_name === 'Kofi Reviewer' && rev.booking_id === bk.id, JSON.stringify(rev));
+
+  // Double-redeem is impossible: token burned → 410 on both submit and context.
+  ok('second submit on burned token → 410', (await post(`/api/v1/reviews/redeem/${token}`, { rating: 4, text: 'again' })).status === 410);
+  ok('GET redeem on burned token → 410', (await get(`/api/v1/reviews/redeem/${token}`)).status === 410);
+
+  // Pending review is invisible to the public read endpoint until moderation approves it.
+  const tourSlug = ctx.body.tour.slug;
+  const pub = await get(`/api/v1/tours/${tourSlug}/reviews`);
+  ok('pending review NOT in public approved-only read', pub.status === 200 && !pub.body.reviews.some((r: any) => r.title === 'A trip to remember (TRI-892)'), JSON.stringify(pub.body.reviews?.length));
+
+  // audit trail recorded the issuance.
+  const revAudits = Number((await db.query(`SELECT COUNT(*)::int n FROM audit_log WHERE action='departure.request_reviews'`)).rows[0].n);
+  ok('audit_log row written for departure.request_reviews', revAudits >= 1, `got ${revAudits}`);
+}
+
 console.log('\n[admin session revocation]');
 {
   const logout = await call('POST', '/api/admin/auth/logout', { cookie: adminCookie });
@@ -582,8 +648,10 @@ console.log('\n[email: transport + template renderer (TRI-880)]');
   };
   const enabledCfg = { ...cfg, email: { ...cfg.email, apiKey: 're_test_stub', from: 'TripKoach <bookings@send.tripkoach.com>', dryRun: false } };
   const disabledCfg = { ...cfg, email: { ...cfg.email, apiKey: undefined, from: 'TripKoach <bookings@send.tripkoach.com>', dryRun: false } };
+  // Scope to this block's own smoke_test sends so unrelated send-log rows (e.g. TRI-892 review invites)
+  // don't perturb the exact counts asserted below.
   const logCount = async (status: string) =>
-    Number((await db.query(`SELECT COUNT(*) n FROM email_message WHERE status=$1`, [status])).rows[0].n);
+    Number((await db.query(`SELECT COUNT(*) n FROM email_message WHERE status=$1 AND template='smoke_test'`, [status])).rows[0].n);
 
   ok('email: transport enabled only with key+from', isEmailEnabled(enabledCfg.email) && !isEmailEnabled(disabledCfg.email));
 

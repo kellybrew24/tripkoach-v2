@@ -133,6 +133,42 @@ View this booking: {{manageUrl}}
 
 TripKoach Ghana Ltd · Accra · Prices in US dollars (USD)`,
   },
+
+  // TRI-892 P2 · Review-invite email. Sent by the admin "end departure & request reviews" action to each
+  // traveller with a one-time {{reviewUrl}} carrying their invite token. The token gates a verified review
+  // (status=pending until an admin moderates it). Vars: firstName, tourTitle, departureLabel, reviewUrl.
+  review_invite: {
+    subject: 'How was {{tourTitle}}? Leave {{firstName}} a review',
+    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Review your TripKoach experience</title>
+<style>
+body{margin:0;padding:24px 0;background:#F1EDE6;font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#2B2724}
+table{border-collapse:collapse}.w{width:600px;max-width:100%}
+a.btn{display:block;background:#1E1C1A;color:#FFFFFF;text-decoration:none;font-weight:700;font-size:16px;padding:15px 20px;border-radius:10px;text-align:center}
+.mut{color:#6F675E;font-size:13px;line-height:1.5}
+@media (max-width:620px){.w{width:100%!important}.pad{padding-left:20px!important;padding-right:20px!important}}
+</style></head>
+<body>
+<table role="presentation" align="center" class="w" style="background:#FFFFFF;border-radius:14px;overflow:hidden">
+  <tr><td style="background:#1E1C1A;padding:20px 28px;color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Share your experience</td></tr>
+  <tr><td class="pad" style="padding:32px 28px 8px">
+    <h1 style="margin:0 0 8px;font-size:26px;line-height:1.2;letter-spacing:-.02em;color:#1E1C1A">How was it, {{firstName}}?</h1>
+    <p style="margin:0;font-size:16px;line-height:1.55">Thanks for joining the <strong>{{tourTitle}}</strong> on {{departureLabel}}. Your honest review helps other travellers — it only takes a minute.</p>
+  </td></tr>
+  <tr><td class="pad" style="padding:24px 28px 0"><a class="btn" href="{{reviewUrl}}">Write your review</a></td></tr>
+  <tr><td class="pad" style="padding:16px 28px 0"><p class="mut" style="margin:0">This link is personal to you and can be used once. If the button doesn't work, paste this into your browser:<br><span style="word-break:break-all;color:#1E1C1A">{{reviewUrl}}</span></p></td></tr>
+  <tr><td style="background:#1E1C1A;padding:20px 28px;margin-top:24px"><p style="margin:0;color:#A8A096;font-size:12px;line-height:1.6">TripKoach Ghana Ltd · Accra · You're receiving this because you travelled with us.</p></td></tr>
+</table>
+</body></html>`,
+    text: `How was it, {{firstName}}?
+
+Thanks for joining the {{tourTitle}} on {{departureLabel}}. Your honest review helps other travellers — it only takes a minute.
+
+Write your review (personal, one-time link):
+{{reviewUrl}}
+
+TripKoach Ghana Ltd · Accra · You're receiving this because you travelled with us.`,
+  },
 } satisfies Record<string, TemplateDef>;
 
 export type TemplateName = keyof typeof TEMPLATES;
