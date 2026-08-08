@@ -80,19 +80,74 @@ function ToursAdmin({ go, state, setState }) {
 function TourEdit({ go, state }) {
   const A = window.TK_ADMIN;
   const isNew = state.editId === "new";
-  const t = isNew ? { title: "", region: "", category: "", price: "", currency: "USD", blurb: "", image: "" } : (A.tours.find(x => x.id === state.editId) || A.tours[0]);
+  const live = !!(window.TK_CONFIG && window.TK_CONFIG.USE_LIVE_API);
+  const blank = { title: "", region: "", category: "", price: "", currency: "USD", blurb: "", image: "", images: [] };
+  const listTour = isNew ? null : (A.tours.find(x => x.id === state.editId) || A.tours[0] || null);
+  const apiId = isNew ? "new" : ((listTour && listTour._apiId) || state.editId);
+
+  // TRI-928 / data-safety: live edits load the FULL tour detail before rendering.
+  // The tours *list* projection omits blurb/highlights/tiers/images, and
+  // updateTour treats an empty string/array as a write — so editing off the list
+  // and saving would blank those fields. Fixtures (flag off) already hold the
+  // rich record, so seed synchronously there.
+  const [detail, setDetail] = React.useState(isNew ? blank : (live ? null : (listTour || blank)));
+  const [loadErr, setLoadErr] = React.useState(false);
   const [dirty, setDirty] = React.useState(false);
-  const [published, setPublished] = React.useState(!isNew);
+  const [published, setPublished] = React.useState(isNew ? false : (listTour ? !!listTour.published : true));
   const [toast, setToast] = React.useState(null);
   const [regions, setRegions] = React.useState(window.TK_DATA.regions.slice());
-  const [region, setRegion] = React.useState(t.region || "");
+  const [region, setRegion] = React.useState((listTour && listTour.region) || "");
   const [addingRegion, setAddingRegion] = React.useState(false);
   const [newRegion, setNewRegion] = React.useState("");
-  const commitRegion = () => { const v = newRegion.trim(); if (!v) return; window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.createRegion(v), () => { window.TK_ADD_REGION(v); setRegions(window.TK_DATA.regions.slice()); setRegion(v); setNewRegion(""); setAddingRegion(false); touch(); setToast("Region “" + v + "” added — now live in browse filters and the Regions page"); }); };
-  const media = (t.image ? [{ id: "m0", src: t.image, alt: t.title }] : []).concat(
-    isNew ? [] : [1, 2, 3].map(i => ({ id: "m" + i, src: t.image, alt: "" })));
-  const [cover, setCover] = React.useState("m0");
+
+  // Media gallery (TRI-928): ordered [{id, src, alt, uploading?, progress?, error?}].
+  // Ready tiles carry a cdn.tripkoach.com src; in-flight tiles show a local
+  // objectURL preview + upload %. Persisted via images[] (cover first) on save.
+  const [media, setMedia] = React.useState([]);
+  const [cover, setCover] = React.useState(null);
+  const uidRef = React.useRef(0);
+  const nextId = () => "m" + (uidRef.current++);
+  const seedMedia = (imgs, coverImg) => {
+    const arr = (Array.isArray(imgs) && imgs.length ? imgs : (coverImg ? [coverImg] : [])).slice();
+    const items = arr.map(src => ({ id: nextId(), src: src, alt: "" }));
+    setMedia(items);
+    setCover(items.length ? items[0].id : null);
+  };
   const touch = () => setDirty(true);
+
+  // Flag-off / new: seed the gallery synchronously from the initial record.
+  React.useEffect(() => { if (!(live && !isNew)) seedMedia(detail && detail.images, detail && detail.image); }, []);
+  // Live existing tour: fetch full detail, then hydrate fields + gallery.
+  React.useEffect(() => {
+    if (isNew || !live) return;
+    let alive = true;
+    window.TK_ADMIN_API.getTour(apiId)
+      .then(d => { if (!alive || !d) return; setDetail(d); setPublished(!!d.published); if (d.region) setRegion(d.region); seedMedia(d.images, d.image); })
+      .catch(() => { if (alive) { setDetail(listTour || blank); setLoadErr(true); } });
+    return () => { alive = false; };
+  }, [state.editId]);
+
+  const commitRegion = () => { const v = newRegion.trim(); if (!v) return; window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.createRegion(v), () => { window.TK_ADD_REGION(v); setRegions(window.TK_DATA.regions.slice()); setRegion(v); setNewRegion(""); setAddingRegion(false); touch(); setToast("Region “" + v + "” added — now live in browse filters and the Regions page"); }); };
+
+  // Gallery handlers — cover tracked by tile id so reorder/remove never mislabels it.
+  const removeMedia = (id) => { setMedia(ms => { const next = ms.filter(m => m.id !== id); setCover(c => c === id ? (next.length ? next[0].id : null) : c); return next; }); touch(); };
+  const reorderMedia = (from, to) => { setMedia(ms => { if (to < 0 || to >= ms.length || from < 0 || from >= ms.length) return ms; const next = ms.slice(); const x = next.splice(from, 1)[0]; next.splice(to, 0, x); return next; }); touch(); };
+  const setCoverMedia = (id) => { setCover(id); touch(); };
+  const uploadFiles = (files) => {
+    Array.prototype.slice.call(files || []).forEach(file => {
+      const id = nextId();
+      let preview = ""; try { preview = (window.URL || window.webkitURL).createObjectURL(file); } catch (_) {}
+      setMedia(ms => ms.concat([{ id, src: preview, alt: "", uploading: live, progress: live ? 0 : 100 }]));
+      setCover(c => c || id);
+      touch();
+      if (!live) return; // prototype/offline: local preview only, nothing to persist
+      window.TK_ADMIN_API.uploadMedia(file, pct => setMedia(ms => ms.map(m => m.id === id ? Object.assign({}, m, { progress: pct }) : m)))
+        .then(url => { setMedia(ms => ms.map(m => m.id === id ? { id, src: url, alt: "", uploading: false, progress: 100 } : m)); })
+        .catch(err => { setMedia(ms => ms.map(m => m.id === id ? Object.assign({}, m, { uploading: false, error: true }) : m)); setToast((err && err.message) ? err.message : "Upload failed"); });
+    });
+  };
+
+  const t = detail || blank;
 
   // Collect the form (DS FormField injects each field's id onto its control, so
   // the uncontrolled inputs are readable by id) and persist via the write API
@@ -101,17 +156,26 @@ function TourEdit({ go, state }) {
   const val = (id) => { const el = document.getElementById(id); return el ? el.value : ""; };
   const lines = (id) => val(id).split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
   const doSave = () => {
+    // Ordered gallery, cover first, ready tiles only (skip in-flight/failed/local blobs).
+    const ready = media.filter(m => !m.uploading && !m.error && m.src && m.src.indexOf("blob:") !== 0);
+    const coverItem = ready.filter(m => m.id === cover)[0];
+    const ordered = (coverItem ? [coverItem].concat(ready.filter(m => m.id !== cover)) : ready).map(m => m.src);
+    const body = {
+      id: apiId,
+      title: val("e-title"), region: region, category: val("e-cat"), duration: val("e-dur"),
+      blurb: val("e-blurb"), highlights: lines("e-high"), included: lines("e-inc"), excluded: lines("e-exc"),
+      currency: val("e-cur") || "USD", published: published,
+    };
+    // Only persist images when we hold the authoritative gallery — a failed detail
+    // load must not blank stored images with an empty array.
+    if (!loadErr) { body.images = ordered; body.image = ordered[0] || ""; }
     const optimistic = () => { setDirty(false); setToast(isNew ? "Tour created" : "Tour saved"); };
-    window.TK_ADMIN_ACT(
-      () => window.TK_ADMIN_API.saveTour({
-        id: isNew ? "new" : (t._apiId || state.editId),
-        title: val("e-title"), region: region, category: val("e-cat"), duration: val("e-dur"),
-        blurb: val("e-blurb"), highlights: lines("e-high"), included: lines("e-inc"), excluded: lines("e-exc"),
-        currency: val("e-cur") || "USD", published: published,
-      }),
-      optimistic
-    );
+    window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.saveTour(body), optimistic);
   };
+
+  if (detail == null) {
+    return <div style={{ minHeight: 240, display: "grid", placeItems: "center" }}><span className="tk-spin" style={{ width: 30, height: 30, borderRadius: "50%", border: "3px solid var(--border-subtle)", borderTopColor: "var(--brand)", display: "inline-block" }} /></div>;
+  }
 
   const Section = ({ title, hint, children }) => (
     <div className="tk-formsection">
@@ -123,6 +187,7 @@ function TourEdit({ go, state }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <div style={{ maxWidth: 900 }}>
+        {loadErr && <Alert tone="warning" title="Couldn't load the full tour">We showed the summary we had. Reload before saving — saving now may overwrite fields that didn't load. Images won't be changed.</Alert>}
         <Section title="Basics" hint="The name, region and category travellers see on the tour card.">
           <FormField id="e-title" label="Tour title" required><Input defaultValue={t.title} placeholder="Cape Coast Castle & Kakum" onChange={touch} /></FormField>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
@@ -152,7 +217,7 @@ function TourEdit({ go, state }) {
         </Section>
 
         <Section title="Media" hint="Photos for the gallery. The cover image is used on cards and search.">
-          <MediaManager items={media} coverId={cover} onSetCover={(id) => { setCover(id); touch(); }} onRemove={touch} onReorder={touch} onUpload={touch} />
+          <MediaManager items={media} coverId={cover} onSetCover={setCoverMedia} onRemove={removeMedia} onReorder={reorderMedia} onUpload={uploadFiles} />
         </Section>
 
         <Section title="Group pricing" hint="Per-person rate by party size. The largest-group rate is the 'from' price on cards. The website and app apply these tiers automatically at checkout.">

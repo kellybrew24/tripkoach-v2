@@ -239,7 +239,7 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
   async function listTours() {
     const { rows } = await db.query(
       `SELECT t.id, t.slug, t.title, r.name AS region, t.category, t.category_label, t.currency,
-              t.base_price_minor, t.rating_cached, t.review_count_cached, t.published,
+              t.base_price_minor, t.rating_cached, t.review_count_cached, t.published, t.image,
               (SELECT COUNT(*) FROM departure d WHERE d.tour_id = t.id) AS departures
          FROM tour t JOIN region r ON r.id = t.region_id
         ORDER BY t.title`);
@@ -248,6 +248,7 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
       category: t.category_label, categoryEnum: t.category, currency: t.currency,
       price: fromMinor(t.base_price_minor), rating: t.rating_cached == null ? null : Number(t.rating_cached),
       reviews: Number(t.review_count_cached || 0), published: t.published, departures: Number(t.departures),
+      image: t.image ?? null, // TRI-928: cover thumbnail for the tours list
     }));
   }
 

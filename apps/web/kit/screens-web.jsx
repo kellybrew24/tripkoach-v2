@@ -601,6 +601,26 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
   const [busy, setBusy] = React.useState(false);
   const [payState, setPayState] = React.useState("idle");
   const [err, setErr] = React.useState(null);
+  // Lead traveller prefill from the signed-in account (TRI-920, re-ported in TRI-927).
+  // The fields live in state (not the DOM) so they survive the step unmount between
+  // Travellers → Review → Payment — previously the values were read from the DOM at
+  // pay time, after those inputs had unmounted, and the booking was submitted with an
+  // empty lead → POST /bookings 422 (the TRI-926 checkout-blocking bug). Controlled
+  // inputs also let the real profile populate once /me resolves. Flag off ⇒ liveAuth
+  // is false and the DS prototype defaults render unchanged.
+  const liveAuth = live && !!window.TK_AUTH;
+  const [leadInfo, setLeadInfo] = React.useState({ name: "", email: "", phone: "", idNumber: "" });
+  const leadSeeded = React.useRef(false);
+  React.useEffect(() => {
+    if (!liveAuth) return undefined;
+    let alive = true;
+    const seed = (u) => { if (alive && u && !leadSeeded.current) { leadSeeded.current = true; setLeadInfo({ name: u.name || "", email: u.email || "", phone: u.phone || "", idNumber: "" }); } };
+    const cached = window.TK_AUTH.cachedMe();
+    if (cached && typeof cached === "object") seed(cached);
+    else window.TK_AUTH.me().then(seed, () => {});
+    return () => { alive = false; };
+  }, []);
+  const leadField = (k) => (e) => { const v = e && e.target ? e.target.value : ""; setLeadInfo((s) => ({ ...s, [k]: v })); };
   // Selected departure: live picks the chosen one, falling back to a real API
   // departure when the prototype default "d2" doesn't exist. Off ⇒ departures[1].
   const d = (live ? t.departures.find(x => x.id === depId) : null) || t.departures[1] || t.departures[0];
@@ -619,7 +639,9 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
     if (busy) return;
     setErr(null); setBusy(true); setPayState("processing");
     try {
-      const lead = { name: readVal("w-name"), email: readVal("w-email"), phone: readVal("w-phone"), idNumber: readVal("w-id") };
+      const lead = liveAuth
+        ? { name: leadInfo.name.trim(), email: leadInfo.email.trim(), phone: leadInfo.phone.trim(), idNumber: leadInfo.idNumber.trim() }
+        : { name: readVal("w-name"), email: readVal("w-email"), phone: readVal("w-phone"), idNumber: readVal("w-id") };
       const bk = await window.TK_BOOKING.create({
         // Backend (TRI-866, deployed) resolves the tour by SLUG; keep the uuid
         // too for tolerance. t0.id / TK_SEL.tourId is the slug; apiTourId the uuid.
@@ -670,10 +692,10 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
             <div className="tk-card"><div className="tk-card__body" style={{ gap: "var(--space-4)", padding: "var(--space-5)" }}>
               <span className="tk-overline">Lead traveller</span>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-4)" }}>
-                <FormField id="w-name" label="Full name" required><Input defaultValue="Ama Mensah" /></FormField>
-                <FormField id="w-email" label="Email address" required><Input defaultValue="ama@example.com" /></FormField>
-                <FormField id="w-phone" label="Phone number" required><Input defaultValue="024 555 0142" /></FormField>
-                <FormField id="w-id" label="ID number" optional><Input placeholder="Ghana Card or passport" /></FormField>
+                <FormField id="w-name" label="Full name" required>{liveAuth ? <Input value={leadInfo.name} onChange={leadField("name")} /> : <Input defaultValue="Ama Mensah" />}</FormField>
+                <FormField id="w-email" label="Email address" required>{liveAuth ? <Input value={leadInfo.email} onChange={leadField("email")} /> : <Input defaultValue="ama@example.com" />}</FormField>
+                <FormField id="w-phone" label="Phone number" required>{liveAuth ? <Input value={leadInfo.phone} onChange={leadField("phone")} /> : <Input defaultValue="024 555 0142" />}</FormField>
+                <FormField id="w-id" label="ID number" optional>{liveAuth ? <Input value={leadInfo.idNumber} onChange={leadField("idNumber")} placeholder="Ghana Card or passport" /> : <Input placeholder="Ghana Card or passport" />}</FormField>
               </div>
             </div></div>
             <div className="tk-card"><div className="tk-card__body" style={{ gap: "var(--space-4)", padding: "var(--space-5)" }}>
@@ -693,7 +715,7 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
               {t0.packages ? <div className="tk-summary__line"><span>Package</span><span>{t.packageName}</span></div> : null}
               <div className="tk-summary__line"><span>Departure</span><span>{d.date}, {d.time}</span></div>
               <div className="tk-summary__line"><span>Travellers</span><span>{pax}</span></div>
-              <div className="tk-summary__line"><span>Lead traveller</span><span>Ama Mensah · ama@example.com</span></div>
+              <div className="tk-summary__line"><span>Lead traveller</span><span>{liveAuth ? ((leadInfo.name || "—") + " · " + (leadInfo.email || "—")) : "Ama Mensah · ama@example.com"}</span></div>
             </div></div>
             <Checkbox id="w-agree" label="I agree to the booking terms and cancellation policy" />
           </>}
