@@ -44,6 +44,10 @@ const APPS = {
     // Load order mirrors ui_kits/web/index.html exactly.
     screens: ["screens-home.jsx", "screens-pages.jsx", "screens-blog.jsx", "screens-account.jsx", "screens-web.jsx"],
     app: "app.jsx",
+    // Web-only shim (TRI-867): booking + Paystack-checkout client. Loaded after
+    // tk-api.js (it uses TK_API) and before app.js. Admin never books, so it is
+    // NOT in SHARED_SHIM — the admin build is untouched.
+    extraShim: ["tk-booking.js"],
     // data.js (window.TK_DATA / TK_IMG) must load before blog.js.
     data: ["data.js", "blog.js"],
     title: "TripKoach — guided tours across Ghana",
@@ -147,6 +151,7 @@ function buildApp(name) {
   //     app is byte-for-byte the fixture prototype until DevOps overwrites
   //     config.js at deploy to point at the same-origin /api proxy.
   for (const f of SHARED_SHIM) cpSync(join(SHIM, f), join(dist, f));
+  for (const f of cfg.extraShim || []) cpSync(join(SHIM, f), join(dist, f));
   cpSync(join(cfg.kit, "tk-boot.js"), join(dist, "tk-boot.js"));
 
   // 4. Build-time-transpiled application script (screens + app, in kit order).
@@ -156,6 +161,7 @@ function buildApp(name) {
 
   // 5. Production index.html.
   const dataTags = cfg.data.map((d) => `<script src="data/${d}"></script>`).join("\n");
+  const extraShimTags = (cfg.extraShim || []).map((f) => `<script src="${f}"></script>`).join("\n");
   const html = `<!doctype html>
 <html lang="en">
 <head>
@@ -176,7 +182,7 @@ ${cfg.headCss}</style>
 <script src="config.js"></script>
 ${dataTags}
 <script src="tk-api.js"></script>
-<script src="tk-boot.js"></script>
+${extraShimTags ? extraShimTags + "\n" : ""}<script src="tk-boot.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

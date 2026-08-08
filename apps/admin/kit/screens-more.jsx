@@ -147,8 +147,8 @@ function PaymentsAdmin({ go, state }) {
           ]}
           rows={rows} getRowId={r => r.id}
           rowActions={(r) => r.status === "pending"
-            ? <Button size="sm" variant="secondary" onClick={() => window.tkToast("Marked " + r.id + " as paid")}>Mark paid</Button>
-            : r.status === "paid" ? <IconButton icon="receipt" label="Issue refund" variant="ghost" size="sm" onClick={() => window.tkToast("Refund started for " + r.id)} /> : <IconButton icon="ellipsis" label="Actions" variant="ghost" size="sm" onClick={() => window.tkToast("Retry requested for " + r.id)} />}
+            ? <Button size="sm" variant="secondary" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.markPaid(r.id), () => window.tkToast("Marked " + r.id + " as paid"))}>Mark paid</Button>
+            : r.status === "paid" ? <IconButton icon="receipt" label="Issue refund" variant="ghost" size="sm" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.flagRefund(r.id), () => window.tkToast("Refund started for " + r.id))} /> : <IconButton icon="ellipsis" label="Actions" variant="ghost" size="sm" onClick={() => window.tkToast("Retry requested for " + r.id)} />}
           empty={<EmptyState icon="wallet" title="No transactions" body="Payments appear here once money starts moving." />} />
       </div>
     </div>
@@ -179,7 +179,7 @@ function PromosAdmin({ go }) {
           empty={<EmptyState icon="badge-percent" title="No promo codes" body="Create a code to run a seasonal discount." action={<Button iconStart="plus" onClick={() => setEdit({})}>New promo code</Button>} />} />
       </div>
       <Drawer open={!!edit} title={edit && edit.code ? "Edit " + edit.code : "New promo code"} onClose={() => setEdit(null)}
-        footer={<><Button variant="secondary" onClick={() => setEdit(null)}>Cancel</Button><Button onClick={() => { setToast("Promo code saved"); setEdit(null); }}>Save code</Button></>}>
+        footer={<><Button variant="secondary" onClick={() => setEdit(null)}>Cancel</Button><Button onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.savePromo({ id: edit && edit.code ? edit.code : undefined, code: (document.getElementById("pc-code") || {}).value, type: (document.getElementById("pc-type") || {}).value || "percent", value: +(((document.getElementById("pc-val") || {}).value) || 0), tours: (document.getElementById("pc-tours") || {}).value, from: (document.getElementById("pc-from") || {}).value, to: (document.getElementById("pc-to") || {}).value, limit: +(((document.getElementById("pc-limit") || {}).value) || 0), active: !!(edit && edit.active), currency: "USD" }), () => { setToast("Promo code saved"); setEdit(null); })}>Save code</Button></>}>
         {edit && <>
           <FormField id="pc-code" label="Code" help="Uppercase, no spaces"><Input defaultValue={edit.code} placeholder="HARMATTAN10" style={{ textTransform: "uppercase" }} /></FormField>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
@@ -248,7 +248,7 @@ function UsersAdmin({ go }) {
           value={perms} onToggle={toggle} />
       </div>
       <Drawer open={invite} title="Invite staff" subtitle="They'll get an email to set a password and enable two-factor." onClose={() => setInvite(false)}
-        footer={<><Button variant="secondary" onClick={() => setInvite(false)}>Cancel</Button><Button iconStart="mail" onClick={() => { setToast("Invite sent"); setInvite(false); }}>Send invite</Button></>}>
+        footer={<><Button variant="secondary" onClick={() => setInvite(false)}>Cancel</Button><Button iconStart="mail" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.inviteStaff({ email: (document.getElementById("iv-email") || {}).value, name: (document.getElementById("iv-name") || {}).value, role: (document.getElementById("iv-role") || {}).value || "operator" }), () => { setToast("Invite sent"); setInvite(false); })}>Send invite</Button></>}>
         <FormField id="iv-email" label="Work email" required><Input type="email" placeholder="name@tripkoach.com" iconStart="mail" /></FormField>
         <FormField id="iv-name" label="Full name"><Input placeholder="Ama Owusu" /></FormField>
         <FormField id="iv-role" label="Role" help="You can change this later"><Select defaultValue="operator" options={[{ value: "admin", label: "Admin — full access" }, { value: "operator", label: "Operator — day-to-day ops" }, { value: "viewer", label: "Read-only — view but not change" }]} /></FormField>
@@ -305,7 +305,7 @@ function SettingsAdmin({ go }) {
           </Section>
         </>}
       </div>
-      <div className="tk-stickysave"><span className="tk-caption">Changes apply to both the website and the app.</span><Button iconStart="check" onClick={() => setToast("Settings saved")}>Save settings</Button></div>
+      <div className="tk-stickysave"><span className="tk-caption">Changes apply to both the website and the app.</span><Button iconStart="check" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.saveSettings({ businessName: (document.getElementById("s-org") || {}).value, address: (document.getElementById("s-addr") || {}).value, supportPhone: (document.getElementById("s-phone") || {}).value, supportEmail: (document.getElementById("s-email") || {}).value, currencyOfRecord: (document.getElementById("s-cur") || {}).value, displayCurrency: (document.getElementById("s-disp") || {}).value, usdToGhsDisplayRate: +(((document.getElementById("s-rate") || {}).value) || 0) || undefined, cancellationPolicy: (document.getElementById("s-canc") || {}).value, paymentDeadlineDays: +(((document.getElementById("s-deadline") || {}).value) || 0) || undefined }), () => setToast("Settings saved"))}>Save settings</Button></div>
       {toast && <div style={{ position: "fixed", bottom: 20, insetInline: 0, display: "flex", justifyContent: "center", zIndex: 800 }}><Toast tone="success" onClose={() => setToast(null)}>{toast}</Toast></div>}
     </div>
   );

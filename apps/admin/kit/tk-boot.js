@@ -1,18 +1,443 @@
 /* ==========================================================================
- * TripKoach v2 admin — boot gate (TRI-861 Phase 1 shim, scaffold).
+ * TripKoach v2 admin — auth gate + write-path API shim (TRI-870 Phase 3).
  *
- * The admin console gets the SAME config + API-client shim as web so it is
- * wired and ready, but this Phase 1 issue scopes live READ integration to the
- * consumer web app only. So admin's boot is a flag-aware pass-through: it mounts
- * from fixtures today and gives the admin read-path work (dashboard + list reads)
- * a drop-in seam — mirror web/kit/tk-boot.js's loadLiveData() here when that
- * lands, no app.jsx change required beyond the render entrypoint already in place.
+ * Same pattern as the consumer app (TRI-861): the DS-verbatim admin screens
+ * read their data SYNCHRONOUSLY from window-globals (window.TK_ADMIN.*,
+ * window.TK_DATA.tours/regions, window.TK_REVIEWS) which the fixtures
+ * (data.js + admin-data.js) populate today. This file replaces that static
+ * seam with a runtime one WITHOUT redesigning any screen:
+ *
+ *   USE_LIVE_API === false  → render immediately from fixtures. Byte-for-byte
+ *                             the prototype (the whole live path is guarded).
+ *   USE_LIVE_API === true   → check the staff session, hydrate the same globals
+ *                             from the admin API, gate to /login on 401, then
+ *                             mount. Screen mutations (create/save/cancel/…)
+ *                             route through window.TK_ADMIN_ACT, which calls the
+ *                             guarded write endpoints and surfaces 401/403/
+ *                             validation errors in the DS UI.
+ *
+ * Admin realm (Phase 3 backend, TRI-869): every route is mounted under
+ * `/api/admin` and Caddy proxies `/api/*` verbatim to the Fastify service, so
+ * the httpOnly session cookie is same-origin. The shared config.js ships
+ * apiBase="/api/v1" for the consumer read paths; we derive the admin base from
+ * it (…/v1 → …/admin) so DevOps only overwrites the one shared config.js at
+ * deploy. An explicit TK_CONFIG.adminApiBase always wins.
+ *
+ * Mapping is deliberately tolerant (accepts snake_case or camelCase, integer
+ * minor units or whole-currency numbers, `{items:[…]}`/`{tours:[…]}`/bare-array
+ * envelopes) so integration stays mechanical as the exact DTOs firm up with
+ * Backend — mirrors web/kit/tk-boot.js.
  * ======================================================================== */
 (function () {
+  var TkApiError = (window.TK_API && window.TK_API.TkApiError) || function (s, c, m) {
+    var e = new Error(m || c || ("HTTP " + s)); e.status = s; e.code = c || null; e.isTkApiError = true; return e;
+  };
+
+  function cfg() { return window.TK_CONFIG || {}; }
+  function adminBase() {
+    var c = cfg();
+    if (c.adminApiBase) return String(c.adminApiBase).replace(/\/+$/, "");
+    var b = String(c.apiBase || "/api/v1").replace(/\/+$/, "");
+    if (/\/admin$/.test(b)) return b;          // already an admin base
+    if (/\/v1$/.test(b)) return b.replace(/\/v1$/, "/admin"); // /api/v1 → /api/admin
+    return b + "/admin";                        // /api → /api/admin
+  }
+  function live() { return !!cfg().USE_LIVE_API; }
+
+  // ---- transport (admin base, same-origin cookie) ---------------------------
+  function req(method, path, body, opts) {
+    opts = opts || {};
+    var url = adminBase() + (path.charAt(0) === "/" ? path : "/" + path);
+    if (opts.query) {
+      var qs = Object.keys(opts.query)
+        .filter(function (k) { var v = opts.query[k]; return v !== undefined && v !== null && v !== ""; })
+        .map(function (k) { return encodeURIComponent(k) + "=" + encodeURIComponent(opts.query[k]); })
+        .join("&");
+      if (qs) url += (url.indexOf("?") === -1 ? "?" : "&") + qs;
+    }
+    var init = { method: method, credentials: "include", headers: { Accept: "application/json" } };
+    if (body !== undefined) { init.headers["Content-Type"] = "application/json"; init.body = typeof body === "string" ? body : JSON.stringify(body); }
+    return fetch(url, init).then(function (res) {
+      var ct = res.headers && res.headers.get && res.headers.get("content-type");
+      var isJson = ct && ct.indexOf("application/json") !== -1;
+      return (isJson ? res.json() : res.text()).then(function (payload) {
+        if (res.ok) return payload;
+        var err = isJson && payload && payload.error ? payload.error : {};
+        throw TkApiError(res.status, err.code, err.message || ("HTTP " + res.status), err.fields);
+      }, function () {
+        if (res.ok) return null;
+        throw TkApiError(res.status, null, "HTTP " + res.status);
+      });
+    });
+  }
+
+  // ---- helpers --------------------------------------------------------------
+  function list(body, key) {
+    if (Array.isArray(body)) return body;
+    if (body && Array.isArray(body[key])) return body[key];
+    if (body && Array.isArray(body.items)) return body.items;
+    return [];
+  }
+  function major(v, minorField) {
+    if (typeof minorField === "number") return Math.round(minorField) / 100;
+    return typeof v === "number" ? v : (v != null && !isNaN(+v) ? +v : 0);
+  }
+  var DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  var MONS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  function fmtDate(v) {
+    if (!v) return "";
+    if (typeof v === "string" && !/^\d{4}-\d{2}-\d{2}/.test(v)) return v;
+    var d = new Date(v);
+    if (isNaN(d.getTime())) return String(v);
+    return DAYS[d.getUTCDay()] + " " + d.getUTCDate() + " " + MONS[d.getUTCMonth()] + " " + d.getUTCFullYear();
+  }
+  function pick() { for (var i = 0; i < arguments.length; i++) if (arguments[i] !== undefined && arguments[i] !== null) return arguments[i]; return undefined; }
+
+  // ---- mappers: admin API → kit fixture shape -------------------------------
+  function mapTier(t) { return { minPax: pick(t.minPax, t.min_pax), price: major(t.price, pick(t.priceMinor, t.price_minor)) }; }
+  function mapTour(t) {
+    var price = major(pick(t.price, t.priceMajor, t.fromPrice), pick(t.basePriceMinor, t.base_price_minor, t.priceMinor, t.price_minor));
+    var out = {
+      id: t.slug || t.id,
+      _apiId: pick(t.id, t.slug),
+      slug: t.slug || t.id,
+      title: t.title || "",
+      region: t.region || t.regionName || (t.region && t.region.name) || "",
+      category: t.category || "",
+      duration: t.duration || "",
+      price: price,
+      currency: t.currency || "USD",
+      rating: pick(t.rating, t.ratingCached, t.rating_cached),
+      reviews: pick(t.reviews, t.reviewCount, t.review_count_cached),
+      image: t.image || (Array.isArray(t.images) && t.images[0]) || null,
+      blurb: t.blurb || t.overview || "",
+      published: t.published !== undefined ? !!t.published : (t.status ? t.status === "published" || t.status === "live" : undefined),
+    };
+    if (Array.isArray(t.tiers) && t.tiers.length) out.tiers = t.tiers.map(mapTier).filter(function (x) { return typeof x.minPax === "number"; });
+    if (Array.isArray(t.highlights)) out.highlights = t.highlights;
+    if (Array.isArray(t.included)) out.included = t.included;
+    if (Array.isArray(t.excluded)) out.excluded = t.excluded;
+    if (Array.isArray(t.departures)) out.departures = t.departures.map(mapDeparture);
+    return out;
+  }
+  function mapDeparture(d) {
+    return {
+      id: pick(d.id, d.departureId),
+      tourId: d.tourId || d.tourSlug || d.tour_id,
+      date: fmtDate(pick(d.date, d.departsOn, d.departs_on)),
+      time: d.time || "",
+      price: major(d.price, pick(d.priceMinor, d.price_minor)),
+      spotsLeft: pick(d.spotsLeft, d.spots_left, d.seatsAvailable),
+    };
+  }
+  // Full admin departure row (capacity/booked/status) for DeparturesAdmin.
+  function mapDepartureRow(d, tourById) {
+    var tourId = d.tourId || d.tourSlug || d.tour_id;
+    var t = (tourById && tourById[tourId]) || {};
+    var cap = pick(d.capacity, d.seatsTotal, d.seats_total, 0);
+    var spots = pick(d.spotsLeft, d.spots_left, (typeof cap === "number" && d.seatsReserved != null ? cap - d.seatsReserved : undefined), 0);
+    return {
+      id: pick(d.id, tourId + "-" + pick(d.departureId, "")),
+      tourId: tourId, tour: d.tour || t.title || tourId, region: d.region || t.region || "",
+      date: fmtDate(pick(d.date, d.departsOn, d.departs_on)), time: d.time || "",
+      price: major(d.price, pick(d.priceMinor, d.price_minor)), currency: d.currency || "USD",
+      capacity: cap, booked: pick(d.booked, (typeof cap === "number" ? cap - spots : undefined), 0), spotsLeft: spots,
+      status: d.status || (spots <= 0 ? "sold-out" : "scheduled"),
+    };
+  }
+  function mapBooking(b, tourById) {
+    var tourId = pick(b.tourId, b.tourSlug, b.tour_id);
+    var t = (tourById && tourById[tourId]) || {};
+    var travellers = pick(b.travellers, b.pax, b.partySize, b.party_size, 1);
+    var usd = major(pick(b.usdAmount, b.totalUsd, b.total), pick(b.usdAmountMinor, b.usd_amount_minor, b.totalMinor, b.total_minor));
+    var unit = major(pick(b.unit, b.unitPrice, t.price), pick(b.unitMinor, b.unit_minor));
+    return {
+      ref: pick(b.ref, b.reference, b.code, b.id),
+      customerId: pick(b.customerId, b.customer_id),
+      customer: pick(b.customer, b.customerName, b.customer_name, (b.customer && b.customer.name)),
+      tourId: tourId, tour: b.tour || t.title || tourId, region: b.region || t.region || "",
+      departureId: pick(b.departureId, b.departure_id),
+      date: fmtDate(pick(b.date, b.departureDate, b.departure_date)),
+      travellers: travellers,
+      unit: unit || (usd && travellers ? Math.round(usd / travellers) : 0),
+      total: usd || (unit * travellers) || 0,
+      currency: b.currency || "USD",
+      // Phase 2 FX columns carried through for the payment/reconciliation views.
+      usd: usd, ghs: major(pick(b.ghsAmount, b.ghs_amount), pick(b.ghsAmountMinor, b.ghs_amount_minor)),
+      fx: pick(b.fxRateUsed, b.fx_rate_used, b.fxRate),
+      status: b.status || "pending",
+      payment: pick(b.payment, b.paymentStatus, b.payment_status, "unpaid"),
+      created: fmtDate(pick(b.created, b.createdAt, b.created_at)),
+    };
+  }
+  function mapPayment(p) {
+    return {
+      id: pick(p.id, p.ref, p.reference),
+      ref: pick(p.bookingRef, p.booking_ref, p.ref),
+      customer: pick(p.customer, p.customerName, p.customer_name),
+      amount: major(pick(p.amount, p.usdAmount, p.total), pick(p.amountMinor, p.usdAmountMinor, p.usd_amount_minor)),
+      currency: p.currency || "USD",
+      usd: major(pick(p.usdAmount, p.amount), pick(p.usdAmountMinor, p.usd_amount_minor)),
+      ghs: major(pick(p.ghsAmount, p.ghs_amount), pick(p.ghsAmountMinor, p.ghs_amount_minor)),
+      fx: pick(p.fxRateUsed, p.fx_rate_used),
+      method: p.method || (p.provider ? p.provider + (p.channel ? " · " + p.channel : "") : "Paystack"),
+      status: p.status || "paid",
+      refundFlagged: !!pick(p.refundFlagged, p.refund_flagged),
+      date: fmtDate(pick(p.date, p.createdAt, p.created_at)),
+    };
+  }
+  function mapPromo(p) {
+    return {
+      code: p.code, type: p.type || (p.percent != null ? "percent" : "fixed"),
+      value: pick(p.value, p.percent, p.amount, 0), currency: p.currency || "USD",
+      used: pick(p.used, p.usedCount, p.used_count, 0), limit: pick(p.limit, p.usageLimit, p.usage_limit, 0),
+      from: fmtDate(pick(p.from, p.startsAt, p.starts_at)), to: fmtDate(pick(p.to, p.endsAt, p.ends_at)),
+      tours: p.tours || p.scope || "All tours", active: p.active !== undefined ? !!p.active : true,
+    };
+  }
+  function initials(name) { return String(name || "").split(/\s+/).map(function (w) { return w.charAt(0); }).join("").slice(0, 2).toUpperCase(); }
+  function mapStaff(u) {
+    return {
+      id: pick(u.id, u.staffId), name: u.name || "", email: u.email || "",
+      role: u.role || "viewer", status: u.status || "active", initials: u.initials || initials(u.name),
+      last: pick(u.last, u.lastActive, u.last_active_at, "—"),
+    };
+  }
+  function mapCustomer(c) {
+    return {
+      id: pick(c.id, c.customerId), name: c.name || "", email: c.email || "", phone: c.phone || "",
+      country: c.country || "", joined: fmtDate(pick(c.joined, c.createdAt, c.created_at)),
+      bookings: pick(c.bookings, c.bookingCount, 0), initials: c.initials || initials(c.name),
+      emergencyName: c.emergencyName || "", emergencyPhone: c.emergencyPhone || "", diet: c.diet || "—",
+    };
+  }
+  function mapGuide(g) {
+    return {
+      id: pick(g.id, g.guideId), name: g.name || "", initials: g.initials || initials(g.name),
+      email: g.email || "", phone: g.phone || "", base: g.base || "",
+      regions: g.regions || [], languages: g.languages || [], status: g.status || "active",
+      rating: pick(g.rating, 0), trips: pick(g.trips, 0), bio: g.bio || "",
+    };
+  }
+  function mapReview(r) {
+    var author = r.author || r.name || "Traveller";
+    return {
+      id: r.id, tourId: pick(r.tourId, r.tourSlug, r.tour_id), tour: r.tour || "",
+      author: author, initials: r.initials || initials(author), rating: r.rating,
+      date: fmtDate(pick(r.date, r.createdAt, r.created_at)),
+      verified: r.verified !== undefined ? !!r.verified : true,
+      status: r.status || "approved", title: r.title || "", text: r.text || r.body || "", reply: r.reply || "",
+    };
+  }
+
+  // ---- write serialisers: kit form values → API body ------------------------
+  // USD is the currency of record. Prices go out as whole-currency numbers with
+  // an explicit currency, mirroring the read contract (Backend converts to GHS
+  // pesewas at charge time — the FE never computes FX).
+  function tourBody(v) {
+    var b = { title: v.title, region: v.region, category: v.category, duration: v.duration,
+      blurb: v.blurb, currency: v.currency || "USD", published: !!v.published };
+    if (Array.isArray(v.highlights)) b.highlights = v.highlights;
+    if (Array.isArray(v.included)) b.included = v.included;
+    if (Array.isArray(v.excluded)) b.excluded = v.excluded;
+    if (Array.isArray(v.tiers)) b.tiers = v.tiers;
+    if (v.price != null && v.price !== "") b.price = +v.price;
+    return b;
+  }
+
+  // ---- the write API screens call ------------------------------------------
+  var API = {
+    live: live,
+    base: adminBase,
+    // auth
+    login: function (email, password, opts) { return req("POST", "/auth/login", Object.assign({ email: email, password: password }, opts || {})); },
+    verifyMfa: function (code) { return req("POST", "/auth/mfa", { code: code }); },
+    logout: function () { return req("POST", "/auth/logout"); },
+    me: function () { return req("GET", "/me"); },
+    // catalogue
+    listTours: function () { return req("GET", "/tours"); },
+    getTour: function (id) { return req("GET", "/tours/" + encodeURIComponent(id)); },
+    createTour: function (v) { return req("POST", "/tours", tourBody(v)); },
+    updateTour: function (id, v) { return req("PATCH", "/tours/" + encodeURIComponent(id), tourBody(v)); },
+    saveTour: function (v) { return v.id && v.id !== "new" ? API.updateTour(v.id, v) : API.createTour(v); },
+    setPublished: function (id, pub) { return req("PATCH", "/tours/" + encodeURIComponent(id), { published: !!pub }); },
+    deleteTour: function (id) { return req("DELETE", "/tours/" + encodeURIComponent(id)); },
+    // regions
+    listRegions: function () { return req("GET", "/regions"); },
+    createRegion: function (name) { return req("POST", "/regions", { name: name }); },
+    // departures / schedules
+    listDepartures: function () { return req("GET", "/departures"); },
+    createDeparture: function (v) { return req("POST", "/departures", v); },
+    cancelDeparture: function (id, reason) { return req("POST", "/departures/" + encodeURIComponent(id) + "/cancel", { reason: reason }); },
+    // bookings
+    listBookings: function () { return req("GET", "/bookings"); },
+    getBooking: function (ref) { return req("GET", "/bookings/" + encodeURIComponent(ref)); },
+    confirmBooking: function (ref) { return req("POST", "/bookings/" + encodeURIComponent(ref) + "/confirm"); },
+    cancelBooking: function (ref, reason) { return req("POST", "/bookings/" + encodeURIComponent(ref) + "/cancel", { reason: reason }); },
+    // payments
+    listPayments: function () { return req("GET", "/payments"); },
+    flagRefund: function (id) { return req("POST", "/payments/" + encodeURIComponent(id) + "/refund-flag"); },
+    markPaid: function (id) { return req("POST", "/payments/" + encodeURIComponent(id) + "/mark-paid"); },
+    // promos / settings / staff
+    listPromos: function () { return req("GET", "/promos"); },
+    savePromo: function (v) { return v && v.id ? req("PATCH", "/promos/" + encodeURIComponent(v.id), v) : req("POST", "/promos", v); },
+    getSettings: function () { return req("GET", "/settings"); },
+    saveSettings: function (v) { return req("PATCH", "/settings", v || {}); },
+    listStaff: function () { return req("GET", "/staff"); },
+    inviteStaff: function (v) { return req("POST", "/staff", v); },
+    // misc lists
+    listCustomers: function () { return req("GET", "/customers"); },
+    listGuides: function () { return req("GET", "/guides"); },
+    request: req,
+  };
+  window.TK_ADMIN_API = API;
+
+  // ---- 401/403/validation surfacing for screen mutations --------------------
+  // Screens keep their optimistic UI (toast + local state) exactly as the
+  // prototype does; TK_ADMIN_ACT just wraps it. Flag off → run the optimistic
+  // callback synchronously (byte-identical). Flag on → call the endpoint, then
+  // run the optimistic callback on success, else surface the server error in the
+  // DS toast and dispatch tk-admin-401 on an expired/absent session.
+  function toast(msg) { if (window.tkToast) window.tkToast(msg); }
+  function errMessage(err) {
+    if (!err) return "Something went wrong. Please try again.";
+    if (err.status === 401) return "Your session has expired. Please sign in again.";
+    if (err.status === 403) return "You don't have permission to do that.";
+    if (err.status === 422 || (err.fields && Object.keys(err.fields).length)) {
+      var f = err.fields ? Object.keys(err.fields).map(function (k) { return err.fields[k]; }).join(" ") : "";
+      return err.message ? err.message + (f ? " — " + f : "") : (f || "Please check the form and try again.");
+    }
+    return err.message || "Something went wrong. Please try again.";
+  }
+  window.TK_ADMIN_ACT = function (call, optimistic, opts) {
+    opts = opts || {};
+    if (!live()) { if (optimistic) optimistic(); return Promise.resolve(); }
+    var p = typeof call === "function" ? call() : call;
+    if (!p || typeof p.then !== "function") { if (optimistic) optimistic(); return Promise.resolve(); }
+    return p.then(function (res) {
+      if (optimistic) optimistic(res);
+      if (opts.onSuccess) opts.onSuccess(res);
+      return res;
+    }, function (err) {
+      if (err && err.status === 401) window.dispatchEvent(new CustomEvent("tk-admin-401"));
+      if (opts.onError) opts.onError(err);
+      else toast(errMessage(err));
+      // Do NOT run the optimistic update on failure — the write didn't persist.
+      throw err;
+    });
+  };
+
+  // ---- live hydration -------------------------------------------------------
+  function commitTours(tours) {
+    var D = (window.TK_DATA = window.TK_DATA || {});
+    if (!Array.isArray(D.tours)) D.tours = [];
+    D.tours.length = 0; Array.prototype.push.apply(D.tours, tours);
+    var A = (window.TK_ADMIN = window.TK_ADMIN || {});
+    A.tours = D.tours;
+  }
+  function commitRegions(names) {
+    var D = (window.TK_DATA = window.TK_DATA || {});
+    if (!Array.isArray(D.regions)) D.regions = [];
+    D.regions.length = 0; Array.prototype.push.apply(D.regions, names);
+  }
+  function setAdmin(key, arr) { var A = (window.TK_ADMIN = window.TK_ADMIN || {}); A[key] = arr; }
+
+  function hydrate() {
+    var A = (window.TK_ADMIN = window.TK_ADMIN || {});
+    // Tours + regions first (bookings/departures reference them).
+    return Promise.all([
+      API.listTours().catch(function () { return null; }),
+      API.listRegions().catch(function () { return null; }),
+    ]).then(function (r) {
+      var tours = list(r[0], "tours").map(mapTour);
+      if (r[0] != null) commitTours(tours);
+      var regionNames = list(r[1], "regions")
+        .map(function (x) { return typeof x === "string" ? x : x.name; })
+        .filter(Boolean);
+      if (regionNames.length) commitRegions(regionNames);
+
+      var tourById = {}; (window.TK_DATA.tours || []).forEach(function (t) { tourById[t.id] = t; tourById[t._apiId] = t; });
+
+      // The rest hydrate independently; a missing/not-ready endpoint (or even a
+      // synchronous error building the request) leaves the fixture-derived
+      // TK_ADMIN entry in place. `safe` guarantees no single list can reject the
+      // batch and drop the console back to fixtures mid-boot.
+      function safe(fn) { try { return Promise.resolve(fn()).catch(function () {}); } catch (_) { return Promise.resolve(); } }
+      return Promise.all([
+        safe(function () { return API.listBookings().then(function (b) { setAdmin("bookings", list(b, "bookings").map(function (x) { return mapBooking(x, tourById); })); }); }),
+        safe(function () { return API.listPayments().then(function (b) { setAdmin("payments", list(b, "payments").map(mapPayment)); }); }),
+        safe(function () { return API.listDepartures().then(function (b) { setAdmin("departures", list(b, "departures").map(function (x) { return mapDepartureRow(x, tourById); })); }); }),
+        safe(function () { return API.listPromos().then(function (b) { setAdmin("promos", list(b, "promos").map(mapPromo)); }); }),
+        safe(function () { return API.listStaff().then(function (b) { setAdmin("staff", list(b, "staff").map(mapStaff)); }); }),
+        safe(function () { return API.listCustomers().then(function (b) { setAdmin("customers", list(b, "customers").map(mapCustomer)); }); }),
+        safe(function () { return API.listGuides().then(function (b) { setAdmin("guides", list(b, "guides").map(mapGuide)); }); }),
+        safe(function () { return req("GET", "/reviews").then(function (b) {
+          var revs = list(b, "reviews").map(mapReview);
+          if (!Array.isArray(window.TK_REVIEWS)) window.TK_REVIEWS = [];
+          window.TK_REVIEWS.length = 0; Array.prototype.push.apply(window.TK_REVIEWS, revs);
+        }); }),
+      ]);
+    });
+  }
+
+  // ---- DS-consistent loading / error states (pre-React) ---------------------
+  function shell(inner) {
+    return '<div style="min-height:100vh;display:grid;place-items:center;padding:32px;background:var(--shell-content-bg)">' +
+      '<div style="display:flex;flex-direction:column;align-items:center;gap:16px;max-width:420px;text-align:center">' + inner + "</div></div>";
+  }
+  function renderLoading() {
+    var root = document.getElementById("root"); if (!root) return;
+    root.innerHTML = shell('<span class="tk-spin" style="width:34px;height:34px;border-radius:50%;border:3px solid var(--border-subtle);border-top-color:var(--brand);display:inline-block"></span>' +
+      '<p style="margin:0;color:var(--text-muted)">Loading the console…</p>');
+    if (!document.getElementById("tk-spin-kf")) {
+      var st = document.createElement("style"); st.id = "tk-spin-kf";
+      st.textContent = "@keyframes tk-spin{to{transform:rotate(360deg)}}.tk-spin{animation:tk-spin .8s linear infinite}";
+      document.head.appendChild(st);
+    }
+  }
+  function renderError(err, retry) {
+    var root = document.getElementById("root"); if (!root) return;
+    var msg = (err && err.message) || "We couldn't reach the console service.";
+    root.innerHTML = shell('<span style="width:44px;height:44px;border-radius:50%;background:var(--danger-wash,rgba(200,40,40,.1));color:var(--danger-fg,#b3261e);display:grid;place-items:center;font-size:22px;font-weight:800">!</span>' +
+      '<h2 class="tk-h4" style="margin:0">Something went wrong</h2>' +
+      '<p style="margin:0;color:var(--text-muted)">' + String(msg).replace(/[<>&]/g, "") + "</p>" +
+      '<button id="tk-retry" class="tk-btn tk-btn--primary" style="min-height:44px;padding:0 20px;border-radius:var(--radius-pill);border:0;background:var(--brand);color:#fff;font-weight:700;cursor:pointer">Try again</button>');
+    var btn = document.getElementById("tk-retry"); if (btn) btn.addEventListener("click", retry);
+  }
+
+  // ---- the boot gate app.js calls -------------------------------------------
+  // window.TK_ADMIN_SESSION: null until resolved. When live, it is either the
+  // staff session ({staff, role, permissions}) or the sentinel {unauthenticated:true}
+  // so app.jsx renders the login screen. Flag off → left null (fixtures/demo).
+  window.TK_ADMIN_SESSION = null;
+  function sessionFromMe(me) {
+    return {
+      staff: (me && (me.staff || me.user || me)) || {},
+      role: (me && (me.role || (me.staff && me.staff.role))) || "admin",
+      permissions: (me && (me.permissions || me.perms)) || null,
+    };
+  }
+  // Called by the login screen after a successful POST /auth/login: record the
+  // session, then hydrate the globals so the console lands on real data.
+  window.TK_ADMIN_ENTER = function (me) {
+    window.TK_ADMIN_SESSION = sessionFromMe(me);
+    return live() ? hydrate() : Promise.resolve();
+  };
+  window.TK_ADMIN_HYDRATE = hydrate;
   window.TK_BOOT = function (render) {
-    // Admin live-read wiring is a follow-up; always render from the current
-    // (fixture) globals for now. window.TK_CONFIG / window.TK_API are present
-    // so the swap is purely additive when scheduled.
-    render();
+    if (!live()) { render(); return; } // fixtures — unchanged prototype
+    renderLoading();
+    API.me().then(function (me) {
+      window.TK_ADMIN_SESSION = sessionFromMe(me);
+      return hydrate().then(render, render);
+    }, function (err) {
+      if (err && (err.status === 401 || err.status === 403)) {
+        // Not signed in (or no access) → render the app, which starts on /login.
+        window.TK_ADMIN_SESSION = { unauthenticated: true };
+        render();
+        return;
+      }
+      renderError(err, function () { window.TK_BOOT(render); });
+    });
   };
 })();
