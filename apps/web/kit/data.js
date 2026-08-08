@@ -176,9 +176,11 @@ window.TK_DATA = {
   // Demo invite the public "review from your trip" link resolves to
   window.TK_INVITE = { token: "rv_ac_8821", name: "Ama Mensah", tourId: tt(0).id, tour: tt(0).title, date: "Sat 22 Aug 2026", ref: "TK-4821" };
 
-  // Currency conversion for the header toggle. USD is the currency of record;
-  // GHS rate is an assumption pending a live FX feed.
-  window.TK_FX = { USD: 1, GHS: 15.6 };
+  // Currency conversion for the header toggle. USD is the currency of record.
+  // GHS is the settings-driven DISPLAY rate (TRI-939) — tk-boot overrides
+  // window.TK_FX.GHS from /config (settings.usd_to_ghs_display_rate) in live
+  // mode; this 12 is the board-set fallback for the fixtures/flag-off path.
+  window.TK_FX = { USD: 1, GHS: 12 };
   window.tkCvt = function (usd, cur) { return cur === "GHS" ? Math.round((usd || 0) * window.TK_FX.GHS) : (usd || 0); };
   window.tkMoney = function (usd, cur) { return (cur === "GHS" ? "GH₵" : "$") + window.tkCvt(usd, cur).toLocaleString(); };
   window.tkDeps = function (deps, cur) { return (deps || []).map(function (d) { return Object.assign({}, d, { price: window.tkCvt(d.price, cur) }); }); };

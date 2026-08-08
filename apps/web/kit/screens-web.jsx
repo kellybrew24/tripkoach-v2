@@ -4,8 +4,12 @@ const { Header, Footer, Breadcrumbs, TourCard, SearchField, Chip, Button, Icon, 
   FormField, Input, Textarea, NumberStepper, PaymentForm, Checkbox, BookingRow, StatusBadge, Tabs, EmptyState, Skeleton, IconButton, Modal, Toast } = NS;
 
 /* Amounts in TK_DATA are the currency of record (USD). The header toggle converts
-   for display only; GHS rate is an assumption pending a live FX feed. */
-const TK_FX = { USD: 1, GHS: 15.6 };
+   for display only. The USD→GHS DISPLAY rate is settings-driven (TRI-939): tk-boot
+   fetches /config and sets window.TK_FX.GHS from settings.usd_to_ghs_display_rate,
+   so ops change it via admin settings without a rebuild. We reference the shared
+   window.TK_FX object (not a private literal) so that live override is visible here;
+   the 12 fallback matches the current board-set rate for the fixtures/flag-off path. */
+const TK_FX = (window.TK_FX = window.TK_FX || { USD: 1, GHS: 12 });
 const TK_SYM = { USD: "$", GHS: "GH₵" };
 // null is meaningful for tier-priced departures (price varies by party size) — preserve it
 // so the DeparturePicker can hide the per-departure price rather than showing "$0". (TRI-932)
@@ -659,9 +663,14 @@ function TourWeb({ go, currency, slug }) {
 const LIVE_BOOK = () => !!(window.TK_CONFIG && window.TK_CONFIG.USE_LIVE_API && window.TK_BOOKING);
 
 function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
-  const t0 = window.TK_DATA.tours[0];
-  const sel = (window.TK_SEL && window.TK_SEL.tourId === t0.id) ? window.TK_SEL : null;
-  const t = (t0.packages && sel) ? pkgTour(t0, sel.packageId) : t0;
+  // Resolve the SELECTED tour (TRI-930). The prototype hardcoded tours[0], so in
+  // live mode every tour showed the LEAD tour's price at checkout no matter which
+  // one the customer chose. TK_SEL.tourId is the tour slug (set on the detail
+  // page's "Reserve my spot"); match it against the hydrated catalogue so pricing
+  // reflects the real selection. Flag off / no selection ⇒ tours[0] (byte-identical).
+  const sel = window.TK_SEL || null;
+  const t0 = (sel && window.TK_DATA.tours.find(x => x.id === sel.tourId || x.slug === sel.tourId)) || window.TK_DATA.tours[0];
+  const t = (t0.packages && sel && sel.packageId) ? pkgTour(t0, sel.packageId) : t0;
   // Traveller count (TRI-922). The prototype defaulted to 4 AND only exposed the
   // count stepper on step 0 (Departure) — which the user never lands on, since
   // checkout opens on step 1 — so it "assumed 4 travellers" with no way to change
@@ -706,9 +715,16 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
   React.useEffect(() => {
     if (live && pax > paxMax) setPax(paxMax);
   }, [live, paxMax, pax]);
-  const unit = window.TK_PRICE.perPerson(t, pax);
+  // Live pricing mirrors the backend exactly (TRI-930): booking.ts charges the
+  // selected departure's price × pax (unitPriceMinor returns the departure override
+  // ahead of any group tier), so surface that same number here — otherwise the
+  // checkout would display the tier step-function price while Paystack charged the
+  // flat departure price. Falls back to the tier function when a departure carries
+  // no explicit price. Flag off ⇒ prototype tier step-function (byte-identical).
+  const depPriced = live && d && d.price != null;
+  const unit = depPriced ? d.price : window.TK_PRICE.perPerson(t, pax);
   const total = unit * pax;
-  const nextTier = window.TK_PRICE.nextTier(t, pax);
+  const nextTier = depPriced ? null : window.TK_PRICE.nextTier(t, pax);
 
   const readVal = (id) => { const el = document.getElementById(id); return el && typeof el.value === "string" ? el.value.trim() : ""; };
   const buildTravellers = (lead) => {

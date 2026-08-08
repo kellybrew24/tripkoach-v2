@@ -260,8 +260,23 @@
   };
 
   // ---- live load ------------------------------------------------------------
+  // TRI-939: the USD→GHS DISPLAY rate is settings-driven. Pull it from /config and
+  // set window.TK_FX.GHS so every screen's cvt()/money() converts from a single
+  // source of truth (admin-editable) rather than a hardcoded constant. Tolerant:
+  // any failure leaves the in-code fallback (12) in place — the display never breaks.
+  function loadConfig() {
+    return api.get("/config").then(function (c) {
+      var rate = c && (c.usdToGhsDisplayRate != null ? c.usdToGhsDisplayRate : c.usd_to_ghs_display_rate);
+      rate = Number(rate);
+      if (isFinite(rate) && rate > 0) {
+        window.TK_FX = window.TK_FX || { USD: 1, GHS: 12 };
+        window.TK_FX.GHS = rate;
+      }
+    }, function () { /* keep fallback */ });
+  }
+
   function loadLiveData() {
-    return Promise.all([api.get("/regions"), api.get("/tours"), loadBlog()]).then(function (res) {
+    return Promise.all([api.get("/regions"), api.get("/tours"), loadBlog(), loadConfig()]).then(function (res) {
       var regionsBody = res[0];
       var toursBody = res[1];
 
