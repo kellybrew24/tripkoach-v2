@@ -47,7 +47,8 @@ export function buildServer(db: Db, cfg: Config, paystack?: PaystackClient): Fas
   // Read-only for consumer routes → /api/v1 responses are unchanged.
   app.register(cookie);
 
-  const bookings = createBookingService(db, cfg, paystack ?? createPaystackClient(cfg.paystack));
+  const paystackClient = paystack ?? createPaystackClient(cfg.paystack);
+  const bookings = createBookingService(db, cfg, paystackClient);
 
   // Caddy proxies /api/* verbatim (no strip, TRI-862), so the public health check is /api/health.
   // We also expose /health for direct localhost/systemd checks. Both return the same payload.
@@ -140,7 +141,8 @@ export function buildServer(db: Db, cfg: Config, paystack?: PaystackClient): Fas
   }, { prefix: cfg.apiPrefix });
 
   // ── Phase 3 admin write/auth realm (TRI-869), mounted under cfg.adminPrefix (default /api/admin) ──
-  registerAdmin(app, db, cfg);
+  // Shares the same Paystack client as the booking service so refunds (TRI-897) are stubbable in tests.
+  registerAdmin(app, db, cfg, paystackClient);
 
   return app;
 }

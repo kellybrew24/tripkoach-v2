@@ -317,9 +317,23 @@ held seats** (`departure.seats_reserved`), returning `{ …booking, seatsRelease
 [bookings.view] → `{ ref, bookingRef, customer, amount, currency, method, status, providerRef, created,
 usdAmount, fxRate, ghsAmount, refundIntent }`. The `usd/fx/ghs` fields are surfaced from Phase 2 migration
 **008** when present (read defensively — `null` until 008 lands; see coordination note below).
-`POST /payments/:ref/refund` [payments.refund] `{ reason? }` — **refund FLAG only**: records the intent in
-`payment.raw.refund_intent` + audit; **does not** flip status to `refunded` (actual Paystack refund
-execution is a follow-up) → `{ refundRequested: true, payment }`.
+`POST /payments/:ref/refund` [payments.refund] `{ reason?, amount? }` — **real Paystack refund** (TRI-897):
+calls Paystack **/refund** (omit `amount` for a full refund; `amount` is whole units of the charged currency
+for a partial), records a linked **negative** `payment` row (`refund_of` → original, `refund_provider_id` =
+Paystack refund id), flips the original to `status='refunded'` and the booking to `payment_state='refunded'`,
+and audits `payment.refunded` → `{ refunded: true, refundId, paystackStatus, payment }`. Idempotent: a repeat
+call 409s (already refunded), and the refund row is unique on `refund_provider_id` so an admin retry or the
+`refund.processed` webhook records it at most once (dashboard-initiated refunds reconcile the same way).
+`POST /payments/:ref/mark-paid` [payments.refund] `{ note? }` — **manual/offline settlement** (bank, cash):
+flips the payment to `paid`, confirms the booking (`payment_state='paid'`), audits `payment.mark_paid` →
+`{ markedPaid: true, payment }`. 409 if already paid/refunded.
+
+**Reconciliation export (finance)** — `GET /reports/reconciliation?from=&to=` [payments.refund] → `{ from, to,
+count, items[], summary[] }` where each item is a charge or refund row (`type`, `amount` — refunds negative,
+`currency`, `usdAmount`, `fxRate`, `ghsAmount`, `providerRef`, `refundProviderId`, `created`) and `summary`
+is per-currency `{ grossPaid, refunded, net, charges, refunds }`. `GET /reports/reconciliation.csv?from=&to=`
+[payments.refund] streams the same data as a downloadable CSV (rows + a per-currency summary block). Dates are
+inclusive `YYYY-MM-DD` (UTC).
 
 Every mutation writes an **`audit_log`** row (actor from the session, `before`/`after`, action, target, ip).
 
@@ -335,6 +349,11 @@ Phase 2 (TRI-866) owns `008_write_path_payments_fx.sql`; this phase adds **`009_
 **after** 008 (guaranteed by the runner's lexical sort). The admin payment views read the 008 FX columns
 defensively, so this branch migrates and passes `npm run smoke` **standalone** (008 absent) and needs no
 edit once 008 lands. Keep the sequence monotonic on merge to the shared `tripkoach_dev` DB.
+
+**TRI-897** adds **`013_refund_execution.sql`** (`payment.refund_of`, `payment.refund_provider_id` + a
+partial-unique index for refund idempotency). 011/012 are claimed by email transport / reviews-write on
+sibling branches; 013 is the next free number here. On consolidation, keep migration numbers monotonic and
+re-number only if a lower number was taken by a branch that lands first.
 
 ---
 

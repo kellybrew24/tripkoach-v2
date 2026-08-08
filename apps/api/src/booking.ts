@@ -439,9 +439,17 @@ export function createBookingService(db: Db, cfg: Config, paystack: PaystackClie
     }
 
     const data = event?.data ?? {};
-    const eventId = data?.id != null ? String(data.id) : null;
-    const reference: string | null = data?.reference ?? null;
     const type: string = event?.event ?? 'unknown';
+    const isRefund = type.startsWith('refund.');
+    // Charge events carry data.reference; refund events carry data.transaction_reference (the original
+    // transaction). Normalise so both paths key off the transaction reference we stored as payment.ref.
+    const reference: string | null =
+      (isRefund ? (data?.transaction_reference ?? data?.transaction?.reference) : data?.reference) ?? null;
+    // Dedup key: Paystack's data.id when present; else synthesise a stable key. Refund states (pending →
+    // processed) are distinct deliveries, so the refund key includes the status to let each apply once.
+    const eventId = data?.id != null ? String(data.id)
+      : isRefund && reference ? `refund:${reference}:${data?.status ?? type}`
+      : null;
 
     // Idempotency: insert-once on event_id. A duplicate delivery collides and is a no-op.
     if (eventId) {
@@ -454,11 +462,42 @@ export function createBookingService(db: Db, cfg: Config, paystack: PaystackClie
 
     if (type === 'charge.success' && reference) {
       await markPaid(reference, eventId ?? reference, data);
+    } else if (type === 'refund.processed' && reference) {
+      // A settled refund (may be admin-initiated or dashboard-initiated). Record + flip idempotently.
+      await applyRefund(reference, data?.id != null ? String(data.id) : (eventId ?? reference), data);
     }
     if (eventId) {
       await db.query(`UPDATE paystack_event SET processed_at = now() WHERE event_id = $1`, [eventId]);
     }
     return { received: true };
+  }
+
+  // ── Apply a settled refund to the ledger (idempotent; shared by webhook; mirrors admin executeRefund) ──
+  // Records a linked negative refund row keyed on the Paystack refund id (partial-unique), flips the
+  // original charge to 'refunded', and marks the booking refunded. Safe if 013 hasn't landed (no-op).
+  async function applyRefund(transactionRef: string, refundProviderId: string, data: any): Promise<void> {
+    const hasCols = await db.query(
+      `SELECT 1 FROM information_schema.columns WHERE table_name='payment' AND column_name='refund_provider_id'`,
+    ).then((r) => r.rows.length > 0);
+    if (!hasCols) return; // DB predates migration 013 — nothing to reconcile against
+    await db.tx(async (q) => {
+      const pay = (await q.query(
+        `SELECT id, booking_id, status, currency, method, amount_minor, ghs_amount_minor
+           FROM payment WHERE ref=$1 OR provider_ref=$1 FOR UPDATE`, [transactionRef])).rows[0];
+      if (!pay) return; // unknown transaction — foreign refund, no-op
+      const refundedMinor = Number(data?.amount ?? pay.ghs_amount_minor ?? pay.amount_minor) || 0;
+      await insertUniqueRef('RFN', 6, async (rfnRef) => {
+        await q.query(
+          `INSERT INTO payment (ref, booking_id, amount_minor, currency, method, status,
+                                provider_ref, raw, refund_of, refund_provider_id)
+           VALUES ($1,$2,$3,$4,$5,'refunded',$6,$7,$8,$9)
+           ON CONFLICT (refund_provider_id) WHERE refund_provider_id IS NOT NULL DO NOTHING`,
+          [rfnRef, pay.booking_id, -Math.abs(refundedMinor), data?.currency ?? pay.currency, pay.method,
+           refundProviderId, JSON.stringify({ refund: data, via: 'webhook' }), pay.id, refundProviderId]);
+      });
+      await q.query(`UPDATE payment SET status='refunded' WHERE id=$1 AND status <> 'refunded'`, [pay.id]);
+      await q.query(`UPDATE booking SET payment_state='refunded', updated_at=now() WHERE id=$1`, [pay.booking_id]);
+    });
   }
 
   // ── Expiry sweep: release unpaid holds past reservation_expires_at (cron-callable) ──

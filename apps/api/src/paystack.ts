@@ -30,9 +30,29 @@ export interface PaystackVerifyResult {
   raw: unknown;                  // full data payload
 }
 
+// Refund a (previously successful) transaction. `transaction` is the Paystack reference or txn id.
+// `amountMinor` is optional (partial refund) in the charged currency's subunit (GHS pesewas); omit for
+// a full refund. See https://paystack.com/docs/api/refund/ — POST /refund.
+export interface PaystackRefundRequest {
+  transaction: string;
+  amountMinor?: number;          // omit → full refund
+  currency?: string;             // 'GHS'
+  customerNote?: string;
+  merchantNote?: string;
+}
+export interface PaystackRefundResult {
+  id: string;                    // Paystack refund id (data.id) as string — the idempotency key
+  status: string;                // 'pending' | 'processing' | 'processed' | 'failed' | ...
+  amountMinor: number;           // refunded amount in the charged currency subunit
+  currency: string;
+  transactionRef: string;        // the original transaction reference (data.transaction.reference)
+  raw: unknown;                  // full data payload
+}
+
 export interface PaystackClient {
   initialize(req: PaystackInitRequest): Promise<PaystackInitResult>;
   verify(reference: string): Promise<PaystackVerifyResult>;
+  refund(req: PaystackRefundRequest): Promise<PaystackRefundResult>;
 }
 
 export class PaystackError extends Error {
@@ -95,6 +115,27 @@ export function createPaystackClient(cfg: PaystackConfig): PaystackClient {
         amountMinor: Number(data.amount),
         currency: data.currency,
         providerRef: String(data.id),
+        raw: data,
+      };
+    },
+    async refund(req) {
+      const data = await call('/refund', {
+        method: 'POST',
+        body: JSON.stringify({
+          transaction: req.transaction,
+          amount: req.amountMinor,          // undefined → Paystack refunds the full amount
+          currency: req.currency,
+          customer_note: req.customerNote,
+          merchant_note: req.merchantNote,
+        }),
+      });
+      // /refund nests the source txn under data.transaction; the refunded amount is data.amount.
+      return {
+        id: String(data.id),
+        status: data.status,
+        amountMinor: Number(data.amount ?? data.transaction?.amount ?? 0),
+        currency: data.currency ?? data.transaction?.currency ?? 'GHS',
+        transactionRef: data.transaction?.reference ?? req.transaction,
         raw: data,
       };
     },
