@@ -372,9 +372,43 @@ function MobileMenu({ onClose, go }) {
 
 function Shell({ children, currency, setCurrency, go }) {
   const [menu, setMenu] = React.useState(false);
+  // Reactive session state (TRI-922). The prototype hardcoded `signedIn` on the
+  // DS <Header> (avatar always) AND always rendered a custom "Sign in" button, so
+  // a signed-in user still saw "Sign in". `LIVE_AUTH()` only tells us live-API
+  // mode is on — NOT whether a session exists — so we resolve /me and drive the
+  // nav off the answer. cachedMe(): undefined = unknown, null = guest, obj = user.
+  // Flag off ⇒ `live` is false and authed stays true → nav renders byte-identical
+  // to the prototype (avatar + Sign in). We read the cache on every render (App
+  // re-renders Shell on nav, and login/logout mutate the cache), and kick a /me
+  // fetch + re-render the first time the answer is unknown.
+  const live = LIVE_AUTH();
+  const [, forceRender] = React.useState(0);
+  const cachedMe = live ? window.TK_AUTH.cachedMe() : undefined;
+  const authed = !live ? true : (cachedMe === undefined ? null : !!cachedMe);
+  React.useEffect(() => {
+    if (!live || window.TK_AUTH.cachedMe() !== undefined) return undefined;
+    let alive = true;
+    window.TK_AUTH.me().then(() => { if (alive) forceRender((n) => n + 1); }, () => {});
+    return () => { alive = false; };
+  }, [live, authed]);
   const onNav = (e) => {
     const accountBtn = e.target.closest('button[aria-label="Your account"]');
-    if (accountBtn) { e.preventDefault(); go && go("profile"); return; }
+    if (accountBtn) {
+      e.preventDefault();
+      if (!live) { go && go("profile"); return; } // byte-identical flag-off
+      // Authed → profile; guest (or brief unknown window) → login. The TRI-920
+      // Settings/Sign out dropdown is intentionally out of this port's scope.
+      go && go(authed === true ? "profile" : "login");
+      return;
+    }
+    // Guest auth CTAs the DS <Header> renders when signedIn is false (TRI-922):
+    // wire its "Log in" / "Sign up" buttons to the real screens.
+    const authBtn = live && e.target.closest('.tk-header button');
+    if (authBtn && authBtn.getAttribute("aria-label") !== "Your account") {
+      const txt = (authBtn.textContent || "").trim().toLowerCase();
+      if (txt === "log in" || txt === "sign in") { e.preventDefault(); go && go("login"); return; }
+      if (txt === "sign up") { e.preventDefault(); go && go("signup"); return; }
+    }
     const a = e.target.closest("a");
     if (!a) return;
     if (a.getAttribute("aria-label") === "TripKoach home") { e.preventDefault(); go && go("home"); return; }
@@ -383,11 +417,11 @@ function Shell({ children, currency, setCurrency, go }) {
   };
   return (
     <div style={{ background: "var(--bg-page)", minHeight: "100%" }} onClick={onNav}>
-      <Header items={NAV} current="#browse" signedIn logoSrc="../../assets/logo-badge.png"
+      <Header items={NAV} current="#browse" signedIn={authed !== false} logoSrc="../../assets/logo-badge.png"
         right={<>
           <CurrencyToggle value={currency} onChange={setCurrency} />
           <IconButton icon="menu" label="Open menu" variant="ghost" className="tk-only-mobile" onClick={() => setMenu(true)} />
-          <Button variant="ghost" size="sm" className="tk-hide-mobile" onClick={() => go && go("login")}>Sign in</Button>
+          {!live && <Button variant="ghost" size="sm" className="tk-hide-mobile" onClick={() => go && go("login")}>Sign in</Button>}
           <Button variant="primary" size="sm" className="tk-hide-mobile" onClick={() => go && go("contact")}>Plan a trip</Button>
         </>} />
       <main>{children}</main>
@@ -593,7 +627,12 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
   const t0 = window.TK_DATA.tours[0];
   const sel = (window.TK_SEL && window.TK_SEL.tourId === t0.id) ? window.TK_SEL : null;
   const t = (t0.packages && sel) ? pkgTour(t0, sel.packageId) : t0;
-  const [pax, setPax] = React.useState(4);
+  // Traveller count (TRI-922). The prototype defaulted to 4 AND only exposed the
+  // count stepper on step 0 (Departure) — which the user never lands on, since
+  // checkout opens on step 1 — so it "assumed 4 travellers" with no way to change
+  // it. Live now defaults to 2 and renders a working count control on the
+  // travellers step (below); flag off keeps the prototype default 4 (byte-identical).
+  const [pax, setPax] = React.useState(() => LIVE_BOOK() ? 2 : 4);
   const [mode, setMode] = React.useState("later");
   // Live-checkout state (inert when the flag is off; hooks always run so order is stable).
   const live = LIVE_BOOK();
@@ -624,6 +663,14 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
   // Selected departure: live picks the chosen one, falling back to a real API
   // departure when the prototype default "d2" doesn't exist. Off ⇒ departures[1].
   const d = (live ? t.departures.find(x => x.id === depId) : null) || t.departures[1] || t.departures[0];
+  // Availability ceiling for the count selector: never let the party exceed the
+  // seats left on the chosen departure (the backend enforces this too via an
+  // atomic guarded reserve + a no-oversell CHECK, but keep the UI honest). Falls
+  // back to 12 when a departure exposes no spotsLeft hint.
+  const paxMax = (d && d.spotsLeft && d.spotsLeft > 0) ? d.spotsLeft : 12;
+  React.useEffect(() => {
+    if (live && pax > paxMax) setPax(paxMax);
+  }, [live, paxMax, pax]);
   const unit = window.TK_PRICE.perPerson(t, pax);
   const total = unit * pax;
   const nextTier = window.TK_PRICE.nextTier(t, pax);
@@ -631,8 +678,9 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
   const readVal = (id) => { const el = document.getElementById(id); return el && typeof el.value === "string" ? el.value.trim() : ""; };
   const buildTravellers = (lead) => {
     const out = [{ name: lead.name || "Lead traveller", email: lead.email || undefined, phone: lead.phone || undefined, idNumber: lead.idNumber || undefined, lead: true }];
-    const extra = ["w-t2", "w-t3", "w-t4"];
-    for (let i = 1; i < pax; i++) out.push({ name: readVal(extra[i - 1]) || ("Traveller " + (i + 1)), lead: false });
+    // Read exactly pax-1 companion fields (w-t2 … w-t{pax}); the fields are
+    // rendered dynamically from pax now (TRI-922) rather than a fixed 3.
+    for (let i = 1; i < pax; i++) out.push({ name: readVal("w-t" + (i + 1)) || ("Traveller " + (i + 1)), lead: false });
     return out;
   };
   async function onPay() {
@@ -689,6 +737,16 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
           </>}
           {step === 1 && <>
             <h1 className="tk-h2">Who is travelling?</h1>
+            {live && <div className="tk-card"><div className="tk-card__body" style={{ gap: "var(--space-3)", padding: "var(--space-5)" }}>
+              {/* Traveller-count selector (TRI-922): the working control the board
+                  reported missing. min 1, max = seats left on the chosen departure;
+                  changing it recomputes the price below and drives partySize. */}
+              <span className="tk-overline">How many travellers?</span>
+              <div className="tk-row" style={{ justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "var(--space-3)" }}>
+                <span className="tk-body-sm tk-muted">{d && d.spotsLeft != null ? (d.spotsLeft + " spot" + (d.spotsLeft === 1 ? "" : "s") + " left on this departure") : "Choose your party size"}</span>
+                <NumberStepper id="pax-travellers" value={pax} min={1} max={paxMax} onChange={setPax} />
+              </div>
+            </div></div>}
             <div className="tk-card"><div className="tk-card__body" style={{ gap: "var(--space-4)", padding: "var(--space-5)" }}>
               <span className="tk-overline">Lead traveller</span>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-4)" }}>
@@ -698,14 +756,24 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
                 <FormField id="w-id" label="ID number" optional>{liveAuth ? <Input value={leadInfo.idNumber} onChange={leadField("idNumber")} placeholder="Ghana Card or passport" /> : <Input placeholder="Ghana Card or passport" />}</FormField>
               </div>
             </div></div>
-            <div className="tk-card"><div className="tk-card__body" style={{ gap: "var(--space-4)", padding: "var(--space-5)" }}>
-              <span className="tk-overline">Travellers 2–4</span>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-4)" }}>
-                <FormField id="w-t2" label="Traveller 2" required><Input placeholder="Full name" /></FormField>
-                <FormField id="w-t3" label="Traveller 3" required error="Enter a name for traveller 3"><Input /></FormField>
-                <FormField id="w-t4" label="Traveller 4" required><Input placeholder="Full name" /></FormField>
-              </div>
-            </div></div>
+            {live
+              ? (pax > 1 && <div className="tk-card"><div className="tk-card__body" style={{ gap: "var(--space-4)", padding: "var(--space-5)" }}>
+                  {/* Exactly pax-1 companion fields, matching the chosen count (TRI-922). */}
+                  <span className="tk-overline">{pax === 2 ? "Traveller 2" : "Travellers 2–" + pax}</span>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-4)" }}>
+                    {Array.from({ length: pax - 1 }, (_, i) => (
+                      <FormField key={i} id={"w-t" + (i + 2)} label={"Traveller " + (i + 2)} required><Input placeholder="Full name" /></FormField>
+                    ))}
+                  </div>
+                </div></div>)
+              : <div className="tk-card"><div className="tk-card__body" style={{ gap: "var(--space-4)", padding: "var(--space-5)" }}>
+                  <span className="tk-overline">Travellers 2–4</span>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-4)" }}>
+                    <FormField id="w-t2" label="Traveller 2" required><Input placeholder="Full name" /></FormField>
+                    <FormField id="w-t3" label="Traveller 3" required error="Enter a name for traveller 3"><Input /></FormField>
+                    <FormField id="w-t4" label="Traveller 4" required><Input placeholder="Full name" /></FormField>
+                  </div>
+                </div></div>}
             <FormField id="w-notes" label="Special requests" optional><Textarea rows={3} placeholder="Dietary needs, mobility, celebrations…" /></FormField>
           </>}
           {step === 2 && <>
