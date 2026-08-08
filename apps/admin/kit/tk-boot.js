@@ -117,6 +117,9 @@
     if (Array.isArray(t.highlights)) out.highlights = t.highlights;
     if (Array.isArray(t.included)) out.included = t.included;
     if (Array.isArray(t.excluded)) out.excluded = t.excluded;
+    // TRI-928: carry the ordered gallery (detail endpoint returns images[]; the
+    // list projection returns only the cover). Editor seeds the MediaManager from this.
+    out.images = (Array.isArray(t.images) && t.images.length) ? t.images.slice() : (out.image ? [out.image] : []);
     if (Array.isArray(t.departures)) out.departures = t.departures.map(mapDeparture);
     return out;
   }
@@ -256,8 +259,37 @@
     if (Array.isArray(v.included)) b.included = v.included;
     if (Array.isArray(v.excluded)) b.excluded = v.excluded;
     if (Array.isArray(v.tiers)) b.tiers = v.tiers;
+    if (Array.isArray(v.images)) b.images = v.images;   // TRI-928 gallery (ordered, cover first)
+    if (v.image != null) b.image = v.image;             // TRI-928 cover image
     if (v.price != null && v.price !== "") b.price = +v.price;
     return b;
+  }
+
+  // TRI-928: upload raw image bytes to POST /api/admin/media (TRI-918) and resolve
+  // the canonical cdn.tripkoach.com URL. The endpoint buffers the RAW request body
+  // keyed by Content-Type (no multipart); unknown types are sent as octet-stream so
+  // the server still validates by magic bytes. XHR (not fetch) gives upload %.
+  function uploadMedia(file, onProgress) {
+    return new Promise(function (resolve, reject) {
+      var name = (file && file.name) || "upload";
+      var ct = (file && file.type) || "";
+      var OK = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+      if (OK.indexOf(ct) === -1) ct = "application/octet-stream";
+      var xhr = new XMLHttpRequest();
+      xhr.open("POST", adminBase() + "/media?filename=" + encodeURIComponent(name), true);
+      xhr.withCredentials = true;
+      xhr.setRequestHeader("Accept", "application/json");
+      xhr.setRequestHeader("Content-Type", ct);
+      if (xhr.upload && onProgress) xhr.upload.onprogress = function (e) { if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100)); };
+      xhr.onload = function () {
+        var p = null; try { p = JSON.parse(xhr.responseText); } catch (_) {}
+        if (xhr.status >= 200 && xhr.status < 300 && p && p.asset && p.asset.url) { resolve(p.asset.url); return; }
+        var err = (p && p.error) || {};
+        reject(TkApiError(xhr.status || 0, err.code || null, err.message || ("Upload failed (HTTP " + xhr.status + ")")));
+      };
+      xhr.onerror = function () { reject(TkApiError(0, "network", "Upload failed — network error")); };
+      xhr.send(file);
+    });
   }
 
   // ---- the write API screens call ------------------------------------------
@@ -283,6 +315,7 @@
     saveTour: function (v) { return v.id && v.id !== "new" ? API.updateTour(v.id, v) : API.createTour(v); },
     setPublished: function (id, pub) { return req("PATCH", "/tours/" + encodeURIComponent(id), { published: !!pub }); },
     deleteTour: function (id) { return req("DELETE", "/tours/" + encodeURIComponent(id)); },
+    uploadMedia: uploadMedia, // TRI-928: File → cdn.tripkoach.com URL
     // regions
     listRegions: function () { return req("GET", "/regions"); },
     createRegion: function (name) { return req("POST", "/regions", { name: name }); },
