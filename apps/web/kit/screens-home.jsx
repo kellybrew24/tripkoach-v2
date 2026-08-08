@@ -37,6 +37,13 @@ function HomeWeb({ go }) {
   // and the prototype render is unchanged.
   const featured = tours.filter(t => t.featured);
   const popular = curated.length ? curated : (featured.length ? featured : tours).slice(0, 3);
+  // Latest 3 stories for the homepage journal rail (TRI-954). window.TK_BLOG is
+  // seeded from fixtures and, in live mode, replaced by GET /api/v1/blog at boot
+  // (tk-boot loadBlog) — already newest-first, so the first three are the most
+  // recent published posts. BlogCard is published on window by screens-blog.jsx;
+  // reading it at render time (not module load) keeps it order-independent.
+  const stories = (window.TK_BLOG || []).slice(0, 3);
+  const BlogCard = window.BlogCard;
 
   return (
     <div>
@@ -218,6 +225,24 @@ function HomeWeb({ go }) {
           ))}
         </div>
       </Section>
+
+      {/* ── LATEST STORIES ──────────────────────────────── */}
+      {stories.length && BlogCard ? (
+        <div style={{ background: "var(--brand-wash)", borderBlock: "1px solid var(--border-subtle)" }}>
+          <Section style={{ paddingBlock: "var(--space-14)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 16, flexWrap: "wrap", marginBottom: "var(--space-8)" }}>
+              <div>
+                <span className="tk-overline" style={{ color: "var(--gold-700)" }}>From the journal</span>
+                <h2 className="tk-h1" style={{ marginTop: 8, maxWidth: "18ch" }}>Latest stories from the ground.</h2>
+              </div>
+              <Button variant="secondary" iconEnd="arrow-right" onClick={() => go("blog")}>All stories</Button>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "var(--space-5)" }}>
+              {stories.map(p => <BlogCard key={p.slug} p={p} go={go} />)}
+            </div>
+          </Section>
+        </div>
+      ) : null}
 
       {/* ── CTA ─────────────────────────────────────────── */}
       <Section style={{ paddingTop: 0 }}>
