@@ -33,6 +33,18 @@ const BOOKINGS = { bookings: [
 const PAYMENTS = { payments: [
   { id: "MOCK-PAY-1", bookingRef: "MOCK-TK-1", customer: "MOCK Ama Mensah", usdAmountMinor: 13000, ghsAmountMinor: 2028000, fxRateUsed: 15.6, provider: "Paystack", channel: "card", status: "paid", createdAt: "2026-08-01" },
 ] };
+// TRI-898 reporting contract: dashboard aggregates (A15) + audit log (A16).
+const DASHBOARD = {
+  range: "7d",
+  bookings: { total: 137, byStatus: { confirmed: 82, pending: 34, cancelled: 12 } },
+  revenue: { usd: 24180, currency: "USD", ghs: 288790, ghsCurrency: "GHS" },
+  departures: { upcoming: 6, next: [{ id: "d1", tour: "MOCK Admin Accra Tour", tourId: "mock-live-accra", date: "Sat 22 Aug 2026", seatsTotal: 12, booked: 9, spotsLeft: 3 }] },
+  occupancy: { seatsTotal: 60, seatsReserved: 34, spotsLeft: 26, utilizationPct: 56.7 },
+};
+const AUDIT = { items: [
+  { id: "a1", action: "booking.cancel", actorType: "staff", actorId: "s1", actor: "MOCK Kwame Boateng", actorEmail: "kwame@tripkoach.com", targetType: "booking", targetId: "MOCK-TK-1", before: null, after: null, ip: "1.2.3.4", createdAt: "2026-08-08T10:15:00Z" },
+  { id: "a2", action: "payment.refund", actorType: "staff", actorId: "s1", actor: "MOCK Kwame Boateng", actorEmail: "kwame@tripkoach.com", targetType: "payment", targetId: "MOCK-PAY-1", before: null, after: null, ip: "1.2.3.4", createdAt: "2026-08-08T09:00:00Z" },
+], page: 1, pageSize: 50, total: 2, totalPages: 1 };
 
 function makeServer(opts) {
   opts = opts || {};
@@ -50,10 +62,12 @@ function makeServer(opts) {
     if (url.endsWith("/api/admin/regions")) return send(200, REGIONS);
     if (url.endsWith("/api/admin/bookings")) return send(200, BOOKINGS);
     if (url.endsWith("/api/admin/payments")) return send(200, PAYMENTS);
+    if (url.endsWith("/api/admin/dashboard")) return send(200, DASHBOARD);
+    if (url.endsWith("/api/admin/audit-log")) return send(200, AUDIT);
     if (/\/api\/admin\/(departures|promos|staff|customers|guides|reviews)$/.test(url)) return send(200, {});
     // Writes
     if (/\/api\/admin\/bookings\/[^/]+\/cancel$/.test(url)) return opts.forbidWrites ? send(403, { error: { code: "forbidden", message: "No permission" } }) : send(200, { ok: true });
-    if (/\/api\/admin\/payments\/[^/]+\/refund-flag$/.test(url)) return send(200, { ok: true });
+    if (/\/api\/admin\/payments\/[^/]+\/refund$/.test(url) && req.method === "POST") return send(200, { ok: true, refund: { status: "pending" } });
     return send(404, { error: { code: "not_found", message: url } });
   });
   server._hits = hits;
@@ -116,13 +130,29 @@ const pass = (name, cond, extra = "") => { console.log(`[smoke:admin] ${cond ? "
   const payments = await render("/payments", base);
   pass("payments hydrate from /api/admin/payments", payments.html.includes("MOCK-PAY-1"));
 
-  const noErr = [tours, bookings, payments].every((r) => r.errors.length === 0);
-  pass("no jsdom errors on live admin render", noErr, [tours, bookings, payments].flatMap((r) => r.errors).join(" | "));
+  // --- dashboard aggregates (TRI-898 / TRI-906) ----------------------------
+  const dash = await render("/", base);
+  pass("dashboard hydrates live revenue from /api/admin/dashboard", dash.html.includes("$24,180"), dash.html.slice(0, 400));
+  pass("dashboard shows live bookings total", dash.html.includes("137"));
+  pass("dashboard shows live capacity utilization", dash.html.includes("56.7%"));
 
-  // --- 3. write path drives the guarded endpoint ---------------------------
+  // --- audit log (TRI-898 / TRI-906) ---------------------------------------
+  const audit = await render("/audit-log", base);
+  pass("audit-log renders live entries", audit.html.includes("booking cancel") && audit.html.includes("MOCK Kwame Boateng"), audit.html.slice(0, 400));
+  pass("audit-log references the entity acted on", audit.html.includes("MOCK-TK-1"));
+  pass("audit-log shows the entry count", audit.html.includes("2 entries"));
+
+  const noErr = [tours, bookings, payments, dash, audit].every((r) => r.errors.length === 0);
+  pass("no jsdom errors on live admin render", noErr, [tours, bookings, payments, dash, audit].flatMap((r) => r.errors).join(" | "));
+
+  // --- 3. write path drives the guarded endpoints --------------------------
   const w = payments.window;
   await w.TK_ADMIN_API.cancelBooking("MOCK-TK-1", "Customer request");
   pass("cancelBooking hits POST /api/admin/bookings/MOCK-TK-1/cancel", server._hits.includes("POST /api/admin/bookings/MOCK-TK-1/cancel"), server._hits.join(" | "));
+  // TRI-906: refund now hits the REAL execution route (/refund), not the old
+  // non-existent /refund-flag stub.
+  await w.TK_ADMIN_API.refundPayment("MOCK-PAY-1");
+  pass("refundPayment hits POST /api/admin/payments/MOCK-PAY-1/refund", server._hits.includes("POST /api/admin/payments/MOCK-PAY-1/refund"), server._hits.join(" | "));
   const usd = w.TK_ADMIN.bookings[0];
   pass("booking carries usd/ghs/fx fields", usd.usd === 130 && usd.ghs === 20280 && usd.fx === 15.6, JSON.stringify(usd));
   server.close();

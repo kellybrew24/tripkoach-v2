@@ -148,7 +148,7 @@ function PaymentsAdmin({ go, state }) {
           rows={rows} getRowId={r => r.id}
           rowActions={(r) => r.status === "pending"
             ? <Button size="sm" variant="secondary" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.markPaid(r.id), () => window.tkToast("Marked " + r.id + " as paid"))}>Mark paid</Button>
-            : r.status === "paid" ? <IconButton icon="receipt" label="Issue refund" variant="ghost" size="sm" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.flagRefund(r.id), () => window.tkToast("Refund started for " + r.id))} /> : <IconButton icon="ellipsis" label="Actions" variant="ghost" size="sm" onClick={() => window.tkToast("Retry requested for " + r.id)} />}
+            : r.status === "paid" ? <IconButton icon="receipt" label="Issue refund" variant="ghost" size="sm" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.refundPayment(r.id), () => window.tkToast("Refund started for " + r.id))} /> : <IconButton icon="ellipsis" label="Actions" variant="ghost" size="sm" onClick={() => window.tkToast("Retry requested for " + r.id)} />}
           empty={<EmptyState icon="wallet" title="No transactions" body="Payments appear here once money starts moving." />} />
       </div>
     </div>

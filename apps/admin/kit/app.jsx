@@ -12,8 +12,9 @@ window.tkToast = (msg) => {
   setTimeout(() => { el.style.opacity = "0"; el.style.transform = "translateY(8px)"; setTimeout(() => el.remove(), 250); }, 2600);
 };
 
-// Screens an Operator may not see (finance + org admin).
-const ADMIN_ONLY = ["payments", "users", "settings"];
+// Screens an Operator may not see (finance + org admin). Audit log is settings-
+// tier on the backend (perm settings.manage), so it stays admin-only too.
+const ADMIN_ONLY = ["payments", "users", "settings", "audit"];
 const USERS = {
   admin: { name: "Kwame B.", role: "Admin", initials: "KB", email: "kwame@tripkoach.com", greet: "Kwame" },
   operator: { name: "Kofi A.", role: "Operator", initials: "KA", email: "kofi@tripkoach.com", greet: "Kofi" },
@@ -35,6 +36,9 @@ function navGroups(role) {
     ] },
     { label: "Admin", items: [
       { id: "users", label: "Staff & roles", icon: "shield-check" },
+      // Audit log (A16) is a live-only read screen; gating the nav entry behind
+      // the live flag keeps the fixture/prototype build byte-identical.
+      ...((window.TK_CONFIG && window.TK_CONFIG.USE_LIVE_API) ? [{ id: "audit", label: "Audit log", icon: "clock" }] : []),
       { id: "settings", label: "Settings", icon: "settings" },
     ] },
   ];
@@ -56,6 +60,7 @@ const META = {
   "tour-edit": { title: "Edit tour", sub: null },
   promos: { title: "Promo codes", sub: "Discounts and their usage" },
   users: { title: "Staff & roles", sub: "Who can do what in the console" },
+  audit: { title: "Audit log", sub: "Every action taken in the console" },
   settings: { title: "Settings", sub: "Shared by the website and the app" },
   "admin-profile": { title: "Your profile", sub: "Your staff account" },
   "admin-prefs": { title: "Preferences", sub: "How the console works for you" },
@@ -73,7 +78,7 @@ const ADMIN_ROUTES = [
   ["dashboard", "/"], ["bookings", "/bookings"], ["departures", "/departures"],
   ["customers", "/customers"], ["guides", "/guides"], ["reviews", "/reviews"],
   ["payments", "/payments"], ["tours", "/tours"], ["promos", "/promos"],
-  ["users", "/staff"], ["settings", "/settings"], ["admin-profile", "/profile"],
+  ["users", "/staff"], ["audit", "/audit-log"], ["settings", "/settings"], ["admin-profile", "/profile"],
   ["admin-prefs", "/preferences"], ["login", "/login"], ["mfa", "/mfa"],
   ["reset", "/reset"], ["expired", "/expired"], ["forbidden", "/403"],
 ];
@@ -208,6 +213,7 @@ function AdminApp() {
     : screen === "tour-edit" ? <TourEdit go={go} state={state} />
     : screen === "promos" ? <PromosAdmin go={go} />
     : screen === "users" ? <UsersAdmin go={go} />
+    : screen === "audit" ? <AuditLogAdmin go={go} />
     : screen === "settings" ? <SettingsAdmin go={go} />
     : screen === "admin-profile" ? <AccountProfileAdmin go={go} user={user} />
     : screen === "admin-prefs" ? <PreferencesAdmin go={go} />

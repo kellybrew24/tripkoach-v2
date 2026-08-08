@@ -75,7 +75,7 @@ const APPS = {
   admin: {
     kit: join(ROOT, "apps/admin/kit"),
     // Load order mirrors ui_kits/admin/index.html exactly.
-    screens: ["screens-auth.jsx", "screens-dashboard.jsx", "screens-bookings.jsx", "screens-tours.jsx", "screens-more.jsx"],
+    screens: ["screens-auth.jsx", "screens-dashboard.jsx", "screens-bookings.jsx", "screens-tours.jsx", "screens-more.jsx", "screens-audit.jsx"],
     app: "app.jsx",
     // data.js (window.TK_DATA) must load before admin-data.js (which reads it).
     data: ["data.js", "admin-data.js"],

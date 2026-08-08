@@ -20,10 +20,53 @@ function Dashboard({ go, state, role = "admin" }) {
   const A = window.TK_ADMIN;
   const [period, setPeriod] = React.useState("7d");
   const P = PERIODS[period];
+  const LIVE = !!(window.TK_CONFIG && window.TK_CONFIG.USE_LIVE_API);
+  // Live aggregates (TRI-898 GET /dashboard). Pre-hydrated at boot for the default
+  // "7d" range; refetched whenever the range changes. Flag off ⇒ stays null and
+  // every derived value below falls back to the mock literals (byte-identical).
+  const [agg, setAgg] = React.useState(() => (LIVE && A && A.dashboard) || null);
+  React.useEffect(() => {
+    if (!LIVE || !window.TK_ADMIN_API) return;
+    let off = false;
+    window.TK_ADMIN_API.getDashboard(period).then(
+      (d) => { if (!off && d) { setAgg(d); if (A) A.dashboard = d; } },
+      () => {}
+    );
+    return () => { off = true; };
+  }, [period]);
   const loading = state.dashView === "loading";
   const empty = state.dashView === "empty";
   const pending = A.bookings.filter(b => b.status === "pending");
   const upcoming = A.departures.filter(d => d.status === "scheduled").slice(0, 5);
+
+  // --- live-derived display values (all default to the prototype literals) ----
+  const live = (LIVE && agg) ? agg : null;
+  const bs = live ? (live.bookings.byStatus || {}) : null;
+  const n = (v) => (typeof v === "number" ? v : 0);
+  const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+  const statBookings = live ? n(live.bookings.total).toLocaleString() : P.bookings;
+  const statConfirmed = live ? n(bs.confirmed) : P.confirmed;
+  const statRevenue = live ? "$" + n(live.revenue.usd).toLocaleString() : P.revenue;
+  const statCapacity = live ? (n(live.occupancy.utilizationPct) + "%") : "71%";
+  const statPending = live ? String(n(bs.pending)) : "5";
+  const statDepartures = live ? String(n(live.departures.upcoming)) : "6";
+  const statTravellers = live ? String(n(live.occupancy.seatsReserved)) : "34";
+  // Bookings chart: backend exposes no time series, so when live we show the real
+  // status breakdown as bars; off, the mock trend line.
+  const chartType = live ? "bar" : "line";
+  const chartData = live ? Object.keys(bs).map((k) => ({ label: cap(k), value: n(bs[k]) })) : P.series;
+  const chartAria = live ? ("Bookings by status: " + chartData.map((d) => d.value + " " + d.label.toLowerCase()).join(", ")) : P.trend;
+  // Right-hand donut: revenue-by-region is fixture-only, so live shows the real
+  // bookings-by-status split for both roles.
+  const donutTitle = live ? "Bookings by status" : (role === "admin" ? "Revenue by region" : "Bookings by status");
+  const donutData = live ? chartData : (role === "admin"
+    ? [{label:"Central",value:9600},{label:"Greater Accra",value:7200},{label:"Eastern",value:4180},{label:"Other",value:3200}]
+    : [{label:"Confirmed",value:82},{label:"Pending",value:41},{label:"Cancelled",value:12}]);
+  const donutAria = live
+    ? chartAria
+    : (role === "admin"
+      ? "Revenue $9,600 Central, $7,200 Greater Accra, $4,180 Eastern, $3,200 other"
+      : "82 confirmed, 41 pending, 12 cancelled");
 
   if (empty) {
     return <EmptyState icon="compass" title="No activity yet"
@@ -35,22 +78,22 @@ function Dashboard({ go, state, role = "admin" }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }}>
         {role === "admin" ? <>
-          <StatCard loading={loading} label={"Bookings " + P.short} value={P.bookings} icon="ticket" delta={P.bDelta} deltaDir="up" hint={"vs previous " + P.label.toLowerCase().replace("last ", "")} />
-          <StatCard loading={loading} label="Expected revenue" value={P.revenue} icon="wallet" delta="+8%" deltaDir="up" hint={P.short} />
-          <StatCard loading={loading} label="Capacity utilization" value="71%" icon="users" delta="+4pts" deltaDir="up" hint="next 30 days" />
-          <StatCard loading={loading} label="Pending confirmation" value="5" icon="clock" delta="2 over 24h" deltaDir="down" hint="act soon" />
+          <StatCard loading={loading} label={"Bookings " + P.short} value={statBookings} icon="ticket" delta={live ? null : P.bDelta} deltaDir="up" hint={"vs previous " + P.label.toLowerCase().replace("last ", "")} />
+          <StatCard loading={loading} label="Expected revenue" value={statRevenue} icon="wallet" delta={live ? null : "+8%"} deltaDir="up" hint={P.short} />
+          <StatCard loading={loading} label="Capacity utilization" value={statCapacity} icon="users" delta={live ? null : "+4pts"} deltaDir="up" hint="next 30 days" />
+          <StatCard loading={loading} label="Pending confirmation" value={statPending} icon="clock" delta={live ? null : "2 over 24h"} deltaDir="down" hint="act soon" />
         </> : <>
-          <StatCard loading={loading} label="Pending confirmation" value="5" icon="clock" delta="2 over 24h" deltaDir="down" hint="act soon" />
-          <StatCard loading={loading} label={"Departures " + P.short} value="6" icon="calendar-days" delta="2 today" deltaDir="flat" />
-          <StatCard loading={loading} label="Travellers to host" value="34" icon="users" delta="next 7 days" deltaDir="flat" />
-          <StatCard loading={loading} label="Capacity utilization" value="71%" icon="compass" delta="+4pts" deltaDir="up" hint="next 30 days" />
+          <StatCard loading={loading} label="Pending confirmation" value={statPending} icon="clock" delta={live ? null : "2 over 24h"} deltaDir="down" hint="act soon" />
+          <StatCard loading={loading} label={"Departures " + P.short} value={statDepartures} icon="calendar-days" delta={live ? null : "2 today"} deltaDir="flat" />
+          <StatCard loading={loading} label="Travellers to host" value={statTravellers} icon="users" delta={live ? null : "next 7 days"} deltaDir="flat" />
+          <StatCard loading={loading} label="Capacity utilization" value={statCapacity} icon="compass" delta={live ? null : "+4pts"} deltaDir="up" hint="next 30 days" />
         </>}
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 16, alignItems: "start" }}>
         <div className="tk-chartcard">
           <div className="tk-row" style={{ justifyContent: "space-between", marginBottom: 14, gap: 12, flexWrap: "wrap" }}>
-            <div><h3 className="tk-h5" style={{ margin: 0 }}>Bookings, {P.label.toLowerCase()}</h3><p className="tk-caption">{P.bookings} new bookings · {P.confirmed} confirmed</p></div>
+            <div><h3 className="tk-h5" style={{ margin: 0 }}>Bookings, {P.label.toLowerCase()}</h3><p className="tk-caption">{statBookings} new bookings · {statConfirmed} confirmed</p></div>
             <div className="tk-row" style={{ gap: 12 }}>
               <Select aria-label="Period" value={period} onChange={(e) => setPeriod(e.target.value)} style={{ width: 150, minHeight: 36 }}
                 options={[{ value: "7d", label: "Last 7 days" }, { value: "30d", label: "Last 30 days" }, { value: "90d", label: "Last 90 days" }, { value: "ytd", label: "Year to date" }]} />
@@ -58,16 +101,12 @@ function Dashboard({ go, state, role = "admin" }) {
             </div>
           </div>
           {loading ? <span className="tk-skeleton" style={{ display: "block", height: 160, borderRadius: 8 }} />
-            : <MiniChart type="line" height={180} ariaLabel={P.trend} data={P.series} />}
+            : <MiniChart type={chartType} height={180} ariaLabel={chartAria} data={chartData} />}
         </div>
         <div className="tk-chartcard">
-          <h3 className="tk-h5" style={{ margin: "0 0 14px" }}>{role === "admin" ? "Revenue by region" : "Bookings by status"}</h3>
+          <h3 className="tk-h5" style={{ margin: "0 0 14px" }}>{donutTitle}</h3>
           {loading ? <span className="tk-skeleton" style={{ display: "block", height: 140, borderRadius: 8 }} />
-            : role === "admin"
-              ? <MiniChart type="donut" ariaLabel="Revenue $9,600 Central, $7,200 Greater Accra, $4,180 Eastern, $3,200 other"
-                  data={[{label:"Central",value:9600},{label:"Greater Accra",value:7200},{label:"Eastern",value:4180},{label:"Other",value:3200}]} />
-              : <MiniChart type="donut" ariaLabel="82 confirmed, 41 pending, 12 cancelled"
-                  data={[{label:"Confirmed",value:82},{label:"Pending",value:41},{label:"Cancelled",value:12}]} />}
+            : <MiniChart type="donut" ariaLabel={donutAria} data={donutData} />}
         </div>
       </div>
 

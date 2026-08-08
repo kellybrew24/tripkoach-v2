@@ -276,7 +276,10 @@
     cancelBooking: function (ref, reason) { return req("POST", "/bookings/" + encodeURIComponent(ref) + "/cancel", { reason: reason }); },
     // payments
     listPayments: function () { return req("GET", "/payments"); },
-    flagRefund: function (id) { return req("POST", "/payments/" + encodeURIComponent(id) + "/refund-flag"); },
+    // TRI-897: real Paystack refund (was a flag-only stub that hit a non-existent
+    // /refund-flag route). Optional body carries { amount, reason }; omit amount
+    // for a full refund of the original charge.
+    refundPayment: function (id, body) { return req("POST", "/payments/" + encodeURIComponent(id) + "/refund", body || {}); },
     markPaid: function (id) { return req("POST", "/payments/" + encodeURIComponent(id) + "/mark-paid"); },
     // promos / settings / staff
     listPromos: function () { return req("GET", "/promos"); },
@@ -295,6 +298,13 @@
     // misc lists
     listCustomers: function () { return req("GET", "/customers"); },
     listGuides: function () { return req("GET", "/guides"); },
+    // reporting (TRI-898): console-home aggregates + read-only audit log (A15/A16)
+    getDashboard: function (range) { return req("GET", "/dashboard" + (range ? "?range=" + encodeURIComponent(range) : "")); },
+    listAuditLog: function (params) {
+      var q = [];
+      if (params) { for (var k in params) if (params[k] != null && params[k] !== "") q.push(encodeURIComponent(k) + "=" + encodeURIComponent(params[k])); }
+      return req("GET", "/audit-log" + (q.length ? "?" + q.join("&") : ""));
+    },
     request: req,
   };
   window.TK_ADMIN_API = API;
@@ -383,6 +393,9 @@
           if (!Array.isArray(window.TK_REVIEWS)) window.TK_REVIEWS = [];
           window.TK_REVIEWS.length = 0; Array.prototype.push.apply(window.TK_REVIEWS, revs);
         }); }),
+        // Dashboard aggregates (TRI-898) for the default "7d" range so the console
+        // home renders real numbers on first paint; the screen refetches on range change.
+        safe(function () { return API.getDashboard("7d").then(function (d) { if (d) setAdmin("dashboard", d); }); }),
       ]);
     });
   }
