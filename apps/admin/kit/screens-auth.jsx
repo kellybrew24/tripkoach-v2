@@ -1,17 +1,33 @@
 const NS = window.TripKoachDesignSystem_c9e4af;
 const { Button, Input, PasswordInput, FormField, Checkbox, Alert, Icon } = NS;
 
+// TRI-923 — the console sign-in aside rotates a small curated set of imagery + a
+// restrained time-of-day greeting by the operator's LOCAL time, so the panel feels
+// alive without changing the branded, staff-only copy. Imagery is served from
+// cdn.tripkoach.com (TRI-914/918 hard rule — no dev-hosted / base64 heroes); the
+// per-bucket scrim keeps the aside dark enough for white copy at any hour.
+const TK_ADMIN_PROMO_BUCKET = (d) => { const h = (d || new Date()).getHours(); return h < 5 ? "night" : h < 11 ? "morning" : h < 17 ? "afternoon" : h < 21 ? "evening" : "night"; };
+const TK_ADMIN_PROMO = {
+  morning:   { img: "https://cdn.tripkoach.com/img/posts/green-season-ghana-hero.jpg",                greet: "Good morning",   scrim: "linear-gradient(180deg, rgba(60,42,15,.30), rgba(12,12,14,.74))" },
+  afternoon: { img: "https://cdn.tripkoach.com/img/posts/kakum-canopy-walk-cape-coast-day-trip-hero.jpg", greet: "Good afternoon", scrim: "linear-gradient(180deg, rgba(15,30,48,.30), rgba(12,12,14,.74))" },
+  evening:   { img: "https://cdn.tripkoach.com/img/posts/mole-larabanga-northern-ghana-weekend-hero.jpg",  greet: "Good evening",   scrim: "linear-gradient(180deg, rgba(120,52,12,.36), rgba(14,10,8,.8))" },
+  night:     { img: "https://cdn.tripkoach.com/img/posts/cape-coast-castles-guide-hero.jpg",          greet: "Good evening",   scrim: "linear-gradient(180deg, rgba(26,26,72,.42), rgba(6,8,20,.84))" },
+};
+
 function AuthFrame({ children, foot }) {
+  const promo = TK_ADMIN_PROMO[TK_ADMIN_PROMO_BUCKET()];
   return (
     <div style={{ minHeight: "100vh", display: "grid", gridTemplateColumns: "1fr 1fr", background: "var(--shell-content-bg)" }}>
       <div style={{ position: "relative", background: "var(--n-950)", color: "var(--n-0)", padding: "48px", display: "flex", flexDirection: "column", justifyContent: "space-between", overflow: "hidden" }} className="tk-admin-authaside">
-        <img src="https://cdn.tripkoach.com/img/tours/discover-ghana-in-10-days/hero-1440.jpg" alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", opacity: 0.22 }} />
+        <img src={promo.img} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", opacity: 0.3 }} />
+        <span style={{ position: "absolute", inset: 0, background: promo.scrim }} />
         <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 10 }}>
           <img src="../../assets/logo-badge.png" width="38" height="38" alt="" />
           <strong style={{ fontWeight: 800, fontSize: 18, letterSpacing: "-0.02em" }}>TripKoach <span style={{ color: "var(--gold-400)" }}>Ops</span></strong>
         </div>
         <div style={{ position: "relative" }}>
-          <h1 style={{ fontFamily: "var(--font-display)", fontWeight: 800, letterSpacing: "-0.03em", lineHeight: 1.05, fontSize: 34, maxWidth: "14ch" }}>The back office for every booking in Ghana.</h1>
+          <span className="tk-overline" style={{ color: "var(--gold-400)" }}>{promo.greet}</span>
+          <h1 style={{ fontFamily: "var(--font-display)", fontWeight: 800, letterSpacing: "-0.03em", lineHeight: 1.05, fontSize: 34, maxWidth: "14ch", marginTop: 8 }}>The back office for every booking in Ghana.</h1>
           <p style={{ color: "rgba(255,255,255,.7)", marginTop: 12, maxWidth: "40ch", fontSize: 14.5 }}>Tours, departures, bookings and payments — one console for the whole operation.</p>
         </div>
         <p style={{ position: "relative", fontSize: 12, color: "rgba(255,255,255,.5)" }}>Staff access only · All actions are logged.</p>

@@ -10,6 +10,50 @@ const LIVE_AUTH = () => !!(window.TK_CONFIG && window.TK_CONFIG.USE_LIVE_API && 
 const authVal = (id) => { const el = document.getElementById(id); return el && typeof el.value === "string" ? el.value.trim() : ""; };
 const authErrMsg = (e, fallback) => (e && e.message ? e.message : (fallback || "Something went wrong. Please try again."));
 
+// TRI-923 — the left promo panel used to statically read "Welcome back", which is
+// wrong for first-time / prospective customers. It now (1) swaps copy on the auth
+// mode — returning ("sign in") vs new ("sign up") — and (2) rotates a small curated
+// set of imagery + greeting + scrim by the visitor's LOCAL time-of-day so the panel
+// feels alive with zero extra logic and stays deterministic (no per-refresh random).
+// All imagery lives on cdn.tripkoach.com (TRI-914/918 hard rule — no dev-hosted or
+// base64 heroes); each scrim keeps the bottom heavily darkened so white copy stays
+// legible across every image in the set.
+const TK_PROMO_BUCKET = (d) => { const h = (d || new Date()).getHours(); return h < 5 ? "night" : h < 11 ? "morning" : h < 17 ? "afternoon" : h < 21 ? "evening" : "night"; };
+const TK_PROMO_SET = {
+  morning:   { img: "https://cdn.tripkoach.com/img/posts/green-season-ghana-hero.jpg",                greet: "Good morning",   newSub: "Wake to Wli's falls and Kakum at first light — build the trip that's yours." },
+  afternoon: { img: "https://cdn.tripkoach.com/img/posts/kakum-canopy-walk-cape-coast-day-trip-hero.jpg", greet: "Good afternoon", newSub: "Canopy walks, castle tours, market afternoons — plan it your way, book it in minutes." },
+  evening:   { img: "https://cdn.tripkoach.com/img/posts/mole-larabanga-northern-ghana-weekend-hero.jpg",  greet: "Good evening",   newSub: "Golden-hour safari at Mole, sundowners on the coast — your Ghana, at your pace." },
+  night:     { img: "https://cdn.tripkoach.com/img/posts/cape-coast-castles-guide-hero.jpg",          greet: "Good evening",   newSub: "From Cape Coast to the north — start planning tonight, travel on your terms." },
+};
+const TK_PROMO_SCRIM = {
+  morning:   "linear-gradient(175deg, rgba(60,42,15,.14) 0%, rgba(20,19,18,.55) 55%, rgba(15,14,12,.86) 100%)",
+  afternoon: "linear-gradient(175deg, rgba(15,30,48,.14) 0%, rgba(20,19,18,.55) 55%, rgba(15,14,12,.86) 100%)",
+  evening:   "linear-gradient(165deg, rgba(120,52,12,.30) 0%, rgba(40,20,10,.62) 55%, rgba(18,12,8,.9) 100%)",
+  night:     "linear-gradient(165deg, rgba(26,26,72,.42) 0%, rgba(12,14,35,.7) 55%, rgba(6,8,22,.92) 100%)",
+};
+// mode: "signin" (returning) | "signup" (prospect) | "reset" (forgot-password)
+function PromoPanel({ mode }) {
+  const bucket = TK_PROMO_BUCKET();
+  const set = TK_PROMO_SET[bucket];
+  const isNew = mode === "signup";
+  const overline = isNew ? "New to TripKoach" : set.greet;
+  const heading = isNew ? "Discover Ghana, your way." : "Your trips to Ghana, in one place.";
+  const sub = mode === "reset"
+    ? "We'll help you back in — resetting your password only takes a moment."
+    : (isNew ? set.newSub : "Sign in to see your bookings, manage travellers, and pick up planning where you left off.");
+  return (
+    <div style={{ position: "relative", overflow: "hidden", background: "var(--n-950)" }}>
+      <img src={set.img} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", opacity: 0.5 }} />
+      <span style={{ position: "absolute", inset: 0, background: TK_PROMO_SCRIM[bucket] }} />
+      <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", justifyContent: "flex-end", padding: "48px", color: "var(--n-0)" }}>
+        <span className="tk-overline" style={{ color: "var(--gold-400)" }}>{overline}</span>
+        <h2 style={{ fontFamily: "var(--font-display)", fontWeight: 800, letterSpacing: "-0.03em", lineHeight: 1.02, fontSize: "clamp(28px,3vw,44px)", margin: "10px 0 0", maxWidth: "16ch" }}>{heading}</h2>
+        <p style={{ color: "rgba(255,255,255,.82)", marginTop: 12, maxWidth: "42ch" }}>{sub}</p>
+      </div>
+    </div>
+  );
+}
+
 const ACCOUNT_NAV = [
   { id: "bookings", icon: "ticket", label: "Bookings" },
   { id: "reviews", icon: "star", label: "Reviews" },
@@ -342,15 +386,7 @@ function LoginWeb({ go, startCreating }) {
   }
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1.05fr 0.95fr", minHeight: "calc(100vh - var(--header-h))" }} className="tk-login">
-      <div style={{ position: "relative", overflow: "hidden", background: "var(--n-950)" }}>
-        <img src="https://cdn.tripkoach.com/img/tours/discover-ghana-in-10-days/hero-1440.jpg" alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", opacity: 0.5 }} />
-        <span style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(20,19,18,.25), rgba(20,19,18,.8))" }} />
-        <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", justifyContent: "flex-end", padding: "48px", color: "var(--n-0)" }}>
-          <span className="tk-overline" style={{ color: "var(--gold-400)" }}>Welcome back</span>
-          <h2 style={{ fontFamily: "var(--font-display)", fontWeight: 800, letterSpacing: "-0.03em", lineHeight: 1.02, fontSize: "clamp(28px,3vw,44px)", margin: "10px 0 0", maxWidth: "16ch" }}>Your trips to Ghana, in one place.</h2>
-          <p style={{ color: "rgba(255,255,255,.82)", marginTop: 12, maxWidth: "42ch" }}>Sign in to see your bookings, manage travellers, and pick up planning where you left off.</p>
-        </div>
-      </div>
+      <PromoPanel mode={creating ? "signup" : "signin"} />
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "40px" }}>
         <div style={{ width: "100%", maxWidth: 380 }}>
           <img src="../../assets/logo-badge.png" width="44" height="44" alt="TripKoach" style={{ marginBottom: "var(--space-5)" }} />
@@ -389,15 +425,7 @@ function LoginWeb({ go, startCreating }) {
 function AuthShell({ children }) {
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1.05fr 0.95fr", minHeight: "calc(100vh - var(--header-h))" }} className="tk-login">
-      <div style={{ position: "relative", overflow: "hidden", background: "var(--n-950)" }}>
-        <img src="https://cdn.tripkoach.com/img/tours/discover-ghana-in-10-days/hero-1440.jpg" alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", opacity: 0.5 }} />
-        <span style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(20,19,18,.25), rgba(20,19,18,.8))" }} />
-        <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", justifyContent: "flex-end", padding: "48px", color: "var(--n-0)" }}>
-          <span className="tk-overline" style={{ color: "var(--gold-400)" }}>Your account</span>
-          <h2 style={{ fontFamily: "var(--font-display)", fontWeight: 800, letterSpacing: "-0.03em", lineHeight: 1.02, fontSize: "clamp(28px,3vw,44px)", margin: "10px 0 0", maxWidth: "16ch" }}>Your trips to Ghana, in one place.</h2>
-          <p style={{ color: "rgba(255,255,255,.82)", marginTop: 12, maxWidth: "42ch" }}>We'll help you back in — resetting your password only takes a moment.</p>
-        </div>
-      </div>
+      <PromoPanel mode="reset" />
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "40px" }}>
         <div style={{ width: "100%", maxWidth: 380 }}>{children}</div>
       </div>
