@@ -121,6 +121,8 @@ export interface EmailConfig {
   dryRun: boolean;
   /** Network timeout for the provider call, ms. */
   timeoutMs: number;
+  /** Extra retry attempts on transient faults (network abort/timeout, 5xx, 429). Default 2. */
+  maxRetries: number;
 }
 
 // Automated daily USD→GHS FX refresh (TRI-873). The cron fetches the mid-market rate, applies the
@@ -222,7 +224,8 @@ export function loadConfig(): Config {
       from: process.env.EMAIL_FROM || process.env.TRIPKOACH_EMAIL_FROM,
       replyTo: process.env.EMAIL_REPLY_TO || process.env.TRIPKOACH_EMAIL_REPLY_TO,
       dryRun: process.env.EMAIL_DRY_RUN === 'true',
-      timeoutMs: num(process.env.EMAIL_TIMEOUT_MS) ?? 10_000,
+      timeoutMs: num(process.env.EMAIL_TIMEOUT_MS) ?? 15_000,
+      maxRetries: num(process.env.EMAIL_MAX_RETRIES) ?? 2,
     },
     notify: {
       // Strip any trailing slash so `${webBaseUrl}/bookings/REF` never doubles up.

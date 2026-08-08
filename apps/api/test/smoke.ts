@@ -1113,7 +1113,7 @@ console.log('\n[fx: automated daily refresh + guards (TRI-873)]');
 console.log('\n[email: transport + template renderer (TRI-880)]');
 {
   const { renderTemplate, interpolate, listTemplates, isTemplate } = await import('../src/email-templates.ts');
-  const { sendEmail, isEmailEnabled } = await import('../src/email.ts');
+  const { sendEmail, isEmailEnabled, createResendTransport } = await import('../src/email.ts');
 
   // ── Template renderer ──
   ok('email: smoke_test + booking_pending registered', isTemplate('smoke_test') && isTemplate('booking_pending') && listTemplates().length >= 2);
@@ -1190,6 +1190,37 @@ console.log('\n[email: transport + template renderer (TRI-880)]');
   try { await sendEmail(db, enabledCfg, { to: '', template: 'smoke_test', vars: { ref: 'x', to: 'a', env: 't' } }, { transport: stubTransport }); } catch { threwNoTo = true; }
   ok('email: unknown template + missing recipient throw', threwSendUnknown && threwNoTo);
   ok('email: no send-log rows written on bad input', Number((await db.query(`SELECT COUNT(*) n FROM email_message`)).rows[0].n) === rowsBefore);
+
+  // E. Resend transport retry on transient faults (TRI-941 hotfix). A slow/aborted Resend call must not
+  // drop an otherwise-deliverable email — the exact "sent but never arrived" failure the board hit.
+  const realFetch = globalThis.fetch;
+  const okResendResp = () => new Response(JSON.stringify({ id: 'rs_ok' }), { status: 200, headers: { 'content-type': 'application/json' } });
+  try {
+    // E1: transient network error on first attempt, success on retry → transport succeeds.
+    let calls = 0;
+    (globalThis as any).fetch = async () => { calls++; if (calls === 1) throw new Error('This operation was aborted'); return okResendResp(); };
+    const t1 = createResendTransport({ ...enabledCfg.email, timeoutMs: 500, maxRetries: 2 } as any);
+    const r1 = await t1.send({ to: 'a@b.c', from: 'x', subject: 's', html: 'h', text: 't' });
+    ok('email/retry: transient network error retried → success', calls === 2 && r1.providerMessageId === 'rs_ok', JSON.stringify({ calls }));
+
+    // E2: permanent 4xx is NOT retried (bad recipient / auth) → single attempt, throws.
+    calls = 0;
+    (globalThis as any).fetch = async () => { calls++; return new Response(JSON.stringify({ message: 'Invalid to' }), { status: 422, headers: { 'content-type': 'application/json' } }); };
+    const t2 = createResendTransport({ ...enabledCfg.email, timeoutMs: 500, maxRetries: 2 } as any);
+    let threw4xx = false;
+    try { await t2.send({ to: 'a@b.c', from: 'x', subject: 's', html: 'h', text: 't' }); } catch { threw4xx = true; }
+    ok('email/retry: permanent 4xx not retried (1 attempt)', threw4xx && calls === 1, JSON.stringify({ calls }));
+
+    // E3: persistent transient fault exhausts retries → maxRetries+1 attempts, then throws.
+    calls = 0;
+    (globalThis as any).fetch = async () => { calls++; throw new Error('network down'); };
+    const t3 = createResendTransport({ ...enabledCfg.email, timeoutMs: 500, maxRetries: 2 } as any);
+    let threwAll = false;
+    try { await t3.send({ to: 'a@b.c', from: 'x', subject: 's', html: 'h', text: 't' }); } catch { threwAll = true; }
+    ok('email/retry: persistent fault → maxRetries+1 attempts then throw', threwAll && calls === 3, JSON.stringify({ calls }));
+  } finally {
+    (globalThis as any).fetch = realFetch;
+  }
 }
 
 console.log('\n[notifications: booking-lifecycle variants + reminder cron (TRI-889)]');

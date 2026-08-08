@@ -92,6 +92,7 @@ function AccountShell({ current, go, title, children }) {
   const [nudge, setNudge] = React.useState(true);
   const [nudgeSent, setNudgeSent] = React.useState(false);
   const [nudgeBusy, setNudgeBusy] = React.useState(false);
+  const [nudgeErr, setNudgeErr] = React.useState(false);
   React.useEffect(() => {
     if (!live) return;
     let alive = true;
@@ -103,9 +104,14 @@ function AccountShell({ current, go, title, children }) {
   }, []);
   async function resendVerify() {
     if (nudgeBusy) return;
-    setNudgeBusy(true);
-    try { await window.TK_AUTH.resendVerification(); } catch (_) {}
-    setNudgeBusy(false); setNudgeSent(true);
+    setNudgeBusy(true); setNudgeErr(false);
+    let failed = false;
+    // The authed resend returns { deliveryFailed: true } when the provider actually rejected/timed out
+    // (TRI-941) — don't claim "sent" when it wasn't. A thrown/rejected request is also a failure.
+    try { const r = await window.TK_AUTH.resendVerification(); if (r && r.deliveryFailed) failed = true; }
+    catch (_) { failed = true; }
+    setNudgeBusy(false);
+    if (failed) setNudgeErr(true); else setNudgeSent(true);
   }
   const unverified = live && me && me.emailVerified === false;
   const acctName = live && me ? (me.name || "Traveller") : "Ama Mensah";
@@ -143,11 +149,13 @@ function AccountShell({ current, go, title, children }) {
       <div className="tk-stack" style={{ gap: "var(--space-5)" }}>
         {title && <h1 className="tk-h2">{title}</h1>}
         {unverified && nudge && (
-          <Alert tone={nudgeSent ? "success" : "warning"}
-            title={nudgeSent ? "Verification email sent" : "Verify your email address"}
+          <Alert tone={nudgeErr ? "error" : nudgeSent ? "success" : "warning"}
+            title={nudgeErr ? "Couldn’t send the email" : nudgeSent ? "Verification email sent" : "Verify your email address"}
             onDismiss={() => setNudge(false)}
-            action={nudgeSent ? undefined : <Button size="sm" variant="secondary" disabled={nudgeBusy} onClick={resendVerify}>{nudgeBusy ? "Sending…" : "Resend email"}</Button>}>
-            {nudgeSent
+            action={nudgeSent ? undefined : <Button size="sm" variant="secondary" disabled={nudgeBusy} onClick={resendVerify}>{nudgeBusy ? "Sending…" : nudgeErr ? "Try again" : "Resend email"}</Button>}>
+            {nudgeErr
+              ? <>We couldn’t send the verification link to <strong>{acctEmail}</strong> just now — please try again in a moment.</>
+              : nudgeSent
               ? <>Check your inbox (and spam) for the link to <strong>{acctEmail}</strong>. It expires in 24 hours.</>
               : <>We sent a verification link to <strong>{acctEmail}</strong>. Confirm your address to secure your account — you can keep using TripKoach either way.</>}
           </Alert>

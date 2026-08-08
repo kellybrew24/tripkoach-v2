@@ -169,8 +169,15 @@ export function createConsumerService(db: Db, cfg: Config) {
     const tokenId = rows[0].id;
 
     const verifyUrl = `${cfg.consumer.appBaseUrl}/verify-email?token=${token}`;
+    // Track the real dispatch outcome. sendEmail never throws for a transport failure — it returns a
+    // 'failed'/'skipped' status — so we must inspect the result rather than assume success. Reporting
+    // `sent: true` unconditionally is exactly what made a failed resend look "sent" to the board (TRI-941).
+    // Only a 'failed' status is a real dispatch failure. 'skipped' means the transport is intentionally
+    // disabled (dev/unconfigured) — not a user-facing error — so it counts as dispatched. A thrown error
+    // (should not happen; sendEmail swallows transport faults) also counts as not dispatched.
+    let dispatched = false;
     try {
-      await sendEmail(db, cfg, {
+      const res = await sendEmail(db, cfg, {
         to: user.email,
         template: 'verify_email',
         vars: {
@@ -181,11 +188,15 @@ export function createConsumerService(db: Db, cfg: Config) {
         relatedType: 'email_verification',
         relatedId: tokenId,
       }, sendOpts);
+      dispatched = res.status !== 'failed';
+      if (res.status === 'failed') {
+        console.error(`[consumer] verification email dispatch FAILED for token ${tokenId}: ${res.error ?? ''}`);
+      }
     } catch (e) {
       console.error(`[consumer] verification email dispatch error for token ${tokenId}: ${(e as Error).message}`);
     }
-    await audit(db, { actorType: 'user', actorId: user.id, action: 'user.verification_email_sent', targetType: 'user_account', targetId: user.id, after: { tokenId }, ip: meta.ip ?? null });
-    return { sent: true, throttled: false, alreadyVerified: false };
+    await audit(db, { actorType: 'user', actorId: user.id, action: 'user.verification_email_sent', targetType: 'user_account', targetId: user.id, after: { tokenId, dispatched }, ip: meta.ip ?? null });
+    return { sent: dispatched, throttled: false, alreadyVerified: false };
   }
 
   // ── Signup ─────────────────────────────────────────────────────────────────
@@ -487,7 +498,16 @@ export function createConsumerService(db: Db, cfg: Config) {
     }
     if (!user) return { ok: true }; // unknown email → silent no-op (no enumeration)
     const res = await issueVerificationEmail(user, meta, { enforceRateLimit: true });
-    return { ok: true, ...(res.alreadyVerified ? { alreadyVerified: true } : {}), ...(res.throttled ? { throttled: true } : {}) };
+    // Surface a delivery failure ONLY on the authed path (userId known) so the FE can say "couldn't send,
+    // try again" instead of a false "sent". The email path stays silent (a deliveryFailed flag keyed on
+    // account existence would leak enumeration), and a throttle isn't a failure.
+    const deliveryFailed = !!target.userId && !res.sent && !res.throttled && !res.alreadyVerified;
+    return {
+      ok: true,
+      ...(res.alreadyVerified ? { alreadyVerified: true } : {}),
+      ...(res.throttled ? { throttled: true } : {}),
+      ...(deliveryFailed ? { deliveryFailed: true } : {}),
+    };
   }
 
   return {

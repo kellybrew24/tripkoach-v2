@@ -71,45 +71,67 @@ export interface EmailTransport {
  * Never constructed when the transport is disabled (no apiKey) — sendEmail short-circuits to 'skipped'.
  */
 export function createResendTransport(email: EmailConfig): EmailTransport {
+  // One POST attempt with a per-attempt timeout. Separated out so send() can retry it on transient
+  // network faults (Resend occasionally takes >timeoutMs to respond — a single slow call must not drop
+  // an otherwise-deliverable email, which is exactly the "sent but never arrived" failure TRI-941 hit).
+  async function attempt(msg: OutboundMessage): Promise<{ providerMessageId: string }> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), email.timeoutMs);
+    let res: Response;
+    try {
+      res = await fetch(`${email.apiBase}/emails`, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          Authorization: `Bearer ${email.apiKey}`,
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({
+          from: msg.from,
+          to: [msg.to],
+          subject: msg.subject,
+          html: msg.html,
+          text: msg.text,
+          ...(msg.replyTo ? { reply_to: msg.replyTo } : {}),
+        }),
+      });
+    } catch (e) {
+      // Network fault / abort (timeout) → transient. Tag it so send() knows it may retry.
+      throw Object.assign(new Error(`email provider network error: ${(e as Error).message}`), { transient: true });
+    } finally {
+      clearTimeout(timer);
+    }
+    const body: any = await res.json().catch(() => null);
+    if (!res.ok) {
+      const detail = body?.message || body?.error || `HTTP ${res.status}`;
+      // 5xx / 429 are transient (retry-worthy); 4xx (bad recipient, auth) are permanent.
+      const transient = res.status >= 500 || res.status === 429;
+      throw Object.assign(new Error(`email provider rejected: ${detail}`), { transient });
+    }
+    const id = body?.id;
+    if (!id || typeof id !== 'string') {
+      throw new Error('email provider returned no message id');
+    }
+    return { providerMessageId: id };
+  }
+
   return {
     name: email.providerName,
     async send(msg) {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), email.timeoutMs);
-      let res: Response;
-      try {
-        res = await fetch(`${email.apiBase}/emails`, {
-          method: 'POST',
-          signal: controller.signal,
-          headers: {
-            Authorization: `Bearer ${email.apiKey}`,
-            'Content-Type': 'application/json',
-            Accept: 'application/json',
-          },
-          body: JSON.stringify({
-            from: msg.from,
-            to: [msg.to],
-            subject: msg.subject,
-            html: msg.html,
-            text: msg.text,
-            ...(msg.replyTo ? { reply_to: msg.replyTo } : {}),
-          }),
-        });
-      } catch (e) {
-        throw new Error(`email provider network error: ${(e as Error).message}`);
-      } finally {
-        clearTimeout(timer);
+      const maxRetries = Math.max(0, email.maxRetries);
+      let lastErr: unknown;
+      for (let i = 0; i <= maxRetries; i++) {
+        try {
+          return await attempt(msg);
+        } catch (e) {
+          lastErr = e;
+          if (!(e as any)?.transient || i === maxRetries) throw e;
+          // Short linear backoff between attempts (250ms, 500ms, …). Bounded by maxRetries.
+          await new Promise((r) => setTimeout(r, 250 * (i + 1)));
+        }
       }
-      const body: any = await res.json().catch(() => null);
-      if (!res.ok) {
-        const detail = body?.message || body?.error || `HTTP ${res.status}`;
-        throw new Error(`email provider rejected: ${detail}`);
-      }
-      const id = body?.id;
-      if (!id || typeof id !== 'string') {
-        throw new Error('email provider returned no message id');
-      }
-      return { providerMessageId: id };
+      throw lastErr; // unreachable (loop either returns or throws), but keeps TS happy.
     },
   };
 }
