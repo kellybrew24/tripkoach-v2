@@ -135,19 +135,25 @@ seats_reserved + $n WHERE seats_reserved + $n <= seats_total RETURNING …`) ins
 ### `POST /api/v1/bookings` → `201`
 Reserves seats, prices the quote, persists travellers (lead carries contact).
 ```jsonc
-// request
+// request  (promoCode optional — TRI-896 C7)
 { "tourSlug": "accra-city-tour", "departureId": "<uuid>", "packageSlug": "route1"|null,
-  "partySize": 2, "specialRequests": null, "agreedTerms": true,
+  "partySize": 2, "specialRequests": null, "agreedTerms": true, "promoCode": "SAVE10"|null,
   "travellers": [ { "name": "Ama Mensah", "email": "a@x.com", "phone": "+233…", "idNumber": null, "isLead": true } ] }
 // 201
 { "ref": "TK-8F3K2Q", "status": "reserved", "paymentState": "unpaid",
   "reservationExpiresAt": "2026-08-07T22:00:00.000Z",
-  "quote": { "unitPrice": 75, "total": 150, "currency": "USD", "partySize": 2 },
+  "quote": { "unitPrice": 75, "subtotal": 150, "discount": 15, "total": 135, "currency": "USD",
+             "partySize": 2, "promo": { "code": "SAVE10", "type": "percent", "value": 10, "discount": 15 } },
   "tour": { "slug": "accra-city-tour", "title": "Accra City Tour" },
   "departure": { "id": "<uuid>", "date": "Sat 15 Aug 2026", "time": "09:00 · Hotel pickup, Accra" } }
 ```
+`quote.promo` is `null` when no code was applied; `subtotal` is the pre-discount price, `total` is what
+the customer pays (and what the GHS charge is derived from at payment/init). A valid code atomically claims
+one redemption of its `usage_limit`; cancelling/expiring the booking releases it again.
 Errors: `404 not_found` (tour/departure/package), `409 sold_out`, `409 not_bookable` (departure not
-scheduled), `422 validation` (partySize<1, terms not agreed, no lead traveller / no lead contact).
+scheduled), `422 validation` (partySize<1, terms not agreed, no lead traveller / no lead contact),
+`422 promo_invalid | promo_inactive | promo_not_started | promo_expired | promo_scope | promo_currency |
+promo_limit_reached` (the code is rejected cleanly and no seat is held).
 
 ### `POST /api/v1/bookings/:ref/payment/init` → `200`
 Creates a pending GHS `payment` row (with FX reconciliation), calls Paystack **initialize**, moves the
@@ -348,10 +354,29 @@ present). `POST /tours/:idOrSlug/publish` · `/unpublish` [tours.edit]. `DELETE 
 
 **Departures** — `GET /departures?tourId=` [tours.view] → `{ departures: [{ id, tourId(slug), tour,
 packageId, date(label), departOn, time, price, currency, capacity, seatsTotal, booked, spotsLeft, status,
-guideId, notes }] }`. `POST /departures` [tours.edit] `{ tourId, packageId?, date:"YYYY-MM-DD", dateLabel?,
-time?, capacity, price?, currency?, status?, guideId?, notes? }` → `201`. `PATCH /departures/:id`
+guideId, guide(name), notes }] }`. `POST /departures` [tours.edit] `{ tourId, packageId?, date:"YYYY-MM-DD",
+dateLabel?, time?, capacity, price?, currency?, status?, guideId?, notes? }` → `201`. A supplied `guideId`
+must reference an existing guide (else `400`); `null` clears the assignment. `PATCH /departures/:id`
 [tours.edit] (capacity below already-reserved seats → `409`; respects the `departure_no_oversell` CHECK).
 `POST /departures/:id/cancel` [tours.edit].
+
+**Guides** (TRI-896 A12) — the field roster a departure's `guideId` points at. `GET /guides` [tours.view] →
+`{ guides: [{ id, name, email, phone, base, regions[], languages[], status, rating, trips, bio, departures }] }`;
+`GET /guides/:id` [tours.view]. `POST /guides` [tours.edit] `{ name, email?, phone?, base?, regions?[],
+languages?[], status?=active('active'|'leave'|'disabled'), rating?(0–5), trips?, bio? }` → `201`.
+`PATCH /guides/:id` [tours.edit] (partial). `DELETE /guides/:id` [tours.edit] — hard delete; the FK
+`ON DELETE SET NULL` unassigns any departures it led → `{ ok, departuresUnassigned }`.
+
+**Promo codes** (TRI-896 A13) — admin CRUD; consumer redemption lives in `POST /api/v1/bookings`.
+`GET /promos` [promos.manage] → `{ promos: [{ id, code, type, value, currency, scope, scopeRef, tours(label),
+from, to, usageLimit, limit, used, active }] }`; `GET /promos/:idOrCode` [promos.manage]. `POST /promos`
+[promos.manage] `{ code, type('percent'|'fixed'), value, currency?='USD'(fixed), scope?|tours?, scopeRef?,
+from?/validFrom?, to?/validTo?, limit?/usageLimit?, active?=true }` → `201`. **`value` is whole-currency at
+the boundary** (a `$20` fixed code is `value:20`; stored as minor units per the 003 schema). Scope resolves
+from explicit `{scope, scopeRef}` or the FE's fuzzy `tours` string ("All tours" | a category label | a tour
+title/slug). `PATCH /promos/:idOrCode` [promos.manage] (partial; changing `type` requires a new `value`).
+`DELETE /promos/:idOrCode` [promos.manage] — **deactivate** (soft: sets `active=false`) → `{ ok, promo }`.
+`:idOrCode` accepts the uuid **or** the code.
 
 **Bookings** — `GET /bookings?status=&q=&page=&pageSize=` [bookings.view] → paginated
 `{ items:[{ ref, status, payment, customer, tour, tourId, region, date, travellers, unit, total, currency,
@@ -465,6 +490,12 @@ Phase 2 (TRI-866) owns `008_write_path_payments_fx.sql`; this phase adds **`009_
 **after** 008 (guaranteed by the runner's lexical sort). The admin payment views read the 008 FX columns
 defensively, so this branch migrates and passes `npm run smoke` **standalone** (008 absent) and needs no
 edit once 008 lands. Keep the sequence monotonic on merge to the shared `tripkoach_dev` DB.
+
+**TRI-896 (P3)** adds **`014_promo_guide_admin.sql`** off `main` — two columns on `booking`
+(`promo_code_id` FK → `promo_code`, `discount_minor`) so a redeemed promo is linked to its booking and can
+be released on cancel/expiry. `guide` (004) and `promo_code` (003) already existed, so no other schema
+change was needed. 014 is the next free number after the consolidated `main` (…010); the runner's lexical
+sort applies it last.
 
 ---
 

@@ -424,8 +424,18 @@ export function createAdminService(db: Db, _cfg: Config, notifier?: Notification
       packageId: r.package_slug ?? null, date: r.date_label, departOn: r.depart_on, time: r.time_label ?? '',
       price: fromMinor(r.price_minor), currency: r.currency, capacity: seatsTotal, seatsTotal,
       booked: seatsReserved, spotsLeft: Math.max(0, seatsTotal - seatsReserved), status: r.status,
-      guideId: r.guide_id ?? null, notes: r.notes_internal ?? null,
+      guideId: r.guide_id ?? null, guide: r.guide_name ?? null, notes: r.notes_internal ?? null,
     };
+  }
+
+  // Validate a guideId reference (nicer error than a raw FK violation). Empty/absent → null (unassigned).
+  async function resolveGuideId(body: Body): Promise<string | null | undefined> {
+    if (body.guideId === undefined) return undefined;   // field omitted → don't touch
+    const gid = optStr(body, 'guideId', 64);
+    if (!gid) return null;                                // explicit null/'' → clear the assignment
+    const g = await db.query(`SELECT 1 FROM guide WHERE id::text = $1`, [gid]);
+    if (!g.rows.length) throw new ValidationError(`unknown guideId "${gid}"`, 'guideId');
+    return gid;
   }
 
   async function listDepartures(opts: { tourId?: string } = {}) {
@@ -436,9 +446,10 @@ export function createAdminService(db: Db, _cfg: Config, notifier?: Notification
       where.push(`(t.slug = $${params.length} OR t.id::text = $${params.length})`);
     }
     const { rows } = await db.query(
-      `SELECT d.*, t.slug AS tour_slug, t.title AS tour_title, p.slug AS package_slug
+      `SELECT d.*, t.slug AS tour_slug, t.title AS tour_title, p.slug AS package_slug, g.name AS guide_name
          FROM departure d JOIN tour t ON t.id = d.tour_id
          LEFT JOIN tour_package p ON p.id = d.package_id
+         LEFT JOIN guide g ON g.id = d.guide_id
         ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
         ORDER BY d.depart_on NULLS LAST, d.created_at`, params);
     return rows.map(departureDTO);
@@ -446,9 +457,10 @@ export function createAdminService(db: Db, _cfg: Config, notifier?: Notification
 
   async function getDeparture(id: string) {
     const { rows } = await db.query(
-      `SELECT d.*, t.slug AS tour_slug, t.title AS tour_title, p.slug AS package_slug
+      `SELECT d.*, t.slug AS tour_slug, t.title AS tour_title, p.slug AS package_slug, g.name AS guide_name
          FROM departure d JOIN tour t ON t.id = d.tour_id
-         LEFT JOIN tour_package p ON p.id = d.package_id WHERE d.id = $1`, [id]);
+         LEFT JOIN tour_package p ON p.id = d.package_id
+         LEFT JOIN guide g ON g.id = d.guide_id WHERE d.id = $1`, [id]);
     return rows[0] ? departureDTO(rows[0]) : null;
   }
 
@@ -471,7 +483,7 @@ export function createAdminService(db: Db, _cfg: Config, notifier?: Notification
     const price = optMoney(body, 'price');
     const currency = (optStr(body, 'currency', 3) ?? tour.currency ?? 'USD').toUpperCase();
     const status = optEnum(body, 'status', ['scheduled', 'sold_out', 'completed', 'cancelled'] as const) ?? 'scheduled';
-    const guideId = optStr(body, 'guideId', 64) ?? null;
+    const guideId = (await resolveGuideId(body)) ?? null;
     const notes = optStr(body, 'notes', 4000) ?? null;
 
     const { rows } = await db.query(
@@ -500,7 +512,7 @@ export function createAdminService(db: Db, _cfg: Config, notifier?: Notification
     if (body.time !== undefined) set('time_label', optStr(body, 'time', 120) ?? null);
     if (body.dateLabel !== undefined) set('date_label', reqStr(body, 'dateLabel', 120));
     if (body.status !== undefined) set('status', optEnum(body, 'status', ['scheduled', 'sold_out', 'completed', 'cancelled'] as const));
-    if (body.guideId !== undefined) set('guide_id', optStr(body, 'guideId', 64) ?? null);
+    if (body.guideId !== undefined) set('guide_id', (await resolveGuideId(body)) ?? null);
     if (body.notes !== undefined) set('notes_internal', optStr(body, 'notes', 4000) ?? null);
     if (!sets.length) throw new ValidationError('no updatable fields provided');
 
@@ -613,6 +625,10 @@ export function createAdminService(db: Db, _cfg: Config, notifier?: Notification
       if (held) {
         await q.query(`SELECT seats_reserved FROM departure WHERE id=$1 FOR UPDATE`, [cur.departure_id]);
         await q.query(`UPDATE departure SET seats_reserved = GREATEST(0, seats_reserved - $1), updated_at=now() WHERE id=$2`, [cur.party_size, cur.departure_id]);
+      }
+      // Release the promo redemption (TRI-896 C7): a cancelled booking frees the code it used.
+      if (cur.promo_code_id) {
+        await q.query(`UPDATE promo_code SET used_count = GREATEST(0, used_count - 1), updated_at=now() WHERE id=$1`, [cur.promo_code_id]);
       }
       await q.query(`UPDATE booking SET status='cancelled', cancel_reason=$1, updated_at=now() WHERE id=$2`, [reason, cur.id]);
       return { before: cur, seatsReleased: held ? Number(cur.party_size) : 0 };
@@ -785,6 +801,246 @@ export function createAdminService(db: Db, _cfg: Config, notifier?: Notification
     return { review: mapReviewRow(await loadReview(id)) };
   }
 
+  // ── Guides (TRI-896 A12) ─────────────────────────────────────────────────
+  // The field roster. A real guide here is what departure.guide_id points at (FK from mig 004), so this
+  // CRUD is what unblocks assigning a guide to a departure.
+  const GUIDE_STATUS = ['active', 'leave', 'disabled'] as const;
+  function guideDTO(g: any) {
+    return {
+      id: g.id, name: g.name, email: g.email ?? null, phone: g.phone ?? null, base: g.base ?? '',
+      regions: g.regions ?? [], languages: g.languages ?? [], status: g.status,
+      rating: g.rating == null ? null : Number(g.rating), trips: Number(g.trips_led ?? 0),
+      bio: g.bio ?? '',
+    };
+  }
+  function optRating(b: Body): number | undefined {
+    const v = b.rating;
+    if (v == null || v === '') return undefined;
+    const n = typeof v === 'number' ? v : Number(v);
+    if (!Number.isFinite(n) || n < 0 || n > 5) throw new ValidationError('"rating" must be between 0 and 5', 'rating');
+    return Math.round(n * 10) / 10; // numeric(2,1)
+  }
+
+  async function listGuides() {
+    const { rows } = await db.query(
+      `SELECT g.*, (SELECT COUNT(*) FROM departure d WHERE d.guide_id = g.id) AS departure_count
+         FROM guide g ORDER BY g.name`);
+    return { guides: rows.map((g) => ({ ...guideDTO(g), departures: Number(g.departure_count) })) };
+  }
+
+  async function getGuide(id: string) {
+    const g = (await db.query(`SELECT * FROM guide WHERE id::text = $1`, [id])).rows[0];
+    if (!g) throw notFound('guide');
+    return guideDTO(g);
+  }
+
+  async function createGuide(body: unknown, actor: Actor) {
+    if (!isPlainObject(body)) throw new ValidationError('body must be an object');
+    const name = reqStr(body, 'name', 200);
+    const email = optStr(body, 'email', 320) ?? null;
+    const phone = optStr(body, 'phone', 60) ?? null;
+    const base = optStr(body, 'base', 200) ?? null;
+    const regions = optArrStr(body, 'regions') ?? [];
+    const languages = optArrStr(body, 'languages') ?? [];
+    const status = optEnum(body, 'status', GUIDE_STATUS) ?? 'active';
+    const rating = optRating(body) ?? null;
+    const tripsLed = optInt(body, 'tripsLed', 0) ?? optInt(body, 'trips', 0) ?? 0;
+    const bio = optStr(body, 'bio', 4000) ?? null;
+    const { rows } = await db.query(
+      `INSERT INTO guide (name, email, phone, base, regions, languages, status, rating, trips_led, bio)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+      [name, email, phone, base, regions, languages, status, rating, tripsLed, bio]);
+    await audit(db, { actorId: actor.id, action: 'guide.create', targetType: 'guide', targetId: rows[0].id, after: { name, base, status }, ip: actor.ip });
+    return getGuide(rows[0].id);
+  }
+
+  async function updateGuide(id: string, body: unknown, actor: Actor) {
+    if (!isPlainObject(body)) throw new ValidationError('body must be an object');
+    const cur = (await db.query(`SELECT * FROM guide WHERE id::text = $1`, [id])).rows[0];
+    if (!cur) throw notFound('guide');
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    const set = (col: string, val: unknown) => { params.push(val); sets.push(`${col} = $${params.length}`); };
+
+    const name = optStr(body, 'name', 200); if (name != null) set('name', name);
+    if (body.email !== undefined) set('email', optStr(body, 'email', 320) ?? null);
+    if (body.phone !== undefined) set('phone', optStr(body, 'phone', 60) ?? null);
+    if (body.base !== undefined) set('base', optStr(body, 'base', 200) ?? null);
+    const regions = optArrStr(body, 'regions'); if (regions) set('regions', regions);
+    const languages = optArrStr(body, 'languages'); if (languages) set('languages', languages);
+    if (body.status !== undefined) set('status', optEnum(body, 'status', GUIDE_STATUS));
+    if (body.rating !== undefined) set('rating', optRating(body) ?? null);
+    if (body.tripsLed !== undefined || body.trips !== undefined) set('trips_led', optInt(body, 'tripsLed', 0) ?? optInt(body, 'trips', 0) ?? 0);
+    if (body.bio !== undefined) set('bio', optStr(body, 'bio', 4000) ?? null);
+    if (!sets.length) throw new ValidationError('no updatable fields provided');
+
+    params.push(cur.id);
+    await db.query(`UPDATE guide SET ${sets.join(', ')}, updated_at=now() WHERE id=$${params.length}`, params);
+    await audit(db, { actorId: actor.id, action: 'guide.update', targetType: 'guide', targetId: cur.id, before: { name: cur.name, status: cur.status }, after: { name: name ?? cur.name }, ip: actor.ip });
+    return getGuide(cur.id);
+  }
+
+  async function deleteGuide(id: string, actor: Actor) {
+    const cur = (await db.query(`SELECT * FROM guide WHERE id::text = $1`, [id])).rows[0];
+    if (!cur) throw notFound('guide');
+    // FK is ON DELETE SET NULL, so any departures the guide led simply become "Assign later". We surface
+    // the reassignment count in the audit trail rather than blocking.
+    const dep = await db.query(`SELECT COUNT(*)::int AS n FROM departure WHERE guide_id = $1`, [cur.id]);
+    await db.query(`DELETE FROM guide WHERE id = $1`, [cur.id]);
+    await audit(db, { actorId: actor.id, action: 'guide.delete', targetType: 'guide', targetId: cur.id, before: { name: cur.name }, after: { departuresUnassigned: Number(dep.rows[0].n) }, ip: actor.ip });
+    return { ok: true, departuresUnassigned: Number(dep.rows[0].n) };
+  }
+
+  // ── Promo codes (TRI-896 A13) ────────────────────────────────────────────
+  const PROMO_TYPES = ['percent', 'fixed'] as const;
+  // Fixed amounts are stored in minor units (per the 003 schema); the API speaks whole-currency numbers.
+  function promoDTO(p: any) {
+    const scopeLabel = p.scope === 'all' ? 'All tours'
+      : p.scope === 'category' ? `Category: ${CAT_LABEL[p.scope_ref] ?? p.scope_ref}`
+      : p.scope_ref;
+    return {
+      id: p.id, code: p.code, type: p.type,
+      value: p.type === 'fixed' ? fromMinor(Number(p.value)) : Number(p.value),
+      currency: p.currency ?? null,
+      scope: p.scope, scopeRef: p.scope_ref ?? null, tours: scopeLabel,
+      from: p.valid_from ?? null, to: p.valid_to ?? null,
+      usageLimit: p.usage_limit == null ? null : Number(p.usage_limit),
+      limit: p.usage_limit == null ? null : Number(p.usage_limit),
+      used: Number(p.used_count ?? 0), active: p.active,
+    };
+  }
+
+  function optDate(b: Body, field: string, alias?: string): string | null | undefined {
+    const raw = b[field] ?? (alias ? b[alias] : undefined);
+    if (raw === undefined) return undefined;
+    if (raw == null || raw === '') return null;
+    if (typeof raw !== 'string') throw new ValidationError(`"${field}" must be a date string`, field);
+    const d = new Date(raw.length === 10 ? `${raw}T00:00:00Z` : raw);
+    if (isNaN(d.getTime())) throw new ValidationError(`"${field}" is not a valid date`, field);
+    return d.toISOString();
+  }
+
+  // Resolve the promo scope from either explicit {scope, scopeRef} or the FE's fuzzy "tours" display string.
+  async function resolvePromoScope(body: Body): Promise<{ scope: string; scopeRef: string | null }> {
+    const explicit = optEnum(body, 'scope', ['all', 'category', 'tour'] as const);
+    const refRaw = optStr(body, 'scopeRef', 200) ?? (explicit ? undefined : optStr(body, 'tours', 200));
+    if (explicit) {
+      if (explicit === 'all') return { scope: 'all', scopeRef: null };
+      const ref = optStr(body, 'scopeRef', 200) ?? optStr(body, 'tours', 200);
+      if (!ref) throw new ValidationError(`"scopeRef" is required for scope "${explicit}"`, 'scopeRef');
+      if (explicit === 'category') return { scope: 'category', scopeRef: normalizeCategory(ref).enumv };
+      return { scope: 'tour', scopeRef: await resolvePromoTourSlug(ref) };
+    }
+    // Lenient: interpret the "Applies to" display string.
+    const tours = refRaw?.trim();
+    if (!tours || /^all( tours)?$/i.test(tours)) return { scope: 'all', scopeRef: null };
+    const key = tours.toLowerCase();
+    if (LABEL_CAT[key] || CAT_LABEL[key]) return { scope: 'category', scopeRef: normalizeCategory(tours).enumv };
+    return { scope: 'tour', scopeRef: await resolvePromoTourSlug(tours) };
+  }
+  async function resolvePromoTourSlug(ref: string): Promise<string> {
+    const t = await db.query(`SELECT slug FROM tour WHERE slug=$1 OR id::text=$1 OR title=$1 LIMIT 1`, [ref]);
+    if (!t.rows.length) throw new ValidationError(`unknown tour "${ref}" for promo scope`, 'scopeRef');
+    return t.rows[0].slug;
+  }
+
+  function parsePromoValue(body: Body, type: string): { value: number; currency: string | null } {
+    if (type === 'percent') {
+      const v = optInt(body, 'value', 0);
+      if (v == null) throw new ValidationError('"value" is required', 'value');
+      if (v > 100) throw new ValidationError('percent "value" must be 0–100', 'value');
+      return { value: v, currency: null };
+    }
+    const amt = optMoney(body, 'value');
+    if (amt == null) throw new ValidationError('"value" is required', 'value');
+    const currency = (optStr(body, 'currency', 3) ?? 'USD').toUpperCase();
+    return { value: toMinor(amt), currency };
+  }
+
+  async function resolvePromoRow(idOrCode: string) {
+    const { rows } = await db.query(`SELECT * FROM promo_code WHERE code = $1 OR id::text = $1 LIMIT 1`, [idOrCode.toUpperCase()]);
+    return rows[0] ?? null;
+  }
+
+  async function listPromos() {
+    const { rows } = await db.query(`SELECT * FROM promo_code ORDER BY created_at DESC`);
+    return { promos: rows.map(promoDTO) };
+  }
+
+  async function getPromo(idOrCode: string) {
+    const p = await resolvePromoRow(idOrCode);
+    if (!p) throw notFound('promo code');
+    return promoDTO(p);
+  }
+
+  async function createPromo(body: unknown, actor: Actor) {
+    if (!isPlainObject(body)) throw new ValidationError('body must be an object');
+    const codeRaw = reqStr(body, 'code', 60).toUpperCase();
+    if (!/^[A-Z0-9][A-Z0-9_-]*$/.test(codeRaw)) throw new ValidationError('code must be uppercase letters/digits (no spaces)', 'code');
+    const type = optEnum(body, 'type', PROMO_TYPES) ?? 'percent';
+    const { value, currency } = parsePromoValue(body, type);
+    const { scope, scopeRef } = await resolvePromoScope(body);
+    const validFrom = optDate(body, 'validFrom', 'from') ?? null;
+    const validTo = optDate(body, 'validTo', 'to') ?? null;
+    const usageLimit = optInt(body, 'usageLimit', 0) ?? optInt(body, 'limit', 0) ?? null;
+    const active = optBool(body, 'active') ?? true;
+
+    const dup = await db.query(`SELECT 1 FROM promo_code WHERE code = $1`, [codeRaw]);
+    if (dup.rows.length) throw conflict(`promo code "${codeRaw}" already exists`);
+
+    const { rows } = await db.query(
+      `INSERT INTO promo_code (code, type, value, currency, scope, scope_ref, valid_from, valid_to, usage_limit, active)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+      [codeRaw, type, value, currency, scope, scopeRef, validFrom, validTo, usageLimit, active]);
+    await audit(db, { actorId: actor.id, action: 'promo.create', targetType: 'promo_code', targetId: rows[0].id, after: { code: codeRaw, type, scope, active }, ip: actor.ip });
+    return getPromo(codeRaw);
+  }
+
+  async function updatePromo(idOrCode: string, body: unknown, actor: Actor) {
+    if (!isPlainObject(body)) throw new ValidationError('body must be an object');
+    const cur = await resolvePromoRow(idOrCode);
+    if (!cur) throw notFound('promo code');
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    const set = (col: string, val: unknown) => { params.push(val); sets.push(`${col} = $${params.length}`); };
+
+    // type + value move together (fixed↔percent changes the stored units/currency).
+    const type = optEnum(body, 'type', PROMO_TYPES);
+    if (type || body.value !== undefined) {
+      const effType = type ?? cur.type;
+      set('type', effType);
+      if (body.value !== undefined) {
+        const { value, currency } = parsePromoValue(body, effType);
+        set('value', value);
+        set('currency', currency);
+      } else if (type && type !== cur.type) {
+        throw new ValidationError('changing "type" requires a new "value"', 'value');
+      }
+    }
+    if (body.scope !== undefined || body.scopeRef !== undefined || body.tours !== undefined) {
+      const { scope, scopeRef } = await resolvePromoScope(body);
+      set('scope', scope); set('scope_ref', scopeRef);
+    }
+    const vf = optDate(body, 'validFrom', 'from'); if (vf !== undefined) set('valid_from', vf);
+    const vt = optDate(body, 'validTo', 'to'); if (vt !== undefined) set('valid_to', vt);
+    if (body.usageLimit !== undefined || body.limit !== undefined) set('usage_limit', optInt(body, 'usageLimit', 0) ?? optInt(body, 'limit', 0) ?? null);
+    if (body.active !== undefined) set('active', optBool(body, 'active'));
+    if (!sets.length) throw new ValidationError('no updatable fields provided');
+
+    params.push(cur.id);
+    await db.query(`UPDATE promo_code SET ${sets.join(', ')}, updated_at=now() WHERE id=$${params.length}`, params);
+    await audit(db, { actorId: actor.id, action: 'promo.update', targetType: 'promo_code', targetId: cur.id, before: { code: cur.code, active: cur.active }, after: { code: cur.code }, ip: actor.ip });
+    return getPromo(cur.code);
+  }
+
+  async function deactivatePromo(idOrCode: string, actor: Actor) {
+    const cur = await resolvePromoRow(idOrCode);
+    if (!cur) throw notFound('promo code');
+    await db.query(`UPDATE promo_code SET active = false, updated_at=now() WHERE id=$1`, [cur.id]);
+    await audit(db, { actorId: actor.id, action: 'promo.deactivate', targetType: 'promo_code', targetId: cur.id, before: { active: cur.active }, after: { active: false }, ip: actor.ip });
+    return { ok: true, promo: await getPromo(cur.code) };
+  }
+
   return {
     listRegions, createRegion, updateRegion, deleteRegion,
     listTours, getTour, createTour, updateTour, setTourPublished, deleteTour,
@@ -792,6 +1048,8 @@ export function createAdminService(db: Db, _cfg: Config, notifier?: Notification
     listBookings, getBooking, confirmBooking, cancelBooking,
     listPayments, getPayment, flagRefund,
     listReviews, moderateReview, replyReview,
+    listGuides, getGuide, createGuide, updateGuide, deleteGuide,
+    listPromos, getPromo, createPromo, updatePromo, deactivatePromo,
   };
 }
 

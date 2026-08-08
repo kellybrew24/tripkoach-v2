@@ -609,6 +609,147 @@ console.log('\n[admin reviews moderation → public visibility]');
   ok('moderate unknown review → 404', (await call('POST', '/api/admin/reviews/00000000-0000-0000-0000-000000000000/approve', { cookie: adminCookie })).status === 404);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TRI-896 P3 · Guides CRUD (A12) + Promo codes (A13, admin) + consumer promo apply (C7).
+// ─────────────────────────────────────────────────────────────────────────────
+console.log('\n[admin guides CRUD (A12)]');
+let smokeGuideId = '';
+{
+  const vlogin = await call('POST', '/api/admin/auth/login', { payload: { email: 'viewer@tripkoach.com', password: 'Just-Look!' } });
+  const vcookie = vlogin.cookies.find((c) => c.name === COOKIE)?.value ?? '';
+  ok('viewer CAN list guides (tours.view)', (await call('GET', '/api/admin/guides', { cookie: vcookie })).status === 200);
+  ok('viewer create guide → 403 (missing tours.edit)', (await call('POST', '/api/admin/guides', { cookie: vcookie, payload: { name: 'X' } })).status === 403);
+
+  const created = await call('POST', '/api/admin/guides', { cookie: adminCookie, payload: {
+    name: 'Kojo Guide', email: 'kojo@tripkoach.com', base: 'Accra', regions: ['Greater Accra', 'Eastern'],
+    languages: ['English', 'Twi'], status: 'active', rating: 4.8, trips: 42, bio: 'Seasoned lead.',
+  } });
+  ok('admin create guide → 201', created.status === 201, JSON.stringify(created.body));
+  smokeGuideId = created.body.id;
+  ok('guide DTO shape (regions/rating/trips)', created.body.regions.length === 2 && created.body.rating === 4.8 && created.body.trips === 42, JSON.stringify(created.body));
+
+  const list = await call('GET', '/api/admin/guides', { cookie: adminCookie });
+  ok('admin guides list includes new guide', list.status === 200 && list.body.guides.some((g: any) => g.id === smokeGuideId), JSON.stringify(list.body.guides?.length));
+
+  const patch = await call('PATCH', `/api/admin/guides/${smokeGuideId}`, { cookie: adminCookie, payload: { status: 'leave', regions: ['Volta'] } });
+  ok('admin patch guide → 200 (status/regions updated)', patch.status === 200 && patch.body.status === 'leave' && patch.body.regions[0] === 'Volta', JSON.stringify(patch.body));
+  ok('create guide missing name → 400', (await call('POST', '/api/admin/guides', { cookie: adminCookie, payload: {} })).status === 400);
+  ok('rating out of range → 400', (await call('POST', '/api/admin/guides', { cookie: adminCookie, payload: { name: 'Bad', rating: 9 } })).status === 400);
+}
+
+console.log('\n[admin assign guide to departure]');
+let guidedDepId = '';
+{
+  const created = await call('POST', '/api/admin/departures', { cookie: adminCookie, payload: {
+    tourId: 'accra-city-tour', date: '2026-12-01', capacity: 10, guideId: smokeGuideId,
+  } });
+  ok('create departure with guideId → 201', created.status === 201, JSON.stringify(created.body));
+  guidedDepId = created.body.id;
+  ok('departure DTO carries guideId + guide name', created.body.guideId === smokeGuideId && created.body.guide === 'Kojo Guide', JSON.stringify({ id: created.body.guideId, g: created.body.guide }));
+  ok('create departure with unknown guideId → 400', (await call('POST', '/api/admin/departures', { cookie: adminCookie, payload: { tourId: 'accra-city-tour', date: '2026-12-02', capacity: 5, guideId: '00000000-0000-0000-0000-000000000000' } })).status === 400);
+  // clear the assignment
+  const cleared = await call('PATCH', `/api/admin/departures/${guidedDepId}`, { cookie: adminCookie, payload: { guideId: null } });
+  ok('patch departure guideId=null clears assignment', cleared.status === 200 && cleared.body.guideId === null, JSON.stringify(cleared.body.guideId));
+  // reassign for the delete-nulls test below
+  await call('PATCH', `/api/admin/departures/${guidedDepId}`, { cookie: adminCookie, payload: { guideId: smokeGuideId } });
+}
+
+console.log('\n[admin promos CRUD (A13)]');
+{
+  const vlogin = await call('POST', '/api/admin/auth/login', { payload: { email: 'viewer@tripkoach.com', password: 'Just-Look!' } });
+  const vcookie = vlogin.cookies.find((c) => c.name === COOKIE)?.value ?? '';
+  ok('viewer list promos → 403 (missing promos.manage)', (await call('GET', '/api/admin/promos', { cookie: vcookie })).status === 403);
+
+  const pct = await call('POST', '/api/admin/promos', { cookie: adminCookie, payload: { code: 'harmattan10', type: 'percent', value: 10, tours: 'All tours', limit: 100, active: true } });
+  ok('admin create percent promo → 201 (code upper-cased)', pct.status === 201 && pct.body.code === 'HARMATTAN10', JSON.stringify(pct.body));
+  ok('percent promo DTO: value 10, scope all, used 0', pct.body.value === 10 && pct.body.scope === 'all' && pct.body.used === 0, JSON.stringify(pct.body));
+
+  // fixed amount is spoken in whole currency at the boundary, stored minor internally.
+  const fix = await call('POST', '/api/admin/promos', { cookie: adminCookie, payload: { code: 'FLAT20', type: 'fixed', value: 20, currency: 'USD', active: true } });
+  ok('admin create fixed promo → 201 value 20 (round-trips major↔minor)', fix.status === 201 && fix.body.value === 20 && fix.body.type === 'fixed', JSON.stringify(fix.body));
+  const fixMinor = Number((await db.query(`SELECT value FROM promo_code WHERE code='FLAT20'`)).rows[0].value);
+  ok('fixed promo stored as minor units (2000)', fixMinor === 2000, `got ${fixMinor}`);
+
+  const dup = await call('POST', '/api/admin/promos', { cookie: adminCookie, payload: { code: 'HARMATTAN10', type: 'percent', value: 5 } });
+  ok('duplicate promo code → 409', dup.status === 409, JSON.stringify(dup.body));
+  ok('percent value > 100 → 400', (await call('POST', '/api/admin/promos', { cookie: adminCookie, payload: { code: 'TOOMUCH', type: 'percent', value: 150 } })).status === 400);
+  ok('bad code format → 400', (await call('POST', '/api/admin/promos', { cookie: adminCookie, payload: { code: 'has spaces', type: 'percent', value: 5 } })).status === 400);
+
+  const list = await call('GET', '/api/admin/promos', { cookie: adminCookie });
+  ok('admin promos list includes both', list.status === 200 && list.body.promos.some((p: any) => p.code === 'HARMATTAN10') && list.body.promos.some((p: any) => p.code === 'FLAT20'), JSON.stringify(list.body.promos?.length));
+
+  const patch = await call('PATCH', '/api/admin/promos/HARMATTAN10', { cookie: adminCookie, payload: { value: 15, limit: 50 } });
+  ok('admin patch promo (value/limit) → 200', patch.status === 200 && patch.body.value === 15 && patch.body.limit === 50, JSON.stringify(patch.body));
+
+  const deact = await call('DELETE', '/api/admin/promos/FLAT20', { cookie: adminCookie });
+  ok('admin deactivate promo (DELETE) → active false', deact.status === 200 && deact.body.promo.active === false, JSON.stringify(deact.body));
+}
+
+console.log('\n[consumer promo apply (C7)]');
+{
+  const usedCount = async (code: string) => Number((await db.query(`SELECT used_count FROM promo_code WHERE code=$1`, [code])).rows[0].used_count);
+  // A valid all-scope percent code discounts the USD quote and claims exactly one redemption.
+  await call('POST', '/api/admin/promos', { cookie: adminCookie, payload: { code: 'SAVE10', type: 'percent', value: 10, tours: 'All tours', limit: 2, active: true } });
+  const dep = await makeDeparture(5);
+  const booked = await post('/api/v1/bookings', {
+    tourSlug: 'accra-city-tour', departureId: dep, partySize: 2, agreedTerms: true,
+    promoCode: 'save10', travellers: [{ ...leadTraveller }],
+  });
+  ok('POST /bookings with promo → 201', booked.status === 201, JSON.stringify(booked.body));
+  ok('quote: subtotal 150, discount 15, total 135', booked.body.quote.subtotal === 150 && booked.body.quote.discount === 15 && booked.body.quote.total === 135, JSON.stringify(booked.body.quote));
+  ok('quote.promo echoes code SAVE10', booked.body.quote.promo?.code === 'SAVE10' && booked.body.quote.promo.discount === 15, JSON.stringify(booked.body.quote.promo));
+  ok('promo used_count incremented to 1', (await usedCount('SAVE10')) === 1);
+  const g = await get(`/api/v1/bookings/${booked.body.ref}`);
+  ok('GET booking reflects discount + promo', g.body.quote.discount === 15 && g.body.quote.total === 135 && g.body.quote.promo?.code === 'SAVE10', JSON.stringify(g.body.quote));
+
+  // Fixed-amount code applies a flat discount in the booking currency.
+  await call('POST', '/api/admin/promos', { cookie: adminCookie, payload: { code: 'FLAT25', type: 'fixed', value: 25, currency: 'USD', active: true } });
+  const fixBooked = await post('/api/v1/bookings', {
+    tourSlug: 'accra-city-tour', departureId: await makeDeparture(5), partySize: 2, agreedTerms: true,
+    promoCode: 'FLAT25', travellers: [{ ...leadTraveller }],
+  });
+  ok('fixed promo discounts 25 → total 125', fixBooked.body.quote.discount === 25 && fixBooked.body.quote.total === 125, JSON.stringify(fixBooked.body.quote));
+
+  // Rejections — each returns 422 and must NOT reserve a seat or claim a redemption.
+  const unknown = await post('/api/v1/bookings', { tourSlug: 'accra-city-tour', departureId: await makeDeparture(5), partySize: 1, agreedTerms: true, promoCode: 'NOPE', travellers: [{ ...leadTraveller }] });
+  ok('unknown promo → 422', unknown.status === 422 && unknown.body.error?.code === 'promo_invalid', JSON.stringify(unknown.body));
+
+  await call('POST', '/api/admin/promos', { cookie: adminCookie, payload: { code: 'EXPIRED1', type: 'percent', value: 10, from: '2020-01-01', to: '2020-02-01', active: true } });
+  ok('expired promo → 422', (await post('/api/v1/bookings', { tourSlug: 'accra-city-tour', departureId: await makeDeparture(5), partySize: 1, agreedTerms: true, promoCode: 'EXPIRED1', travellers: [{ ...leadTraveller }] })).body.error?.code === 'promo_expired');
+
+  await call('POST', '/api/admin/promos', { cookie: adminCookie, payload: { code: 'INACTIVE1', type: 'percent', value: 10, active: false } });
+  ok('inactive promo → 422', (await post('/api/v1/bookings', { tourSlug: 'accra-city-tour', departureId: await makeDeparture(5), partySize: 1, agreedTerms: true, promoCode: 'INACTIVE1', travellers: [{ ...leadTraveller }] })).body.error?.code === 'promo_inactive');
+
+  // Scope mismatch: a luxury-category code cannot apply to a city tour.
+  await call('POST', '/api/admin/promos', { cookie: adminCookie, payload: { code: 'LUXONLY', type: 'percent', value: 10, tours: 'Luxury', active: true } });
+  ok('category-scope mismatch → 422', (await post('/api/v1/bookings', { tourSlug: 'accra-city-tour', departureId: await makeDeparture(5), partySize: 1, agreedTerms: true, promoCode: 'LUXONLY', travellers: [{ ...leadTraveller }] })).body.error?.code === 'promo_scope');
+
+  // Usage limit: a limit-1 code redeems once, then the second attempt is rejected and used_count stays 1.
+  await call('POST', '/api/admin/promos', { cookie: adminCookie, payload: { code: 'ONCE', type: 'percent', value: 10, limit: 1, active: true } });
+  const first = await post('/api/v1/bookings', { tourSlug: 'accra-city-tour', departureId: await makeDeparture(5), partySize: 1, agreedTerms: true, promoCode: 'ONCE', travellers: [{ ...leadTraveller }] });
+  ok('limit-1 promo: first booking ok', first.status === 201);
+  const second = await post('/api/v1/bookings', { tourSlug: 'accra-city-tour', departureId: await makeDeparture(5), partySize: 1, agreedTerms: true, promoCode: 'ONCE', travellers: [{ ...leadTraveller }] });
+  ok('limit-1 promo: second booking → 422 limit reached', second.status === 422 && second.body.error?.code === 'promo_limit_reached', JSON.stringify(second.body));
+  ok('over-limit attempt did not double-claim (used_count = 1)', (await usedCount('ONCE')) === 1);
+
+  // Cancelling a promo-bearing booking releases the redemption so the code frees up again.
+  await call('POST', '/api/admin/promos', { cookie: adminCookie, payload: { code: 'REL1', type: 'percent', value: 10, limit: 1, active: true } });
+  const relBooked = await post('/api/v1/bookings', { tourSlug: 'accra-city-tour', departureId: await makeDeparture(5), partySize: 1, agreedTerms: true, promoCode: 'REL1', travellers: [{ ...leadTraveller }] });
+  ok('promo REL1 claimed (used_count 1)', (await usedCount('REL1')) === 1);
+  const rel = await call('POST', `/api/admin/bookings/${relBooked.body.ref}/cancel`, { cookie: adminCookie, payload: { reason: 'customer_request' } });
+  ok('cancel promo booking → 200', rel.status === 200, JSON.stringify(rel.body));
+  ok('cancel released the redemption (used_count back to 0)', (await usedCount('REL1')) === 0);
+}
+
+console.log('\n[admin delete guide nulls departure assignment]');
+{
+  const del = await call('DELETE', `/api/admin/guides/${smokeGuideId}`, { cookie: adminCookie });
+  ok('delete guide → 200 (reports departures unassigned)', del.status === 200 && del.body.departuresUnassigned >= 1, JSON.stringify(del.body));
+  const dep = await call('GET', `/api/admin/departures?tourId=accra-city-tour`, { cookie: adminCookie });
+  const row = dep.body.departures.find((d: any) => d.id === guidedDepId);
+  ok('departure guide_id nulled by FK on guide delete', row && row.guideId === null, JSON.stringify(row));
+}
+
 console.log('\n[admin session revocation]');
 {
   const logout = await call('POST', '/api/admin/auth/logout', { cookie: adminCookie });

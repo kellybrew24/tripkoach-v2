@@ -32,7 +32,17 @@ export interface CreateBookingInput {
   partySize: number;
   specialRequests?: string | null;
   agreedTerms?: boolean;
+  promoCode?: string | null;
   travellers: TravellerInput[];
+}
+
+// A validated, priced promo redemption. discountMinor is already capped to the subtotal (never negative).
+interface AppliedPromo {
+  id: string;
+  code: string;
+  type: 'percent' | 'fixed';
+  value: number;         // percent (0-100) or the fixed amount in whole currency units
+  discountMinor: number;
 }
 
 // GHS pesewas = round(USD cents × GHS-per-USD). cents × (GHS/USD) = pesewas (both are ×100 minor units).
@@ -145,6 +155,70 @@ export function createBookingService(
     return Number(tour.base_price_minor); // fall back to the "from" price
   }
 
+  // ── Promo redemption (C7). Validate a code against the booked tour + subtotal, then ATOMICALLY claim
+  // one usage against the usage_limit. Runs inside the booking transaction (after the seat reserve) so a
+  // rolled-back booking never leaks a redemption; the caller stores promo_code_id + discount on the row so
+  // the redemption can be released again if the hold is cancelled or expires (see expireHolds / admin cancel).
+  async function applyPromo(
+    q: Db, rawCode: string, tour: any, subtotalMinor: number, currency: string,
+  ): Promise<AppliedPromo> {
+    const code = String(rawCode).trim().toUpperCase();
+    if (!code) throw new BookingError('promo_invalid', 'Enter a promo code', 422);
+    const { rows } = await q.query(`SELECT * FROM promo_code WHERE code = $1`, [code]);
+    const p = rows[0];
+    if (!p) throw new BookingError('promo_invalid', 'That promo code was not recognised', 422);
+    if (!p.active) throw new BookingError('promo_inactive', 'That promo code is no longer active', 422);
+
+    const now = Date.now();
+    if (p.valid_from && new Date(p.valid_from).getTime() > now) {
+      throw new BookingError('promo_not_started', 'That promo code is not valid yet', 422);
+    }
+    if (p.valid_to && new Date(p.valid_to).getTime() < now) {
+      throw new BookingError('promo_expired', 'That promo code has expired', 422);
+    }
+
+    // Scope: all | category (matches tour category enum or its display label) | tour (matches slug or id).
+    if (p.scope === 'tour') {
+      if (p.scope_ref !== tour.slug && p.scope_ref !== tour.id) {
+        throw new BookingError('promo_scope', 'That promo code does not apply to this tour', 422);
+      }
+    } else if (p.scope === 'category') {
+      const ref = String(p.scope_ref ?? '').toLowerCase();
+      const cat = String(tour.category ?? '').toLowerCase();
+      const label = String(tour.category_label ?? '').toLowerCase();
+      if (ref !== cat && ref !== label) {
+        throw new BookingError('promo_scope', 'That promo code does not apply to this tour', 422);
+      }
+    }
+
+    // Discount. percent → % of subtotal; fixed → promo.value minor units in promo.currency (must match the
+    // booking currency — the discount is applied to the USD display quote; GHS is derived at charge time).
+    let discountMinor: number;
+    if (p.type === 'percent') {
+      discountMinor = Math.round(subtotalMinor * Number(p.value) / 100);
+    } else {
+      const promoCurrency = (p.currency ?? currency).toUpperCase();
+      if (promoCurrency !== currency.toUpperCase()) {
+        throw new BookingError('promo_currency', 'That promo code cannot be applied to this booking', 422);
+      }
+      discountMinor = Number(p.value);
+    }
+    discountMinor = Math.max(0, Math.min(discountMinor, subtotalMinor)); // never drive the total negative
+
+    // Atomically claim one redemption. Guard the usage_limit in the UPDATE so concurrent bookings can't
+    // over-redeem — a 0-row result means the limit is exhausted.
+    const claim = await q.query(
+      `UPDATE promo_code SET used_count = used_count + 1, updated_at = now()
+        WHERE id = $1 AND (usage_limit IS NULL OR used_count < usage_limit)
+      RETURNING used_count`, [p.id]);
+    if (claim.rowCount === 0) {
+      throw new BookingError('promo_limit_reached', 'That promo code has reached its usage limit', 422);
+    }
+
+    const value = p.type === 'fixed' ? fromMinor(Number(p.value)) : Number(p.value);
+    return { id: p.id, code, type: p.type, value, discountMinor };
+  }
+
   // ── CREATE + RESERVE (single transaction) ──
   async function create(input: CreateBookingInput): Promise<any> {
     const partySize = Number(input.partySize);
@@ -165,7 +239,8 @@ export function createBookingService(
 
     return db.tx(async (q) => {
       const tourRes = await q.query(
-        `SELECT id, slug, title, currency, base_price_minor FROM tour WHERE slug = $1 AND published`,
+        `SELECT id, slug, title, currency, base_price_minor, category, category_label
+           FROM tour WHERE slug = $1 AND published`,
         [input.tourSlug]);
       const tour = tourRes.rows[0];
       if (!tour) throw new BookingError('not_found', `tour "${input.tourSlug}" not found`, 404);
@@ -202,18 +277,28 @@ export function createBookingService(
       }
 
       const unit = await unitPriceMinor(q, tour, dep, packageId, partySize);
-      const total = unit * partySize;
+      const subtotal = unit * partySize;
+      const currency = tour.currency || 'USD';
+
+      // Promo (C7): validate + claim a redemption, then discount the subtotal. Runs after the seat reserve
+      // so a sold-out booking never consumes a code; the tx rollback releases the claim if anything below fails.
+      const promo = input.promoCode
+        ? await applyPromo(q, input.promoCode, tour, subtotal, currency)
+        : null;
+      const total = subtotal - (promo?.discountMinor ?? 0);
       const expires = new Date(Date.now() + cfg.reservationHoldMinutes * 60_000);
 
       const bk = await insertUniqueRef('TK', 6, async (ref) => {
         const r = await q.query(
           `INSERT INTO booking
              (ref, tour_id, departure_id, package_id, party_size, unit_price_minor, total_minor,
-              currency, status, payment_state, reservation_expires_at, special_requests, agreed_terms_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'reserved','unpaid',$9,$10, now())
+              currency, status, payment_state, reservation_expires_at, special_requests, agreed_terms_at,
+              promo_code_id, discount_minor)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'reserved','unpaid',$9,$10, now(),$11,$12)
            RETURNING id, ref`,
-          [ref, tour.id, dep.id, packageId, partySize, unit, total, tour.currency || 'USD',
-           expires.toISOString(), input.specialRequests ?? null]);
+          [ref, tour.id, dep.id, packageId, partySize, unit, total, currency,
+           expires.toISOString(), input.specialRequests ?? null,
+           promo?.id ?? null, promo?.discountMinor ?? 0]);
         return r.rows[0];
       });
 
@@ -230,8 +315,10 @@ export function createBookingService(
         paymentState: 'unpaid',
         reservationExpiresAt: expires.toISOString(),
         quote: {
-          unitPrice: fromMinor(unit), total: fromMinor(total),
-          currency: tour.currency || 'USD', partySize,
+          unitPrice: fromMinor(unit), subtotal: fromMinor(subtotal),
+          discount: fromMinor(promo?.discountMinor ?? 0), total: fromMinor(total),
+          currency, partySize,
+          promo: promo ? { code: promo.code, type: promo.type, value: promo.value, discount: fromMinor(promo.discountMinor) } : null,
         },
         tour: { slug: tour.slug, title: tour.title },
         departure: { id: dep.id, date: dep.date_label, time: dep.time_label ?? '' },
@@ -243,10 +330,11 @@ export function createBookingService(
   async function loadBooking(q: Db, ref: string): Promise<any | null> {
     const { rows } = await q.query(
       `SELECT b.*, t.slug AS tour_slug, t.title AS tour_title,
-              d.date_label, d.time_label
+              d.date_label, d.time_label, pc.code AS promo_code, pc.type AS promo_type
        FROM booking b
        JOIN tour t ON t.id = b.tour_id
        JOIN departure d ON d.id = b.departure_id
+       LEFT JOIN promo_code pc ON pc.id = b.promo_code_id
        WHERE b.ref = $1`, [ref]);
     return rows[0] ?? null;
   }
@@ -266,8 +354,13 @@ export function createBookingService(
         ? new Date(b.reservation_expires_at).toISOString() : null,
       quote: {
         unitPrice: fromMinor(Number(b.unit_price_minor)),
+        subtotal: fromMinor(Number(b.total_minor) + Number(b.discount_minor ?? 0)),
+        discount: fromMinor(Number(b.discount_minor ?? 0)),
         total: fromMinor(Number(b.total_minor)),
         currency: b.currency, partySize: Number(b.party_size),
+        promo: b.promo_code ? {
+          code: b.promo_code, type: b.promo_type, discount: fromMinor(Number(b.discount_minor ?? 0)),
+        } : null,
       },
       tour: { slug: b.tour_slug, title: b.tour_title },
       departure: { id: b.departure_id, date: b.date_label, time: b.time_label ?? '' },
@@ -504,8 +597,8 @@ export function createBookingService(
   // ── Expiry sweep: release unpaid holds past reservation_expires_at (cron-callable) ──
   async function expireHolds(now: Date = new Date()): Promise<{ released: number; refs: string[] }> {
     return db.tx(async (q) => {
-      const due = await q.query<{ id: string; ref: string; departure_id: string; party_size: number }>(
-        `SELECT id, ref, departure_id, party_size FROM booking
+      const due = await q.query<{ id: string; ref: string; departure_id: string; party_size: number; promo_code_id: string | null }>(
+        `SELECT id, ref, departure_id, party_size, promo_code_id FROM booking
           WHERE status IN ('reserved','pending')
             AND payment_state IN ('unpaid','pending')
             AND reservation_expires_at IS NOT NULL
@@ -518,6 +611,12 @@ export function createBookingService(
           `UPDATE departure
               SET seats_reserved = GREATEST(0, seats_reserved - $2), updated_at = now()
             WHERE id = $1`, [bk.departure_id, bk.party_size]);
+        // Release the promo redemption so a limited code isn't consumed by an abandoned hold.
+        if (bk.promo_code_id) {
+          await q.query(
+            `UPDATE promo_code SET used_count = GREATEST(0, used_count - 1), updated_at = now() WHERE id = $1`,
+            [bk.promo_code_id]);
+        }
         await q.query(
           `UPDATE booking SET status = 'cancelled', payment_state = 'failed',
                   cancel_reason = 'non_payment', updated_at = now()
