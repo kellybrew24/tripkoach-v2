@@ -175,7 +175,7 @@ function ReviewInviteLive({ go, token }) {
       ) : (
         <div className="tk-card" style={{ boxShadow: "var(--elev-2)" }}><div className="tk-card__body" style={{ padding: "var(--space-6)", gap: "var(--space-4)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{ width: 60, height: 60, borderRadius: "var(--radius-md)", overflow: "hidden", flex: "none" }}><TourImage src={tour.image} alt={tour.title} label={tour.title} gi={0} showLabel={false} /></div>
+            <div style={{ position: "relative", width: 60, height: 60, borderRadius: "var(--radius-md)", overflow: "hidden", flex: "none" }}><TourImage src={tour.image} alt={tour.title} label={tour.title} gi={0} showLabel={false} /></div>
             <div><span className="tk-overline" style={{ color: "var(--brand-ink)" }}>How was your trip?</span><h1 className="tk-h3" style={{ margin: "2px 0 0" }}>{tour.title}</h1></div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", background: "var(--success-bg)", borderRadius: "var(--radius-md)" }}><Icon name="shield-check" size={16} style={{ color: "var(--success-fg)" }} /><span className="tk-body-sm">Verified traveller — only you can use this private link.</span></div>
@@ -212,7 +212,7 @@ function ReviewInvitePage({ go, token }) {
       ) : (
         <div className="tk-card" style={{ boxShadow: "var(--elev-2)" }}><div className="tk-card__body" style={{ padding: "var(--space-6)", gap: "var(--space-4)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{ width: 60, height: 60, borderRadius: "var(--radius-md)", overflow: "hidden", flex: "none" }}><TourImage src={tour.image} alt={tour.title} label={tour.title} gi={0} showLabel={false} /></div>
+            <div style={{ position: "relative", width: 60, height: 60, borderRadius: "var(--radius-md)", overflow: "hidden", flex: "none" }}><TourImage src={tour.image} alt={tour.title} label={tour.title} gi={0} showLabel={false} /></div>
             <div><span className="tk-overline" style={{ color: "var(--brand-ink)" }}>How was your trip?</span><h1 className="tk-h3" style={{ margin: "2px 0 0" }}>{tour.title}</h1></div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", background: "var(--success-bg)", borderRadius: "var(--radius-md)" }}><Icon name="shield-check" size={16} style={{ color: "var(--success-fg)" }} /><span className="tk-body-sm">Verified — you travelled on <strong>{inv.date}</strong> (booking {inv.ref}).</span></div>
