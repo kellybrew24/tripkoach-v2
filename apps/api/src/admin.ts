@@ -7,6 +7,7 @@ import type { Db } from './db.ts';
 import type { Config } from './config.ts';
 import type { PaystackClient } from './paystack.ts';
 import { fromMinor, toMinor, slugify, formatReviewDate, initials } from './util.ts';
+import { blocksToText, textToBlocks } from './content.ts';
 import { audit } from './auth.ts';
 import type { NotificationService } from './notifications.ts';
 
@@ -1483,6 +1484,150 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     };
   }
 
+  // ── Blog / CMS (TRI-917) ─────────────────────────────────────────────────
+  // The console authors stories here; the consumer web reads only status='published' (src/content.ts).
+  // Body is stored as a jsonb block array; the editor round-trips it through the plain-text projection
+  // (blocksToText / textToBlocks) so authors work in a friendly format without a rich-text dependency.
+  const BLOG_STATUS = ['draft', 'published'] as const;
+
+  function blogListDTO(p: any) {
+    return {
+      id: p.id, slug: p.slug, tag: p.tag ?? null, status: p.status,
+      published: p.status === 'published',
+      readTime: p.read_time == null || p.read_time === '' ? null : Number(p.read_time),
+      date: formatReviewDate(p.published_at) || '',
+      title: p.title, excerpt: p.excerpt ?? '', hero: p.hero_url ?? null,
+      updated: formatReviewDate(p.updated_at) || '',
+    };
+  }
+  function blogDetailDTO(p: any) {
+    const body = Array.isArray(p.body) ? p.body : [];
+    return {
+      ...blogListDTO(p),
+      heroAlt: p.hero_alt ?? null, author: p.author ?? null,
+      body, bodyText: blocksToText(body),
+    };
+  }
+
+  // Body arrives as either `bodyText` (the editor's plain-text form) or `body` (a raw block array).
+  function readBlogBody(body: Body): unknown[] | undefined {
+    if (typeof body.bodyText === 'string') return textToBlocks(body.bodyText);
+    if (Array.isArray(body.body)) return body.body;
+    return undefined;
+  }
+  // Publish state may come as `status` ('draft'|'published') or a boolean `published`.
+  function readBlogStatus(body: Body): string | undefined {
+    const s = optEnum(body, 'status', BLOG_STATUS);
+    if (s) return s;
+    const pub = optBool(body, 'published');
+    return pub == null ? undefined : (pub ? 'published' : 'draft');
+  }
+
+  async function loadBlog(idOrSlug: string) {
+    const { rows } = await db.query(`SELECT * FROM blog_post WHERE id::text = $1 OR slug = $1 LIMIT 1`, [idOrSlug]);
+    return rows[0] ?? null;
+  }
+
+  async function listBlog() {
+    const { rows } = await db.query(
+      `SELECT * FROM blog_post ORDER BY published_at DESC NULLS LAST, updated_at DESC`);
+    return { posts: rows.map(blogListDTO) };
+  }
+
+  async function getBlog(idOrSlug: string) {
+    const p = await loadBlog(idOrSlug);
+    if (!p) throw notFound('post');
+    return blogDetailDTO(p);
+  }
+
+  async function createBlog(body: unknown, actor: Actor) {
+    if (!isPlainObject(body)) throw new ValidationError('body must be an object');
+    const title = reqStr(body, 'title', 300);
+    let slug = optStr(body, 'slug', 200);
+    slug = slug ? slugify(slug) : slugify(title);
+    if (!slug) throw new ValidationError('could not derive a slug from the title', 'slug');
+    if ((await db.query(`SELECT 1 FROM blog_post WHERE slug = $1`, [slug])).rows.length) {
+      throw conflict(`a post with slug "${slug}" already exists`);
+    }
+    const tag = optStr(body, 'tag', 120) ?? null;
+    const excerpt = optStr(body, 'excerpt', 2000) ?? null;
+    const hero = optStr(body, 'hero', 1000) ?? optStr(body, 'heroUrl', 1000) ?? null;
+    const heroAlt = optStr(body, 'heroAlt', 1000) ?? null;
+    const author = optStr(body, 'author', 200) ?? null;
+    const readTime = optInt(body, 'readTime', 0);
+    const status = readBlogStatus(body) ?? 'draft';
+    const blocks = readBlogBody(body) ?? [];
+    // Publishing with no explicit date stamps "now"; a draft keeps the authored date (or null).
+    let publishedAt = optDate(body, 'publishedAt', 'date');
+    if (publishedAt === undefined) publishedAt = status === 'published' ? new Date().toISOString() : null;
+
+    const { rows } = await db.query(
+      `INSERT INTO blog_post (slug, tag, read_time, published_at, title, excerpt, hero_url, hero_alt, author, body, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+      [slug, tag, readTime == null ? null : String(readTime), publishedAt, title, excerpt, hero, heroAlt, author, JSON.stringify(blocks), status]);
+    await audit(db, { actorId: actor.id, action: 'blog.create', targetType: 'blog_post', targetId: rows[0].id, after: { slug, title, status }, ip: actor.ip });
+    return getBlog(rows[0].id);
+  }
+
+  async function updateBlog(idOrSlug: string, body: unknown, actor: Actor) {
+    if (!isPlainObject(body)) throw new ValidationError('body must be an object');
+    const cur = await loadBlog(idOrSlug);
+    if (!cur) throw notFound('post');
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    const set = (col: string, val: unknown) => { params.push(val); sets.push(`${col} = $${params.length}`); };
+
+    const title = optStr(body, 'title', 300); if (title != null) set('title', title.trim());
+    if (body.slug !== undefined) {
+      const s = slugify(optStr(body, 'slug', 200) ?? '');
+      if (!s) throw new ValidationError('slug cannot be empty', 'slug');
+      if (s !== cur.slug && (await db.query(`SELECT 1 FROM blog_post WHERE slug=$1 AND id<>$2`, [s, cur.id])).rows.length) {
+        throw conflict(`a post with slug "${s}" already exists`);
+      }
+      set('slug', s);
+    }
+    if (body.tag !== undefined) set('tag', optStr(body, 'tag', 120) ?? null);
+    if (body.excerpt !== undefined) set('excerpt', optStr(body, 'excerpt', 2000) ?? null);
+    if (body.hero !== undefined || body.heroUrl !== undefined) set('hero_url', optStr(body, 'hero', 1000) ?? optStr(body, 'heroUrl', 1000) ?? null);
+    if (body.heroAlt !== undefined) set('hero_alt', optStr(body, 'heroAlt', 1000) ?? null);
+    if (body.author !== undefined) set('author', optStr(body, 'author', 200) ?? null);
+    if (body.readTime !== undefined) { const rt = optInt(body, 'readTime', 0); set('read_time', rt == null ? null : String(rt)); }
+    const blocks = readBlogBody(body); if (blocks !== undefined) set('body', JSON.stringify(blocks));
+    const status = readBlogStatus(body);
+    if (status !== undefined) {
+      set('status', status);
+      // First-time publish with no stored date → stamp now; keep any existing/authored date otherwise.
+      if (status === 'published' && !cur.published_at && optDate(body, 'publishedAt', 'date') === undefined) set('published_at', new Date().toISOString());
+    }
+    const pd = optDate(body, 'publishedAt', 'date'); if (pd !== undefined) set('published_at', pd);
+    if (!sets.length) throw new ValidationError('no updatable fields provided');
+
+    params.push(cur.id);
+    await db.query(`UPDATE blog_post SET ${sets.join(', ')}, updated_at = now() WHERE id = $${params.length}`, params);
+    await audit(db, { actorId: actor.id, action: 'blog.update', targetType: 'blog_post', targetId: cur.id, before: { slug: cur.slug, status: cur.status }, after: { title: title ?? cur.title, status: status ?? cur.status }, ip: actor.ip });
+    return getBlog(cur.id);
+  }
+
+  async function setBlogPublished(idOrSlug: string, published: boolean, actor: Actor) {
+    const cur = await loadBlog(idOrSlug);
+    if (!cur) throw notFound('post');
+    const status = published ? 'published' : 'draft';
+    const stampNow = published && !cur.published_at;
+    await db.query(
+      `UPDATE blog_post SET status = $1${stampNow ? ', published_at = now()' : ''}, updated_at = now() WHERE id = $2`,
+      [status, cur.id]);
+    await audit(db, { actorId: actor.id, action: published ? 'blog.publish' : 'blog.unpublish', targetType: 'blog_post', targetId: cur.id, before: { status: cur.status }, after: { status }, ip: actor.ip });
+    return getBlog(cur.id);
+  }
+
+  async function deleteBlog(idOrSlug: string, actor: Actor) {
+    const cur = await loadBlog(idOrSlug);
+    if (!cur) throw notFound('post');
+    await db.query(`DELETE FROM blog_post WHERE id = $1`, [cur.id]);
+    await audit(db, { actorId: actor.id, action: 'blog.delete', targetType: 'blog_post', targetId: cur.id, before: { slug: cur.slug, title: cur.title }, ip: actor.ip });
+    return { ok: true };
+  }
+
   return {
     listRegions, createRegion, updateRegion, deleteRegion,
     listTours, getTour, createTour, updateTour, setTourPublished, deleteTour,
@@ -1496,6 +1641,7 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     listCustomers, getCustomer,
     listAuditLog,
     getDashboard,
+    listBlog, getBlog, createBlog, updateBlog, setBlogPublished, deleteBlog,
   };
 }
 

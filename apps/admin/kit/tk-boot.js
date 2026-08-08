@@ -229,6 +229,21 @@
       status: r.status || "approved", title: r.title || "", text: r.text || r.body || "", reply: r.reply || "",
     };
   }
+  // Blog / CMS (TRI-917). The admin list DTO already matches the kit shape; this
+  // stays tolerant of snake_case / camelCase so integration is mechanical.
+  function mapBlogPost(p) {
+    return {
+      id: pick(p.id, p.slug), slug: p.slug || p.id, tag: p.tag || null,
+      status: p.status || (p.published ? "published" : "draft"),
+      published: p.published !== undefined ? !!p.published : p.status === "published",
+      readTime: pick(p.readTime, p.read_time),
+      date: p.date != null ? (typeof p.date === "string" ? p.date : fmtDate(p.date)) : fmtDate(pick(p.publishedAt, p.published_at)),
+      title: p.title || "", excerpt: p.excerpt || "", hero: pick(p.hero, p.heroUrl, p.hero_url) || null,
+      heroAlt: pick(p.heroAlt, p.hero_alt) || "", author: p.author || "",
+      body: p.body, bodyText: p.bodyText,
+      updated: p.updated != null ? p.updated : fmtDate(pick(p.updatedAt, p.updated_at)),
+    };
+  }
 
   // ---- write serialisers: kit form values → API body ------------------------
   // USD is the currency of record. Prices go out as whole-currency numbers with
@@ -301,6 +316,15 @@
     unpublishReview: function (id) { return req("POST", "/reviews/" + encodeURIComponent(id) + "/unpublish"); },
     restoreReview: function (id) { return req("POST", "/reviews/" + encodeURIComponent(id) + "/restore"); },
     replyReview: function (id, reply) { return req("POST", "/reviews/" + encodeURIComponent(id) + "/reply", { reply: reply }); },
+    // blog / CMS (TRI-917) — authoring CRUD, guarded server-side by content.manage
+    listBlog: function () { return req("GET", "/blog"); },
+    getBlog: function (id) { return req("GET", "/blog/" + encodeURIComponent(id)); },
+    saveBlog: function (v) {
+      var id = v && v.id; var b = Object.assign({}, v); delete b.id;
+      return id ? req("PATCH", "/blog/" + encodeURIComponent(id), b) : req("POST", "/blog", b);
+    },
+    setBlogPublished: function (id, pub) { return req("POST", "/blog/" + encodeURIComponent(id) + "/" + (pub ? "publish" : "unpublish")); },
+    deleteBlog: function (id) { return req("DELETE", "/blog/" + encodeURIComponent(id)); },
     // misc lists
     listCustomers: function () { return req("GET", "/customers"); },
     listGuides: function () { return req("GET", "/guides"); },
@@ -394,6 +418,7 @@
         safe(function () { return API.listStaff().then(function (b) { setAdmin("staff", list(b, "staff").map(mapStaff)); }); }),
         safe(function () { return API.listCustomers().then(function (b) { setAdmin("customers", list(b, "customers").map(mapCustomer)); }); }),
         safe(function () { return API.listGuides().then(function (b) { setAdmin("guides", list(b, "guides").map(mapGuide)); }); }),
+        safe(function () { return API.listBlog().then(function (b) { setAdmin("blog", list(b, "posts").map(mapBlogPost)); }); }),
         safe(function () { return req("GET", "/reviews").then(function (b) {
           var revs = list(b, "reviews").map(mapReview);
           if (!Array.isArray(window.TK_REVIEWS)) window.TK_REVIEWS = [];

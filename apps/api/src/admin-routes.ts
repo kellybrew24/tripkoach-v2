@@ -289,6 +289,16 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
       return reconciliationCsv(report);
     });
 
+    // ── Blog / CMS (TRI-917) — admin authoring CRUD, guarded by content.manage. Consumer render reads
+    //    published-only under /api/v1/blog. ──
+    admin.get('/blog', perm('content.manage'), async () => svc.listBlog());
+    admin.get('/blog/:idOrSlug', perm('content.manage'), async (req) => svc.getBlog((req.params as any).idOrSlug));
+    admin.post('/blog', perm('content.manage'), async (req, reply) => reply.code(201).send(await svc.createBlog(body(req), actorOf(req))));
+    admin.patch('/blog/:idOrSlug', perm('content.manage'), async (req) => svc.updateBlog((req.params as any).idOrSlug, body(req), actorOf(req)));
+    admin.post('/blog/:idOrSlug/publish', perm('content.manage'), async (req) => svc.setBlogPublished((req.params as any).idOrSlug, true, actorOf(req)));
+    admin.post('/blog/:idOrSlug/unpublish', perm('content.manage'), async (req) => svc.setBlogPublished((req.params as any).idOrSlug, false, actorOf(req)));
+    admin.delete('/blog/:idOrSlug', perm('content.manage'), async (req) => svc.deleteBlog((req.params as any).idOrSlug, actorOf(req)));
+
     // ── Settings (org config incl display rate; charge rate is read-only) ────────
     // TRI-898 · GET/PATCH the singleton settings row. settings.manage gates both. PATCH surfaces the
     // customer-facing DISPLAY rate for editing but the service rejects any attempt to touch the charge rate.

@@ -80,5 +80,13 @@
     { id:"nii", name:"Nii Armah", initials:"NA", email:"nii.g@tripkoach.com", phone:"+233 26 555 0121", base:"Accra", regions:["Greater Accra"], languages:["English","Ga"], status:"leave", rating:4.6, trips:52, bio:"Jamestown and street-food walks. On leave until September." },
   ];
 
-  window.TK_ADMIN = { customers:customers, bookings:B, payments:payments, promos:promos, staff:staff, guides:guides, departures:departures, tours:T };
+  // Blog / CMS (TRI-917) — prototype fixture for the authoring screen. In live
+  // mode tk-boot.js replaces this with the real catalogue from GET /api/admin/blog.
+  var blog = [
+    { id:"kakum-canopy-walk-cape-coast-day-trip", slug:"kakum-canopy-walk-cape-coast-day-trip", tag:"Destinations", status:"published", published:true, readTime:6, date:"5 Aug 2026", updated:"5 Aug 2026", title:"Above the trees at Kakum: Ghana's canopy walk and how to do it right", excerpt:"Forty metres up, on seven swaying bridges strung between the tallest trees in the forest, you walk right through the top of Ghana's rainforest.", hero:"https://cdn.tripkoach.com/img/posts/kakum-canopy-walk-cape-coast-day-trip-hero.jpg", author:"TripKoach", bodyText:"## What Kakum actually is\n\nKakum National Park protects about 375 square kilometres of Upper Guinean rainforest, one of the last big stretches of this forest type left in West Africa." },
+    { id:"first-24-hours-accra", slug:"first-24-hours-accra", tag:"First-time in Ghana", status:"published", published:true, readTime:3, date:"18 May 2026", updated:"18 May 2026", title:"Your first 24 hours in Accra: the koach's arrival kit", excerpt:"SIM, cedis, ride apps, the food that fixes jet lag, and the small moves that set up the rest of your trip.", hero:"https://cdn.tripkoach.com/img/posts/first-24-hours-accra-hero.jpg", author:"TripKoach", bodyText:"Akwaaba. Here is what to do before you even unpack." },
+    { id:"green-season-ghana", slug:"green-season-ghana", tag:"Seasons & Weather", status:"draft", published:false, readTime:3, date:"", updated:"11 May 2026", title:"Akwaaba to the green season", excerpt:"Yes, it rains. It is also when Boti Falls runs full and the crowds thin out.", hero:"https://cdn.tripkoach.com/img/posts/green-season-ghana-hero.jpg", author:"TripKoach", bodyText:"Here is what the green season actually looks like, and how TripKoach keeps you covered." },
+  ];
+
+  window.TK_ADMIN = { customers:customers, bookings:B, payments:payments, promos:promos, staff:staff, guides:guides, departures:departures, tours:T, blog:blog };
 })();

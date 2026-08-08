@@ -12,6 +12,7 @@ import { registerAdmin } from './admin-routes.ts';
 import { createNotificationService } from './notifications.ts';
 import { registerConsumer } from './consumer-routes.ts';
 import { createReviewsService, ReviewError } from './reviews.ts';
+import { listBlogPosts, getBlogPost } from './content.ts';
 
 /** Normalise a query value that may be absent, a single string ("a,b"), or an array into string[]. */
 function asArray(v: unknown): string[] | undefined {
@@ -102,6 +103,14 @@ export function buildServer(db: Db, cfg: Config, paystack?: PaystackClient): Fas
       const { slug } = req.params as { slug: string };
       const out = await getReviews(db, slug);
       return out ?? notFound(reply, `tour "${slug}" not found`);
+    });
+
+    // ── TRI-917 · Blog (published-only). The web kit renders these into window.TK_BLOG. ──
+    api.get('/blog', async () => listBlogPosts(db));
+    api.get('/blog/:slug', async (req, reply) => {
+      const { slug } = req.params as { slug: string };
+      const out = await getBlogPost(db, slug);
+      return out ?? notFound(reply, `post "${slug}" not found`);
     });
 
     // ── TRI-892 · Tokenized review redeem (consumer). Context for a valid unredeemed invite token,

@@ -11,6 +11,7 @@
     "start": "node --experimental-strip-types src/index.ts",
     "migrate": "node --experimental-strip-types src/migrate.ts",
     "seed": "node --experimental-strip-types src/seed.ts",
+    "blog-import": "node --experimental-strip-types src/blog-import.ts",
     "admin-seed": "node --experimental-strip-types src/admin-seed.ts",
     "fx-refresh": "node --experimental-strip-types src/fx-refresh.ts",
     "send-email": "node --experimental-strip-types src/send-email.ts",

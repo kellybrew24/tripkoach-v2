@@ -205,9 +205,59 @@
     return hydrateTour(tour).catch(function () { return tour; });
   };
 
+  // ---- blog (TRI-917) -------------------------------------------------------
+  // The blog screens read window.TK_BLOG (cards) + window.TK_BLOG_TAGS (chips)
+  // synchronously; a post page reads the matching entry's `body` block array.
+  // The list endpoint ships card metadata only (no body) — each post's body is
+  // fetched on demand via TK_HYDRATE_POST when its page opens (mirrors tours).
+  function mapPostCard(p) {
+    return {
+      slug: p.slug, tag: p.tag || null,
+      readTime: p.readTime != null ? p.readTime : p.read_time,
+      date: typeof p.date === "string" ? p.date : fmtDate(p.date || p.publishedAt || p.published_at),
+      title: p.title || "", excerpt: p.excerpt || "",
+      hero: p.hero || p.heroUrl || p.hero_url || null,
+    };
+  }
+  function commitBlog(posts, tags) {
+    if (!Array.isArray(window.TK_BLOG)) window.TK_BLOG = [];
+    window.TK_BLOG.length = 0;
+    Array.prototype.push.apply(window.TK_BLOG, posts);
+    if (Array.isArray(tags) && tags.length) {
+      if (!Array.isArray(window.TK_BLOG_TAGS)) window.TK_BLOG_TAGS = [];
+      window.TK_BLOG_TAGS.length = 0;
+      Array.prototype.push.apply(window.TK_BLOG_TAGS, tags);
+    }
+  }
+  function loadBlog() {
+    return api.get("/blog").then(function (body) {
+      var posts = list(body, "posts").map(mapPostCard);
+      var tags = body && Array.isArray(body.tags) ? body.tags : null;
+      commitBlog(posts, tags);
+    }).catch(function () { /* blog is non-critical to the catalogue boot; leave fixtures */ });
+  }
+  // Fetch one post's full body on demand and fold it into the TK_BLOG entry in
+  // place (BlogPost reads window.TK_BLOG synchronously). Idempotent — a post that
+  // already carries a body array short-circuits. Resolves even on failure.
+  window.TK_HYDRATE_POST = function (slug) {
+    var posts = Array.isArray(window.TK_BLOG) ? window.TK_BLOG : [];
+    var p = null;
+    for (var i = 0; i < posts.length; i++) if (posts[i].slug === slug) { p = posts[i]; break; }
+    if (!p) return Promise.resolve(null);
+    if (Array.isArray(p.body)) return Promise.resolve(p);
+    return api.get("/blog/" + encodeURIComponent(slug)).then(function (d) {
+      if (d) {
+        p.body = Array.isArray(d.body) ? d.body : [];
+        if (d.heroAlt || d.hero_alt) p.heroAlt = d.heroAlt || d.hero_alt;
+        if (d.author) p.author = d.author;
+      }
+      return p;
+    }, function () { return p; });
+  };
+
   // ---- live load ------------------------------------------------------------
   function loadLiveData() {
-    return Promise.all([api.get("/regions"), api.get("/tours")]).then(function (res) {
+    return Promise.all([api.get("/regions"), api.get("/tours"), loadBlog()]).then(function (res) {
       var regionsBody = res[0];
       var toursBody = res[1];
 

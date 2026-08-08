@@ -32,6 +32,7 @@ function navGroups(role) {
     ] },
     { label: "Catalogue", items: [
       { id: "tours", label: "Tours", icon: "compass" },
+      { id: "blog", label: "Blog", icon: "pencil" },
       { id: "promos", label: "Promo codes", icon: "badge-percent" },
     ] },
     { label: "Admin", items: [
@@ -58,6 +59,7 @@ const META = {
   payments: { title: "Payments & reconciliation", sub: "Transactions, refunds and what's outstanding" },
   tours: { title: "Tours", sub: "Your published and draft catalogue" },
   "tour-edit": { title: "Edit tour", sub: null },
+  blog: { title: "Blog", sub: "Guides and field notes for the journal" },
   promos: { title: "Promo codes", sub: "Discounts and their usage" },
   users: { title: "Staff & roles", sub: "Who can do what in the console" },
   audit: { title: "Audit log", sub: "Every action taken in the console" },
@@ -77,7 +79,7 @@ const AUTH_SCREENS = ["login", "mfa", "mfa-enroll", "reset", "expired"];
 const ADMIN_ROUTES = [
   ["dashboard", "/"], ["bookings", "/bookings"], ["departures", "/departures"],
   ["customers", "/customers"], ["guides", "/guides"], ["reviews", "/reviews"],
-  ["payments", "/payments"], ["tours", "/tours"], ["promos", "/promos"],
+  ["payments", "/payments"], ["tours", "/tours"], ["blog", "/blog"], ["promos", "/promos"],
   ["users", "/staff"], ["audit", "/audit-log"], ["settings", "/settings"], ["admin-profile", "/profile"],
   ["admin-prefs", "/preferences"], ["login", "/login"], ["mfa", "/mfa"], ["mfa-enroll", "/mfa-enroll"],
   ["reset", "/reset"], ["expired", "/expired"], ["forbidden", "/403"],
@@ -212,6 +214,7 @@ function AdminApp() {
     : screen === "payments" ? <PaymentsAdmin go={go} state={state} />
     : screen === "tours" ? <ToursAdmin go={go} state={state} setState={setState} />
     : screen === "tour-edit" ? <TourEdit go={go} state={state} />
+    : screen === "blog" ? <BlogAdmin go={go} />
     : screen === "promos" ? <PromosAdmin go={go} />
     : screen === "users" ? <UsersAdmin go={go} />
     : screen === "audit" ? <AuditLogAdmin go={go} />

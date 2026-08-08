@@ -398,8 +398,9 @@ let adminCookie = '';
   const login = await call('POST', '/api/admin/auth/login', { payload: { email: 'admin@tripkoach.com', password: 'Sup3r-Secret!' } });
   ok('login 200', login.status === 200, JSON.stringify(login.body));
   ok('login returns role admin', login.body.staff?.role === 'admin', JSON.stringify(login.body.staff));
-  ok('admin has all 11 permissions', Array.isArray(login.body.permissions) && login.body.permissions.length === 11, JSON.stringify(login.body.permissions));
+  ok('admin has all 12 permissions', Array.isArray(login.body.permissions) && login.body.permissions.length === 12, JSON.stringify(login.body.permissions));
   ok('admin permissions include reviews.moderate', login.body.permissions.includes('reviews.moderate'));
+  ok('admin permissions include content.manage', login.body.permissions.includes('content.manage'));
   adminCookie = login.cookies.find((c) => c.name === COOKIE)?.value ?? '';
   ok('login set session cookie', !!adminCookie);
   const me = await call('GET', '/api/admin/me', { cookie: adminCookie });
@@ -690,6 +691,66 @@ console.log('\n[admin reviews moderation → public visibility]');
 
   // unknown review id → 404
   ok('moderate unknown review → 404', (await call('POST', '/api/admin/reviews/00000000-0000-0000-0000-000000000000/approve', { cookie: adminCookie })).status === 404);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+console.log('\n[blog / CMS (TRI-917)]');
+{
+  // Consumer read starts empty (Phase 1 seed doesn't populate blog_post).
+  const empty = await call('GET', '/api/v1/blog');
+  ok('consumer GET /blog 200 (empty catalogue ok)', empty.status === 200 && Array.isArray(empty.body.posts), JSON.stringify(empty.body).slice(0, 80));
+
+  // RBAC: viewer lacks content.manage.
+  const vlogin = await call('POST', '/api/admin/auth/login', { payload: { email: 'viewer@tripkoach.com', password: 'Just-Look!' } });
+  const vcookie = vlogin.cookies.find((c) => c.name === COOKIE)?.value ?? '';
+  ok('viewer create post → 403 (missing content.manage)', (await call('POST', '/api/admin/blog', { cookie: vcookie, payload: { title: 'x' } })).status === 403);
+  ok('unauthenticated /admin/blog → 401', (await call('GET', '/api/admin/blog', { payload: {} })).status === 401);
+
+  // Create a draft with the plain-text body editor form.
+  const created = await call('POST', '/api/admin/blog', { cookie: adminCookie, payload: {
+    title: 'Smoke Story: A Night in Osu', tag: 'Practical', excerpt: 'A quick after-dark guide.',
+    hero: 'https://cdn.tripkoach.com/img/posts/osu-hero.jpg', readTime: 4, author: 'TripKoach',
+    bodyText: '## Where to start\n\nOsu comes alive after dark.\n\n- Eat first.\n- Then wander.\n\n> Photo: TripKoach.',
+  } });
+  ok('admin create draft → 201', created.status === 201 && created.body.status === 'draft', JSON.stringify(created.body).slice(0, 120));
+  const slug = created.body.slug;
+  ok('slug auto-derived from title', slug === 'smoke-story-a-night-in-osu', slug);
+  ok('bodyText parsed into blocks (h2/p/ul/credit)', created.body.body.length === 4 && created.body.body[0].t === 'h2' && created.body.body[3].t === 'credit', JSON.stringify(created.body.body.map((b: any) => b.t)));
+
+  // A draft is invisible to the consumer read.
+  ok('draft NOT visible on consumer /blog', !(await call('GET', '/api/v1/blog')).body.posts.some((p: any) => p.slug === slug));
+  ok('consumer GET draft detail → 404', (await call('GET', `/api/v1/blog/${slug}`)).status === 404);
+
+  // Publish → now on the consumer read with a real body.
+  const pub = await call('POST', `/api/admin/blog/${slug}/publish`, { cookie: adminCookie });
+  ok('publish → 200 status=published + published_at stamped', pub.status === 200 && pub.body.status === 'published' && !!pub.body.date, JSON.stringify(pub.body).slice(0, 100));
+  const consumerList = await call('GET', '/api/v1/blog');
+  ok('published post visible on consumer /blog', consumerList.body.posts.some((p: any) => p.slug === slug));
+  ok('consumer list exposes the Practical tag', consumerList.body.tags.includes('Practical'), JSON.stringify(consumerList.body.tags));
+  const detail = await call('GET', `/api/v1/blog/${slug}`);
+  ok('consumer detail 200 with body blocks + readTime', detail.status === 200 && detail.body.body.length === 4 && detail.body.readTime === 4, JSON.stringify({ n: detail.body.body?.length, rt: detail.body.readTime }));
+
+  // Edit: retitle + rewrite body; round-trips through bodyText.
+  const edited = await call('PATCH', `/api/admin/blog/${slug}`, { cookie: adminCookie, payload: { title: 'Osu After Dark', bodyText: 'A single new paragraph about the night.' } });
+  ok('edit → 200 new title + single-block body', edited.status === 200 && edited.body.title === 'Osu After Dark' && edited.body.body.length === 1, JSON.stringify(edited.body).slice(0, 100));
+  ok('admin getBlog exposes bodyText projection', /single new paragraph/.test(edited.body.bodyText || ''), edited.body.bodyText);
+
+  // Slug conflict is rejected.
+  const dup = await call('POST', '/api/admin/blog', { cookie: adminCookie, payload: { title: 'dup', slug } });
+  ok('duplicate slug → 409', dup.status === 409, JSON.stringify(dup.body));
+
+  // Unpublish hides it again.
+  const unpub = await call('POST', `/api/admin/blog/${slug}/unpublish`, { cookie: adminCookie });
+  ok('unpublish → 200 status=draft', unpub.status === 200 && unpub.body.status === 'draft');
+  ok('unpublished post drops off consumer /blog', !(await call('GET', '/api/v1/blog')).body.posts.some((p: any) => p.slug === slug));
+
+  // Blog actions are audited.
+  const blogAudits = Number((await db.query(`SELECT COUNT(*)::int AS n FROM audit_log WHERE action LIKE 'blog.%'`)).rows[0].n);
+  ok('audit_log rows written for blog.* actions', blogAudits >= 4, `got ${blogAudits}`);
+
+  // Delete → gone.
+  ok('delete → 200', (await call('DELETE', `/api/admin/blog/${slug}`, { cookie: adminCookie })).status === 200);
+  ok('deleted post → admin getBlog 404', (await call('GET', `/api/admin/blog/${slug}`, { cookie: adminCookie })).status === 404);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

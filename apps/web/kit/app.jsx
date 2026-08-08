@@ -54,7 +54,7 @@ function routeFromPath(pathname) {
 // In-page loader shown while a tour detail hydrates from the API (TRI-888). Kept
 // dependency-free (no DS namespace in app.jsx) and token-driven so it matches the
 // pre-React boot spinner. Only ever rendered in live mode.
-function TourDetailLoading() {
+function TourDetailLoading({ label = "Loading tour…" }) {
   return (
     <div
       className="tk-container"
@@ -63,7 +63,7 @@ function TourDetailLoading() {
     >
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "var(--space-4)" }}>
         <span className="tk-spin" style={{ width: 34, height: 34, borderRadius: "50%", border: "3px solid var(--border-subtle)", borderTopColor: "var(--brand)", display: "inline-block" }} />
-        <p className="tk-body" style={{ margin: 0, color: "var(--text-muted)" }}>Loading tour…</p>
+        <p className="tk-body" style={{ margin: 0, color: "var(--text-muted)" }}>{label}</p>
       </div>
     </div>
   );
@@ -78,6 +78,15 @@ function tourNeedsHydration(slug) {
   const tours = (window.TK_DATA && window.TK_DATA.tours) || [];
   const t = tours.find((x) => x.id === slug || x.slug === slug);
   return !(t && t._hydrated);
+}
+// Live per-slug blog-post hydration (TRI-917). The /blog list ships card
+// metadata only; a post's body block array is fetched when its page opens.
+// Flag off ⇒ inert (fixtures already carry bodies), so the prototype is unchanged.
+function postNeedsHydration(slug) {
+  if (!LIVE_API() || !slug || !window.TK_HYDRATE_POST) return false;
+  const posts = window.TK_BLOG || [];
+  const p = posts.find((x) => x.slug === slug);
+  return !(p && Array.isArray(p.body));
 }
 
 function WebApp() {
@@ -94,6 +103,9 @@ function WebApp() {
   // Which tour slug is hydrated and ready to render. null while a live per-slug
   // fetch is in flight, which gates the tour body behind a loader below.
   const [ready, setReady] = React.useState(() => (tourNeedsHydration(first.slug) ? null : first.slug));
+  // Which post slug's body is loaded and ready to render (null while a live
+  // per-slug fetch is in flight, which gates the article behind a loader below).
+  const [postReady, setPostReady] = React.useState(() => (first.screen === "post" && postNeedsHydration(first.slug) ? null : first.slug));
   const go = (s, payload) => {
     // Tour nav carries a slug only in live mode; flag off drops it, so the URL
     // stays /tour and TourWeb falls back to tours[0] (byte-identical prototype).
@@ -130,6 +142,20 @@ function WebApp() {
     );
     return () => { cancelled = true; };
   }, [screen, slug]);
+  // Lazily hydrate a blog post's body when its page opens (TRI-917). Mirrors the
+  // tour effect: the article renders from fixtures (flag off) or after the body
+  // fetch resolves (flag on). Failures still resolve so the fallback card shows.
+  React.useEffect(() => {
+    if (screen !== "post") return;
+    if (!postNeedsHydration(slug)) { setPostReady(slug); return; }
+    let cancelled = false;
+    setPostReady(null);
+    window.TK_HYDRATE_POST(slug).then(
+      () => { if (!cancelled) setPostReady(slug); },
+      () => { if (!cancelled) setPostReady(slug); }
+    );
+    return () => { cancelled = true; };
+  }, [screen, slug]);
   const tourBody =
     screen === "tour" && LIVE_API() && slug && ready !== slug ? (
       <TourDetailLoading />
@@ -158,7 +184,7 @@ function WebApp() {
     about: <AboutPage go={go} />,
     contact: <ContactPage go={go} />,
     blog: <BlogIndex go={go} />,
-    post: <BlogPost go={go} slug={slug} />,
+    post: (LIVE_API() && slug && postReady !== slug) ? <TourDetailLoading label="Loading story…" /> : <BlogPost go={go} slug={slug} />,
     review: <ReviewInvitePage go={go} token={reviewToken} />,
   }[screen] || <HomeWeb go={go} />;
 
