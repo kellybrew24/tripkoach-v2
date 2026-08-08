@@ -347,8 +347,165 @@ function Forbidden({ go }) {
     </div>
   );
 }
+
+/* ── Admin MFA (TRI-899) ───────────────────────────────────────────────────
+ * Self-service two-factor for the signed-in staff member, wired to the
+ * /api/admin/auth/mfa/* endpoints (TRI-895). These components only ever mount
+ * when USE_LIVE_API is on (see AccountProfileAdmin), so the flag-off DS
+ * prototype below is byte-identical.
+ *
+ * Two entry points share one drawer:
+ *   • First-time enroll (the DS gap) — mode "enroll": begin enroll → scan the
+ *     setup key → verify a 6-digit code → save recovery codes.
+ *   • Reconfigure — mode "reconfigure": confirm a current code (disables the old
+ *     factor) → then the same enroll flow. Permanent self-service turn-off is
+ *     intentionally NOT surfaced — policy requires 2FA for all staff.
+ */
+function MfaCodeBoxes({ code, setCode, error }) {
+  const refs = React.useRef([]);
+  const setDigit = (i, v) => {
+    if (!/^\d?$/.test(v)) return;
+    const next = code.slice(); next[i] = v; setCode(next);
+    if (v && i < 5) refs.current[i + 1] && refs.current[i + 1].focus();
+  };
+  return (
+    <div style={{ display: "flex", gap: 8 }}>
+      {code.map((d, i) => (
+        <input key={i} ref={(el) => refs.current[i] = el} value={d} onChange={(e) => setDigit(i, e.target.value)}
+          inputMode="numeric" maxLength={1} aria-label={"Digit " + (i + 1)}
+          style={{ width: 44, height: 52, textAlign: "center", fontSize: 20, fontWeight: 700, borderRadius: "var(--radius-md)", border: "1px solid " + (error ? "var(--danger-solid)" : "var(--border-input)"), background: "var(--surface-card)", color: "var(--text-strong)", fontVariantNumeric: "tabular-nums" }} />
+      ))}
+    </div>
+  );
+}
+
+function MfaEnrollDrawer({ open, mode, onClose, onEnabled, setToast }) {
+  // step: confirm (reconfigure only) → scan → codes
+  const [step, setStep] = React.useState(mode === "reconfigure" ? "confirm" : "scan");
+  const [data, setData] = React.useState(null);            // { secret, otpauthUri, issuer }
+  const [confirmCode, setConfirmCode] = React.useState("");
+  const [code, setCode] = React.useState(["", "", "", "", "", ""]);
+  const [recoveryCodes, setRecoveryCodes] = React.useState(null);
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState(null);
+
+  const beginEnroll = React.useCallback(() => {
+    setBusy(true); setErr(null);
+    return window.TK_ADMIN_API.mfaEnroll().then(
+      (d) => { setData(d); setStep("scan"); setBusy(false); },
+      (e) => { setBusy(false); setErr((e && e.message) || "Couldn't start enrollment. Please try again."); });
+  }, []);
+
+  React.useEffect(() => {
+    if (!open) { // reset for next time
+      setStep(mode === "reconfigure" ? "confirm" : "scan");
+      setData(null); setConfirmCode(""); setCode(["", "", "", "", "", ""]); setRecoveryCodes(null); setBusy(false); setErr(null);
+      return;
+    }
+    if (mode !== "reconfigure") beginEnroll(); // first-time: enroll immediately
+  }, [open, mode, beginEnroll]);
+
+  // Reconfigure: verify a current code (disables the old factor), then enroll.
+  const confirmReconfigure = () => {
+    setBusy(true); setErr(null);
+    window.TK_ADMIN_API.mfaDisable(confirmCode.trim())
+      .then(() => beginEnroll())
+      .catch((e) => { setBusy(false); setErr((e && e.message) || "Enter a current authenticator or recovery code to continue."); });
+  };
+  const verify = () => {
+    setBusy(true); setErr(null);
+    window.TK_ADMIN_API.mfaVerifyEnroll(code.join("")).then(
+      (r) => { setRecoveryCodes((r && r.recoveryCodes) || []); setStep("codes"); setBusy(false); onEnabled && onEnabled(); },
+      (e) => { setBusy(false); setErr((e && e.message) || "That code didn't match — check your authenticator app and try again."); });
+  };
+
+  const secretPretty = data && data.secret ? data.secret.replace(/\s+/g, "").replace(/(.{4})/g, "$1 ").trim() : "";
+  const title = mode === "reconfigure" ? "Reconfigure two-factor" : "Set up two-factor authentication";
+  const footer = step === "codes"
+    ? <Button onClick={onClose} style={{ marginInlineStart: "auto" }}>Done</Button>
+    : step === "confirm"
+      ? <><Button variant="secondary" onClick={onClose}>Cancel</Button><Button disabled={busy || !confirmCode.trim()} onClick={confirmReconfigure} style={{ marginInlineStart: "auto" }}>{busy ? "Checking…" : "Continue"}</Button></>
+      : <><Button variant="secondary" onClick={onClose}>Cancel</Button><Button iconStart="check" disabled={busy || step !== "scan" || code.join("").length < 6} onClick={verify} style={{ marginInlineStart: "auto" }}>{busy ? "Verifying…" : "Verify & turn on"}</Button></>;
+
+  return (
+    <Drawer open={open} title={title} subtitle="Protect your staff account with an authenticator app" onClose={onClose} footer={footer}>
+      {err && <Alert tone="error" title="Something went wrong">{err}</Alert>}
+      {step === "confirm" && (
+        <>
+          <Alert tone="info" title="Confirm it's you">Enter a current authenticator or recovery code. This replaces your existing authenticator with a new one.</Alert>
+          <FormField id="mfa-reconf-code" label="Current code"><Input id="mfa-reconf-code" value={confirmCode} onChange={(e) => setConfirmCode(e.target.value)} placeholder="123456 or recovery code" autoComplete="one-time-code" /></FormField>
+        </>
+      )}
+      {step === "scan" && (
+        <>
+          <ol className="tk-body-sm" style={{ margin: 0, paddingInlineStart: 18, display: "flex", flexDirection: "column", gap: 6, color: "var(--text-body)" }}>
+            <li>Open your authenticator app (Google Authenticator, Authy, 1Password…).</li>
+            <li>Scan the QR code below — or add an account with the setup key.</li>
+            <li>Enter the 6-digit code it shows to finish.</li>
+          </ol>
+          {data && data.otpauthUri && (
+            <div style={{ display: "flex", justifyContent: "center", padding: "8px 0" }}>
+              <div style={{ padding: 12, background: "#fff", border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-lg)" }}>
+                <MfaQr text={data.otpauthUri} px={184} />
+              </div>
+            </div>
+          )}
+          <FormField id="mfa-secret" label="Setup key" hint="Can't scan? Type or paste this into your authenticator app.">
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <Input id="mfa-secret" readOnly value={secretPretty} style={{ fontVariantNumeric: "tabular-nums", letterSpacing: "0.08em" }} />
+              <Button variant="secondary" size="sm" iconStart="copy" onClick={() => { try { navigator.clipboard && navigator.clipboard.writeText(data.secret); setToast && setToast("Setup key copied"); } catch (_) {} }}>Copy</Button>
+            </div>
+          </FormField>
+          <FormField id="mfa-verify" label="Verification code" error={err ? "Check the code and try again" : undefined}>
+            <MfaCodeBoxes code={code} setCode={setCode} error={!!err} />
+          </FormField>
+        </>
+      )}
+      {step === "codes" && (
+        <>
+          <Alert tone="success" title="Two-factor is on">Save these one-time recovery codes somewhere safe — each works once if you ever lose your authenticator.</Alert>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: "12px 14px", background: "var(--bg-sunken)", borderRadius: "var(--radius-md)" }}>
+            {(recoveryCodes || []).map((c) => <span key={c} className="tk-num" style={{ fontSize: 14, letterSpacing: "0.04em", color: "var(--text-strong)" }}>{c}</span>)}
+            <span className="tk-caption tk-muted" style={{ gridColumn: "1 / -1" }}>These won't be shown again.</span>
+          </div>
+        </>
+      )}
+    </Drawer>
+  );
+}
+
+function MfaManageDrawer({ open, onClose, status, onReconfigure, onChanged, setToast }) {
+  const [codes, setCodes] = React.useState(null);
+  const [busy, setBusy] = React.useState(false);
+  React.useEffect(() => { if (!open) { setCodes(null); setBusy(false); } }, [open]);
+  const remaining = status ? status.recoveryCodesRemaining : null;
+  const regen = () => {
+    setBusy(true);
+    window.TK_ADMIN_API.mfaRegenerateCodes().then(
+      (r) => { setCodes((r && r.recoveryCodes) || []); setBusy(false); onChanged && onChanged(); },
+      () => { setBusy(false); setToast && setToast("Couldn't regenerate recovery codes"); });
+  };
+  return (
+    <Drawer open={open} title="Two-factor authentication" subtitle="Required for every staff account" onClose={onClose}
+      footer={<Button variant="secondary" onClick={onClose} style={{ marginInlineStart: "auto" }}>Done</Button>}>
+      <Alert tone="success" title="Two-factor is on">Sign-in is protected by an authenticator app.</Alert>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "14px 0", borderBottom: "1px solid var(--border-subtle)" }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 12 }}><span style={{ width: 40, height: 40, borderRadius: "var(--radius-md)", background: "var(--bg-sunken)", display: "grid", placeItems: "center" }}><Icon name="smartphone" size={18} /></span><span><strong style={{ fontSize: 14, color: "var(--text-strong)" }}>Authenticator app</strong><p className="tk-body-sm tk-muted" style={{ margin: "2px 0 0" }}>TOTP · active</p></span></span>
+        <Button variant="secondary" size="sm" onClick={onReconfigure}>Reconfigure</Button>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "14px 0", borderBottom: "1px solid var(--border-subtle)" }}>
+        <span><strong style={{ fontSize: 14, color: "var(--text-strong)" }}>Recovery codes</strong><p className="tk-body-sm tk-muted" style={{ margin: "2px 0 0" }}>{remaining == null ? "Use these if you lose your phone." : remaining + " unused. Regenerating replaces all of them."}</p></span>
+        <Button variant="secondary" size="sm" disabled={busy} onClick={regen}>{busy ? "Generating…" : "Regenerate"}</Button>
+      </div>
+      {codes && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: "12px 14px", background: "var(--bg-sunken)", borderRadius: "var(--radius-md)" }}>{codes.map((c) => <span key={c} className="tk-num" style={{ fontSize: 14, letterSpacing: "0.04em", color: "var(--text-strong)" }}>{c}</span>)}<span className="tk-caption tk-muted" style={{ gridColumn: "1 / -1" }}>Save these now — they won't be shown again.</span></div>}
+      <Alert tone="warning" title="Turning 2FA off isn't allowed">Policy requires two-factor for all staff. Use Reconfigure to switch to a new device; contact an admin to reset a lost one.</Alert>
+    </Drawer>
+  );
+}
+
 /* ── Staff profile (from the user menu) ────────────────── */
 function AccountProfileAdmin({ go, user }) {
+  const LIVE = !!(window.TK_CONFIG && window.TK_CONFIG.USE_LIVE_API);
   const [toast, setToast] = React.useState(null);
   const [dirty, setDirty] = React.useState(false);
   const [manage2fa, setManage2fa] = React.useState(false);
@@ -359,6 +516,17 @@ function AccountProfileAdmin({ go, user }) {
   const codes = ["7F2K-9QL4", "B3MX-1WP8", "D6RT-5YC2", "H9NA-4VE7", "K2QZ-8JU3", "M5LP-6XB9"];
   const touch = () => setDirty(true);
   const u = user || { name: "Kwame Boateng", role: "Admin", initials: "KB", email: "kwame@tripkoach.com" };
+
+  // --- Live MFA state (TRI-899). None of this runs (and none of the LIVE-only
+  //     markup below mounts) when the flag is off, so the DS prototype is
+  //     byte-identical. `mfa` = { enabled, pendingEnrollment, recoveryCodesRemaining }.
+  const [mfa, setMfa] = React.useState(null);
+  const [mfaDrawer, setMfaDrawer] = React.useState(null); // "enroll" | "reconfigure" | "manage" | null
+  const refreshMfa = React.useCallback(() => {
+    if (!LIVE || !window.TK_ADMIN_API) return;
+    window.TK_ADMIN_API.mfaStatus().then(setMfa, function () {});
+  }, [LIVE]);
+  React.useEffect(() => { refreshMfa(); }, [refreshMfa]);
   return (
     <div style={{ maxWidth: 760, display: "flex", flexDirection: "column", gap: 16 }}>
       <div className="tk-card"><div className="tk-card__body" style={{ padding: "var(--space-6)", gap: "var(--space-4)" }}>
@@ -380,10 +548,21 @@ function AccountProfileAdmin({ go, user }) {
           <span><strong style={{ fontSize: 14.5, color: "var(--text-strong)" }}>Password</strong><p className="tk-body-sm tk-muted" style={{ margin: "2px 0 0" }}>Last changed 2 months ago.</p></span>
           <Button variant="secondary" size="sm" onClick={() => { setPw({ cur: "", next: "", conf: "" }); setChangePw(true); }}>Change password</Button>
         </div>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, paddingTop: 14, borderTop: "1px solid var(--border-subtle)" }}>
-          <span><strong style={{ fontSize: 14.5, color: "var(--text-strong)" }}>Two-factor authentication <span className="tk-badge tk-badge--confirmed">On</span></strong><p className="tk-body-sm tk-muted" style={{ margin: "2px 0 0" }}>Authenticator app · required for all staff.</p></span>
-          <Button variant="secondary" size="sm" onClick={() => setManage2fa(true)}>Manage</Button>
-        </div>
+        {LIVE ? (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, paddingTop: 14, borderTop: "1px solid var(--border-subtle)" }}>
+            <span><strong style={{ fontSize: 14.5, color: "var(--text-strong)" }}>Two-factor authentication {mfa ? <span className={"tk-badge " + (mfa.enabled ? "tk-badge--confirmed" : "tk-badge--pending")}>{mfa.enabled ? "On" : "Off"}</span> : null}</strong><p className="tk-body-sm tk-muted" style={{ margin: "2px 0 0" }}>{mfa == null ? "Checking status…" : mfa.enabled ? "Authenticator app · required for all staff." : "Required for all staff — set it up to secure your account."}</p></span>
+            {mfa == null
+              ? <Button variant="secondary" size="sm" disabled>Manage</Button>
+              : mfa.enabled
+                ? <Button variant="secondary" size="sm" onClick={() => setMfaDrawer("manage")}>Manage</Button>
+                : <Button size="sm" onClick={() => setMfaDrawer("enroll")}>Set up</Button>}
+          </div>
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, paddingTop: 14, borderTop: "1px solid var(--border-subtle)" }}>
+            <span><strong style={{ fontSize: 14.5, color: "var(--text-strong)" }}>Two-factor authentication <span className="tk-badge tk-badge--confirmed">On</span></strong><p className="tk-body-sm tk-muted" style={{ margin: "2px 0 0" }}>Authenticator app · required for all staff.</p></span>
+            <Button variant="secondary" size="sm" onClick={() => setManage2fa(true)}>Manage</Button>
+          </div>
+        )}
       </div></div>
 
       <Drawer open={changePw} title="Change password" subtitle="Choose a strong password you don't use elsewhere" onClose={() => setChangePw(false)}
@@ -393,6 +572,18 @@ function AccountProfileAdmin({ go, user }) {
         <FormField id="pw-conf" label="Confirm new password" error={pw.conf && pw.next !== pw.conf ? "Passwords don't match" : undefined}><Input id="pw-conf" type="password" value={pw.conf} onChange={(e) => setPw(p => ({ ...p, conf: e.target.value }))} /></FormField>
         <Alert tone="info" title="You'll stay signed in">Other devices will be signed out and need the new password.</Alert>
       </Drawer>
+      {LIVE ? (
+        <>
+          <MfaManageDrawer open={mfaDrawer === "manage"} status={mfa} setToast={setToast}
+            onClose={() => setMfaDrawer(null)}
+            onReconfigure={() => setMfaDrawer("reconfigure")}
+            onChanged={refreshMfa} />
+          <MfaEnrollDrawer open={mfaDrawer === "enroll" || mfaDrawer === "reconfigure"}
+            mode={mfaDrawer === "reconfigure" ? "reconfigure" : "enroll"} setToast={setToast}
+            onClose={() => { setMfaDrawer(null); refreshMfa(); }}
+            onEnabled={refreshMfa} />
+        </>
+      ) : (
       <Drawer open={manage2fa} title="Two-factor authentication" subtitle="Required for every staff account" onClose={() => setManage2fa(false)}
         footer={<Button variant="secondary" onClick={() => setManage2fa(false)} style={{ marginInlineStart: "auto" }}>Done</Button>}>
         <Alert tone="success" title="Two-factor is on">Sign-in is protected by an authenticator app.</Alert>
@@ -411,6 +602,7 @@ function AccountProfileAdmin({ go, user }) {
         </div>
         <Alert tone="warning" title="Turning 2FA off isn't allowed">Policy requires two-factor for all staff. Contact an admin to reset a lost device.</Alert>
       </Drawer>
+      )}
       <div className="tk-stickysave"><span className="tk-caption">{dirty ? "Unsaved changes" : "All changes saved"}</span><Button iconStart="check" disabled={!dirty} onClick={() => { setDirty(false); setToast("Profile saved"); }} style={{ marginInlineStart: "auto" }}>Save changes</Button></div>
       {toast && <div style={{ position: "fixed", bottom: 20, insetInline: 0, display: "flex", justifyContent: "center", zIndex: 800 }}><Toast tone="success" onClose={() => setToast(null)}>{toast}</Toast></div>}
     </div>
