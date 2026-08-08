@@ -46,6 +46,9 @@ function AdminLogin({ go, state }) {
     setBusy(true); setLiveErr(null);
     window.TK_ADMIN_API.login(email, password, { trust }).then((res) => {
       if (res && (res.mfaRequired || res.mfa_required || res.requiresMfa)) { setBusy(false); go("mfa"); return; }
+      // TRI-912 enforcement: MFA is required for this role but the account has no factor yet. The server
+      // issued an enroll-gated half-auth session; route to the enroll gate to set one up before entering.
+      if (res && (res.mfaEnrollmentRequired || res.mfa_enrollment_required)) { setBusy(false); go("mfa-enroll"); return; }
       // Logged in — record session + hydrate, then go to the dashboard.
       Promise.resolve(window.TK_ADMIN_ENTER(res)).then(() => { setBusy(false); go("dashboard"); }, () => { setBusy(false); go("dashboard"); });
     }, (err) => {
@@ -137,6 +140,98 @@ function MfaChallenge({ go, state }) {
   );
 }
 
+// TRI-912 · Login-time MFA enrollment gate. Shown when a factor-less staffer in an MFA-enforced role
+// signs in: the server returned { mfaEnrollmentRequired: true } and issued an enroll-gated half-auth
+// session that can reach only /auth/mfa/*. We reuse the same enroll → QR → verify → recovery-codes flow
+// as the in-console MfaEnrollDrawer (TRI-899/911); on a successful verify the server promotes the session
+// and returns { staff, permissions, recoveryCodes }, so we hydrate and land on the dashboard. LIVE only —
+// with the flag off this screen is never routed to, so the prototype render stays byte-identical.
+function MfaEnrollGate({ go }) {
+  const LIVE = !!(window.TK_CONFIG && window.TK_CONFIG.USE_LIVE_API);
+  const [data, setData] = React.useState(null);          // { secret, otpauthUri, issuer }
+  const [step, setStep] = React.useState("scan");        // "scan" | "codes"
+  const [code, setCode] = React.useState(["", "", "", "", "", ""]);
+  const [recoveryCodes, setRecoveryCodes] = React.useState(null);
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState(false);
+  const [loadErr, setLoadErr] = React.useState(false);
+  const enterRes = React.useRef(null);
+  const refs = React.useRef([]);
+  // Begin enrollment on mount: fetch a fresh secret + otpauth URI for the QR.
+  React.useEffect(() => {
+    if (!LIVE) return undefined;
+    let live = true;
+    window.TK_ADMIN_API.mfaEnroll().then(
+      (r) => { if (live) setData(r); },
+      () => { if (live) setLoadErr(true); },
+    );
+    return () => { live = false; };
+  }, []);
+  const setDigit = (i, v) => {
+    if (!/^\d?$/.test(v)) return;
+    const next = [...code]; next[i] = v; setCode(next);
+    if (v && i < 5) refs.current[i + 1] && refs.current[i + 1].focus();
+  };
+  const verify = () => {
+    setBusy(true); setErr(false);
+    window.TK_ADMIN_API.mfaVerifyEnroll(code.join("")).then(
+      (res) => { enterRes.current = res; setRecoveryCodes((res && res.recoveryCodes) || []); setStep("codes"); setBusy(false); },
+      () => { setBusy(false); setErr(true); setCode(["", "", "", "", "", ""]); },
+    );
+  };
+  const enter = () => {
+    const res = enterRes.current || {};
+    Promise.resolve(window.TK_ADMIN_ENTER(res)).then(() => go("dashboard"), () => go("dashboard"));
+  };
+  const secretPretty = data && data.secret ? data.secret.replace(/\s+/g, "").replace(/(.{4})/g, "$1 ").trim() : "";
+  return (
+    <AuthFrame foot={step === "scan" ? <Button block variant="ghost" style={{ marginTop: "var(--space-4)" }} onClick={() => go("login")}>Back to sign-in</Button> : null}>
+      <span style={{ width: 48, height: 48, borderRadius: "50%", background: "var(--brand-wash)", color: "var(--brand-gold-deep)", display: "grid", placeItems: "center", marginBottom: "var(--space-4)" }}><Icon name="shield-check" size={24} /></span>
+      {step === "scan" ? (
+        <>
+          <h2 className="tk-h2">Set up two-factor authentication</h2>
+          <p className="tk-body-sm tk-muted" style={{ marginTop: 4, marginBottom: "var(--space-5)" }}>Your role requires two-factor authentication. Scan the QR code with an authenticator app (Google Authenticator, Authy, 1Password), then enter the 6-digit code to finish.</p>
+          {loadErr && <Alert tone="error" title="Couldn't start setup" style={{ marginBottom: "var(--space-4)" }}>We couldn't reach the console service. Please go back and sign in again.</Alert>}
+          {data && data.otpauthUri && (
+            <div style={{ display: "grid", placeItems: "center", marginBottom: "var(--space-4)" }}>
+              <div style={{ padding: 10, background: "#fff", borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)" }}>
+                <MfaQr text={data.otpauthUri} px={184} />
+              </div>
+            </div>
+          )}
+          {data && data.secret && (
+            <FormField id="mfa-enroll-secret" label="Setup key" hint="Can't scan? Type or paste this into your authenticator app.">
+              <div className="tk-row" style={{ gap: 8 }}>
+                <Input id="mfa-enroll-secret" readOnly value={secretPretty} style={{ fontVariantNumeric: "tabular-nums", letterSpacing: "0.08em" }} />
+                <Button variant="secondary" size="sm" iconStart="copy" onClick={() => { try { navigator.clipboard && navigator.clipboard.writeText(data.secret); } catch (_) {} }}>Copy</Button>
+              </div>
+            </FormField>
+          )}
+          {err && <Alert tone="error" title="Incorrect code" style={{ marginTop: "var(--space-4)", marginBottom: "var(--space-2)" }}>That code didn't match or has expired. Codes refresh every 30 seconds.</Alert>}
+          <p className="tk-caption" style={{ marginTop: "var(--space-4)", marginBottom: 6 }}>Enter the 6-digit code</p>
+          <div style={{ display: "flex", gap: 8, justifyContent: "space-between" }}>
+            {code.map((d, i) => (
+              <input key={i} ref={(el) => refs.current[i] = el} value={d} onChange={(e) => setDigit(i, e.target.value)}
+                inputMode="numeric" maxLength={1} aria-label={"Digit " + (i + 1)}
+                style={{ width: 48, height: 56, textAlign: "center", fontSize: 22, fontWeight: 700, borderRadius: "var(--radius-md)", border: "1px solid " + (err ? "var(--danger-solid)" : "var(--border-input)"), background: "var(--surface-card)", color: "var(--text-strong)", fontVariantNumeric: "tabular-nums" }} />
+            ))}
+          </div>
+          <Button block size="lg" style={{ marginTop: "var(--space-5)" }} disabled={busy || !data || code.join("").length !== 6} onClick={verify}>{busy ? "Verifying…" : "Verify and continue"}</Button>
+        </>
+      ) : (
+        <>
+          <h2 className="tk-h2">Save your recovery codes</h2>
+          <p className="tk-body-sm tk-muted" style={{ marginTop: 4, marginBottom: "var(--space-5)" }}>Two-factor authentication is now on. Store these one-time recovery codes somewhere safe — each works once if you lose access to your authenticator.</p>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: "var(--space-4)", background: "var(--surface-muted)", borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)", marginBottom: "var(--space-4)" }}>
+            {(recoveryCodes || []).map((c) => <span key={c} className="tk-num" style={{ fontSize: 14, letterSpacing: "0.04em", color: "var(--text-strong)" }}>{c}</span>)}
+          </div>
+          <Button block size="lg" onClick={enter}>Enter the console</Button>
+        </>
+      )}
+    </AuthFrame>
+  );
+}
+
 function ResetPassword({ go }) {
   const [sent, setSent] = React.useState(false);
   return (
@@ -169,4 +264,4 @@ function SessionExpired({ go }) {
     </div>
   );
 }
-Object.assign(window, { AdminLogin, MfaChallenge, ResetPassword, SessionExpired });
+Object.assign(window, { AdminLogin, MfaChallenge, MfaEnrollGate, ResetPassword, SessionExpired });
