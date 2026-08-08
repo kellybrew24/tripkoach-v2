@@ -19,6 +19,7 @@ import { createStaffService } from './staff.ts';
 import { createPaystackClient, type PaystackClient } from './paystack.ts';
 import { createMediaService, MediaError } from './media.ts';
 import { createStorage, type Storage } from './storage.ts';
+import { createAvatarService, AvatarError } from './avatar.ts';
 
 // RFC-4180-ish CSV cell: quote when the value contains a comma, quote, or newline; double embedded quotes.
 function csvCell(v: unknown): string {
@@ -49,6 +50,8 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
   // TRI-918: admin image upload → validation → R2 (cdn.tripkoach.com) publish. Storage is 'enabled' only
   // when the R2 credentials are present in the environment; unconfigured → the routes answer 503.
   const mediaSvc = createMediaService(db, cfg, storage ?? createStorage(cfg.media));
+  // TRI-943: avatar moderation queue + actions (content.manage). Shares the media pipeline.
+  const avatarSvc = createAvatarService(db, cfg, mediaSvc);
   const auth = makeRequireAuth(db, cfg);
   const authEnroll = makeRequireAuthAllowingEnroll(db, cfg); // TRI-912: enroll-gated sessions may reach /auth/mfa enroll
   const perm = (p: Permission) => ({ preHandler: makeRequirePermission(db, cfg, p) });
@@ -70,7 +73,7 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
       if (err instanceof ReviewError) {
         return reply.code(err.httpStatus).send({ error: { code: err.code, message: err.message, field: err.field } });
       }
-      if (err instanceof MediaError) {
+      if (err instanceof MediaError || err instanceof AvatarError) {
         return reply.code(err.httpStatus).send({ error: { code: err.code, message: err.message, field: err.field } });
       }
       // Fastify raises FST_ERR_CTP_BODY_TOO_LARGE (413) when an upload exceeds the route bodyLimit.
@@ -356,6 +359,39 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
       return svc.listCustomers({ q: qStr(q, 'q'), page: qNum(q, 'page'), pageSize: qNum(q, 'pageSize') });
     });
     admin.get('/customers/:id', perm('customers.view'), async (req) => svc.getCustomer((req.params as any).id));
+
+    // ── Avatar moderation (TRI-943) — queue + actions, guarded by content.manage ─
+    // Queue lists pending/hidden (auto-flagged) avatars with owner + media + last report reason. An admin
+    // approve/reject/remove flips avatar_status; reject/remove hide the avatar from /me + public. Both the
+    // avatar_moderation_action trail and the shared admin audit-log record the action.
+    //
+    // Canonical TRI-943 contract (documented in README, what the FE binds to):
+    //   GET  /api/admin/moderation/avatars?status=pending,hidden
+    //   POST /api/admin/moderation/avatars/:userId  { action: approve|reject|remove, reason }
+    // REST-style aliases (/avatars/queue + /avatars/:userId/{approve,reject,remove}) are kept for callers
+    // that prefer verb-per-path; both hit the same service.
+    const avatarQueue = async (req: FastifyRequest) => avatarSvc.listQueue({ status: qStr(query(req), 'status') });
+    const avatarModerate = (action: 'approve' | 'reject' | 'remove') =>
+      async (req: FastifyRequest) => {
+        const reason = typeof (body(req) as any).reason === 'string' ? (body(req) as any).reason : null;
+        return avatarSvc.moderate((req.params as any).userId, action, reason, actorOf(req));
+      };
+
+    admin.get('/moderation/avatars', perm('content.manage'), avatarQueue);
+    admin.post('/moderation/avatars/:userId', perm('content.manage'), async (req: FastifyRequest, reply: FastifyReply) => {
+      const b = body(req) as Record<string, unknown>;
+      const action = typeof b.action === 'string' ? b.action : '';
+      if (!['approve', 'reject', 'remove'].includes(action)) {
+        return reply.code(400).send({ error: { code: 'validation', message: 'action must be approve, reject, or remove', field: 'action' } });
+      }
+      const reason = typeof b.reason === 'string' ? b.reason : null;
+      return avatarSvc.moderate((req.params as any).userId, action as 'approve' | 'reject' | 'remove', reason, actorOf(req));
+    });
+
+    admin.get('/avatars/queue', perm('content.manage'), avatarQueue);
+    admin.post('/avatars/:userId/approve', perm('content.manage'), avatarModerate('approve'));
+    admin.post('/avatars/:userId/reject', perm('content.manage'), avatarModerate('reject'));
+    admin.post('/avatars/:userId/remove', perm('content.manage'), avatarModerate('remove'));
 
     // ── Audit-log read (A16) — read-only; admin/settings-tier access ─────────────
     admin.get('/audit-log', perm('settings.manage'), async (req) => {

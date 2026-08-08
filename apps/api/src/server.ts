@@ -210,7 +210,7 @@ export function buildServer(db: Db, cfg: Config, paystack?: PaystackClient, stor
 
   // ── P1 consumer accounts & auth realm (TRI-881), mounted under cfg.apiPrefix (default /api/v1).
   // Encapsulated plugin: adds /auth/* + /me[...]; the Phase-1 read paths above are untouched. ──
-  registerConsumer(app, db, cfg);
+  registerConsumer(app, db, cfg, storage);
 
   return app;
 }

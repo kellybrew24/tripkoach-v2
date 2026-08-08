@@ -1366,6 +1366,9 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
       hasAccount: !!r.user_id,
       emailVerified: r.user_id ? !!r.email_verified_at : null,
       emailVerifiedAt: r.email_verified_at ?? null,
+      // TRI-943: avatar moderation surface. Admin sees the real image + status even when hidden from public.
+      avatarStatus: r.user_id ? (r.avatar_status ?? null) : null,
+      avatarUrl: r.user_id ? (r.avatar_url ?? null) : null,
     };
   }
 
@@ -1384,22 +1387,24 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     params.push((page - 1) * pageSize); const off = params.length;
     // Per-customer booking count + lifetime spend (paid bookings only) derived at read time.
     const { rows } = await db.query(
-      `SELECT c.*, u.email_verified_at,
+      `SELECT c.*, u.email_verified_at, u.avatar_status, am.url AS avatar_url,
               (SELECT COUNT(*) FROM booking b WHERE b.customer_id = c.id) AS booking_count,
               (SELECT COALESCE(SUM(b.total_minor),0) FROM booking b
                  WHERE b.customer_id = c.id AND b.payment_state = 'paid') AS total_spend_minor
-         FROM customer c LEFT JOIN user_account u ON u.id = c.user_id ${whereSql}
+         FROM customer c LEFT JOIN user_account u ON u.id = c.user_id
+              LEFT JOIN media_asset am ON am.id = u.avatar_media_id ${whereSql}
         ORDER BY c.created_at DESC LIMIT $${lim} OFFSET $${off}`, params);
     return { items: rows.map(customerRow), page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
   }
 
   async function getCustomer(id: string) {
     const c = (await db.query(
-      `SELECT c.*, u.email_verified_at,
+      `SELECT c.*, u.email_verified_at, u.avatar_status, am.url AS avatar_url,
               (SELECT COUNT(*) FROM booking b WHERE b.customer_id = c.id) AS booking_count,
               (SELECT COALESCE(SUM(b.total_minor),0) FROM booking b
                  WHERE b.customer_id = c.id AND b.payment_state = 'paid') AS total_spend_minor
-         FROM customer c LEFT JOIN user_account u ON u.id = c.user_id WHERE c.id::text = $1`, [id])).rows[0];
+         FROM customer c LEFT JOIN user_account u ON u.id = c.user_id
+              LEFT JOIN media_asset am ON am.id = u.avatar_media_id WHERE c.id::text = $1`, [id])).rows[0];
     if (!c) throw notFound('customer');
     const bookings = (await db.query(
       `SELECT b.ref, b.status, b.payment_state, b.party_size, b.total_minor, b.currency, b.created_at,
