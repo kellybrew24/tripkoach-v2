@@ -80,7 +80,9 @@ export function createAvatarService(db: Db, cfg: Config, media: MediaService) {
     // stricter avatar allow-list + size + dimension caps so a mismatch is a clean 4xx before any R2 PUT.
     const { asset } = await media.upload(
       { bytes, filename: meta.filename ?? null, declaredType: meta.declaredType ?? null, altText: `avatar:${userId}` },
-      { id: userId, ip: actor.ip },
+      // uploaded_by must be null (it FKs staff_user; a consumer isn't staff). The user linkage is carried by
+      // the avatar_moderation_action rows + the user.avatar_upload audit entry below.
+      { id: null, ip: actor.ip },
       { maxBytes: AVATAR_MAX_BYTES, maxDimension: AVATAR_MAX_DIMENSION, allowedTypes: AVATAR_ALLOWED_TYPES },
     );
 

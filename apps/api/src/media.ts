@@ -19,7 +19,10 @@ import type { Config } from './config.ts';
 import type { Storage } from './storage.ts';
 import { audit } from './auth.ts';
 
-export interface MediaActor { id: string; ip: string | null }
+// uploaded_by FKs staff_user, so a non-staff uploader (a consumer uploading their own avatar, TRI-943)
+// passes id:null — the media row carries no staff uploader; the user linkage lives in the caller's audit
+// trail (avatar_moderation_action + audit_log actor_type='user').
+export interface MediaActor { id: string | null; ip: string | null }
 
 export class MediaError extends Error {
   code: string;
