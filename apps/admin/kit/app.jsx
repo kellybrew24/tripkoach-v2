@@ -66,7 +66,7 @@ const META = {
   "admin-prefs": { title: "Preferences", sub: "How the console works for you" },
 };
 
-const AUTH_SCREENS = ["login", "mfa", "reset", "expired"];
+const AUTH_SCREENS = ["login", "mfa", "mfa-enroll", "reset", "expired"];
 
 // --- Real URL routing (History API, hashless) ------------------------------
 // The console home is the dashboard (/). Auth screens live at their own paths;
@@ -79,7 +79,7 @@ const ADMIN_ROUTES = [
   ["customers", "/customers"], ["guides", "/guides"], ["reviews", "/reviews"],
   ["payments", "/payments"], ["tours", "/tours"], ["promos", "/promos"],
   ["users", "/staff"], ["audit", "/audit-log"], ["settings", "/settings"], ["admin-profile", "/profile"],
-  ["admin-prefs", "/preferences"], ["login", "/login"], ["mfa", "/mfa"],
+  ["admin-prefs", "/preferences"], ["login", "/login"], ["mfa", "/mfa"], ["mfa-enroll", "/mfa-enroll"],
   ["reset", "/reset"], ["expired", "/expired"], ["forbidden", "/403"],
 ];
 const ADMIN_PATH_BY_SCREEN = Object.fromEntries(ADMIN_ROUTES.map(([s, p]) => [s, p]));
@@ -192,6 +192,7 @@ function AdminApp() {
   // Auth screens render full-bleed (no shell)
   if (screen === "login") return <Frame demo={demo} setDemo={setDemo} screen={screen} go={go}><AdminLogin go={go} state={state} /></Frame>;
   if (screen === "mfa") return <Frame demo={demo} setDemo={setDemo} screen={screen} go={go}><MfaChallenge go={go} state={state} /></Frame>;
+  if (screen === "mfa-enroll") return <Frame demo={demo} setDemo={setDemo} screen={screen} go={go}><MfaEnrollGate go={go} state={state} /></Frame>;
   if (screen === "reset") return <Frame demo={demo} setDemo={setDemo} screen={screen} go={go}><ResetPassword go={go} /></Frame>;
   if (screen === "expired") return <Frame demo={demo} setDemo={setDemo} screen={screen} go={go}><SessionExpired go={go} /></Frame>;
 

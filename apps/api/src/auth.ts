@@ -32,6 +32,9 @@ export interface StaffContext {
 declare module 'fastify' {
   interface FastifyRequest {
     staff?: StaffContext;
+    /** TRI-912: set by requireAuthAllowingEnroll when the session is enroll-gated (factor-less enforced
+     *  role). The /auth/mfa/verify handler reads it to promote the session on a successful enrollment. */
+    mfaEnrollPending?: boolean;
   }
 }
 
@@ -66,15 +69,20 @@ export async function permissionsFor(db: Db, role: string): Promise<Set<string>>
  *  `mfaPending` is true the session is a half-auth login state (see resolveSession / clearMfaPending). */
 export async function createSession(
   db: Db, cfg: Config, staffId: string,
-  meta: { ip?: string; userAgent?: string; trustedDevice?: boolean; mfaPending?: boolean },
+  meta: { ip?: string; userAgent?: string; trustedDevice?: boolean; mfaPending?: boolean; mfaEnrollPending?: boolean },
 ): Promise<string> {
   const { rows } = await db.query<{ id: string }>(
-    `INSERT INTO session (subject_type, subject_id, expires_at, trusted_device, ip, user_agent, mfa_pending)
-     VALUES ('staff', $1, now() + ($2 * interval '1 minute'), $3, $4, $5, $6)
+    `INSERT INTO session (subject_type, subject_id, expires_at, trusted_device, ip, user_agent, mfa_pending, mfa_enroll_pending)
+     VALUES ('staff', $1, now() + ($2 * interval '1 minute'), $3, $4, $5, $6, $7)
      RETURNING id`,
-    [staffId, cfg.adminSessionIdleMinutes, !!meta.trustedDevice, meta.ip ?? null, meta.userAgent ?? null, !!meta.mfaPending],
+    [staffId, cfg.adminSessionIdleMinutes, !!meta.trustedDevice, meta.ip ?? null, meta.userAgent ?? null, !!meta.mfaPending, !!meta.mfaEnrollPending],
   );
   return rows[0].id;
+}
+
+/** TRI-912: is MFA mandatory for this role? Consults the configured enforced-role set. */
+export function mfaEnforcedFor(cfg: Config, role: string): boolean {
+  return cfg.mfaEnforcedRoles.includes(role);
 }
 
 export async function revokeSession(db: Db, sessionId: string): Promise<void> {
@@ -104,6 +112,31 @@ export async function clearMfaPending(db: Db, sessionId: string): Promise<void> 
   await db.query(`UPDATE session SET mfa_pending = false, last_seen_at = now() WHERE id = $1`, [sessionId]);
 }
 
+/** TRI-912: a live ENROLL-gated session — a factor-less login by an MFA-enforced role. It may reach only
+ *  the /auth/mfa enroll+verify endpoints; every privileged route is 401 until a factor is confirmed and
+ *  the session is promoted. Returns null unless live (not expired/revoked), staff active, AND enroll-pending. */
+export async function resolveEnrollPendingSession(
+  db: Db, sessionId: string,
+): Promise<{ sessionId: string; staffId: string } | null> {
+  if (!sessionId) return null;
+  const { rows } = await db.query<any>(
+    `SELECT s.id AS session_id, u.id AS staff_id, u.status
+       FROM session s JOIN staff_user u ON u.id = s.subject_id
+      WHERE s.id = $1 AND s.subject_type = 'staff'
+        AND s.revoked_at IS NULL AND s.expires_at > now()
+        AND s.mfa_pending = false AND s.mfa_enroll_pending = true`,
+    [sessionId],
+  );
+  const r = rows[0];
+  if (!r || r.status !== 'active') return null;
+  return { sessionId: r.session_id, staffId: r.staff_id };
+}
+
+/** Promote an enroll-gated session to fully authenticated once a factor has been confirmed. */
+export async function clearMfaEnrollPending(db: Db, sessionId: string): Promise<void> {
+  await db.query(`UPDATE session SET mfa_enroll_pending = false, last_seen_at = now() WHERE id = $1`, [sessionId]);
+}
+
 /** Resolve a live staff session → full StaffContext, applying sliding idle expiry. null if absent/expired/revoked. */
 export async function resolveSession(db: Db, cfg: Config, sessionId: string): Promise<StaffContext | null> {
   if (!sessionId) return null;
@@ -113,7 +146,8 @@ export async function resolveSession(db: Db, cfg: Config, sessionId: string): Pr
        JOIN staff_user u ON u.id = s.subject_id
       WHERE s.id = $1 AND s.subject_type = 'staff'
         AND s.revoked_at IS NULL AND s.expires_at > now()
-        AND s.mfa_pending = false`,   // a half-auth (awaiting 2FA) session is NOT authenticated
+        AND s.mfa_pending = false          -- a half-auth (awaiting 2FA) session is NOT authenticated
+        AND s.mfa_enroll_pending = false`, // nor is an enroll-gated (factor-less enforced-role) session (TRI-912)
     [sessionId],
   );
   const r = rows[0];
@@ -162,6 +196,32 @@ export function makeRequireAuth(db: Db, cfg: Config) {
     const staff = sid ? await resolveSession(db, cfg, sid) : null;
     if (!staff) return unauthorized(reply);
     req.staff = staff;
+  };
+}
+
+/** TRI-912 preHandler: allow EITHER a full session OR an enroll-gated one (a factor-less enforced-role
+ *  login). Used only by the /auth/mfa enroll+verify endpoints so a gated staffer can complete enrollment;
+ *  every other route keeps the strict `requireAuth`. Attaches req.staff and req.mfaEnrollPending. */
+export function makeRequireAuthAllowingEnroll(db: Db, cfg: Config) {
+  return async function requireAuthAllowingEnroll(req: FastifyRequest, reply: FastifyReply) {
+    const sid = req.cookies?.[cfg.adminCookieName];
+    if (sid) {
+      const staff = await resolveSession(db, cfg, sid);
+      if (staff) { req.staff = staff; req.mfaEnrollPending = false; return; }
+      const enroll = await resolveEnrollPendingSession(db, sid);
+      if (enroll) {
+        const { rows } = await db.query<any>(
+          `SELECT id, email, name, role, job_title FROM staff_user WHERE id = $1`, [enroll.staffId]);
+        const u = rows[0];
+        if (u) {
+          req.staff = { id: u.id, email: u.email, name: u.name ?? null, role: u.role, jobTitle: u.job_title ?? null,
+            permissions: await permissionsFor(db, u.role) };
+          req.mfaEnrollPending = true;
+          return;
+        }
+      }
+    }
+    return unauthorized(reply);
   };
 }
 

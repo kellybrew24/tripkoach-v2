@@ -37,6 +37,10 @@ export interface Config {
   staffInviteExpiryHours: number;
   /** Issuer label shown in the authenticator app for admin TOTP factors (TRI-895). */
   mfaIssuer: string;
+  /** Roles for which MFA is REQUIRED (TRI-912): a factor-less login by one of these roles is issued an
+   *  enroll-gated half-auth session that can reach only the MFA enroll endpoints until a factor is set.
+   *  Roles outside this set keep MFA optional. Default enforces admin+operator; viewer stays optional. */
+  mfaEnforcedRoles: readonly string[];
   fx: FxConfig;
   email: EmailConfig;
   notify: NotifyConfig;
@@ -163,6 +167,10 @@ export function loadConfig(): Config {
     adminBaseUrl: (process.env.ADMIN_BASE_URL || 'https://admin.dev.tripkoach.com').replace(/\/+$/, ''),
     staffInviteExpiryHours: num(process.env.STAFF_INVITE_EXPIRY_HOURS) ?? 72,
     mfaIssuer: process.env.MFA_ISSUER || 'TripKoach Admin',
+    // TRI-912: comma-separated roles that MUST have MFA. Default = admin,operator (viewer optional).
+    // Set MFA_ENFORCED_ROLES='' to disable enforcement entirely (revert to opt-in MFA).
+    mfaEnforcedRoles: (process.env.MFA_ENFORCED_ROLES ?? 'admin,operator')
+      .split(',').map((r) => r.trim().toLowerCase()).filter(Boolean),
     fx: {
       providerName: process.env.FX_PROVIDER_NAME || 'open.er-api.com',
       providerUrl: process.env.FX_PROVIDER_URL || 'https://open.er-api.com/v6/latest/USD',

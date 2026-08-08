@@ -8,6 +8,7 @@ import type { Config } from './config.ts';
 import {
   verifyPassword, createSession, revokeSession, resolveSession,
   resolvePendingSession, clearMfaPending,
+  clearMfaEnrollPending, mfaEnforcedFor, makeRequireAuthAllowingEnroll,
   setSessionCookie, clearSessionCookie, permissionsFor,
   makeRequireAuth, makeRequirePermission, audit, type Permission,
 } from './auth.ts';
@@ -44,6 +45,7 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
   const reviewSvc = reviews ?? createReviewsService(db, cfg);
   const staffSvc = createStaffService(db, cfg);
   const auth = makeRequireAuth(db, cfg);
+  const authEnroll = makeRequireAuthAllowingEnroll(db, cfg); // TRI-912: enroll-gated sessions may reach /auth/mfa enroll
   const perm = (p: Permission) => ({ preHandler: makeRequirePermission(db, cfg, p) });
   const actorOf = (req: FastifyRequest) => ({ id: req.staff!.id, ip: req.ip ?? null });
   const body = (req: FastifyRequest) => (req.body ?? {}) as unknown;
@@ -94,6 +96,21 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
         setSessionCookie(reply, cfg, sid);
         await audit(db, { actorId: u.id, action: 'staff.mfa_challenge', targetType: 'staff_user', targetId: u.id, ip: req.ip ?? null });
         return { mfaRequired: true };
+      }
+      // TRI-912 enforcement: a factor-less staffer in an MFA-enforced role gets an ENROLL-gated half-auth
+      // session. It can reach ONLY the /auth/mfa enroll+verify endpoints (authEnroll) until a factor is
+      // confirmed, at which point that verify promotes the session to a full login. All other roles keep
+      // MFA optional and fall through to a normal session below.
+      if (mfaEnforcedFor(cfg, u.role)) {
+        const sid = await createSession(db, cfg, u.id, {
+          ip: req.ip, userAgent: req.headers['user-agent'], trustedDevice: trust, mfaEnrollPending: true,
+        });
+        setSessionCookie(reply, cfg, sid);
+        await audit(db, { actorId: u.id, action: 'staff.mfa_enroll_required', targetType: 'staff_user', targetId: u.id, after: { role: u.role }, ip: req.ip ?? null });
+        return {
+          mfaEnrollmentRequired: true,
+          staff: { id: u.id, email: u.email, name: u.name ?? null, role: u.role, jobTitle: u.job_title ?? null },
+        };
       }
       const sid = await createSession(db, cfg, u.id, {
         ip: req.ip, userAgent: req.headers['user-agent'], trustedDevice: trust,
@@ -206,11 +223,23 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
     admin.post('/staff/accept', async (req) => staffSvc.acceptInvite(body(req)));
 
     // ── Admin MFA (self-service; the current staff enrolls/manages their OWN factor) ──
-    admin.get('/auth/mfa/status', { preHandler: auth }, async (req) => staffSvc.mfaStatus(req.staff!.id));
-    admin.post('/auth/mfa/enroll', { preHandler: auth }, async (req) => staffSvc.enrollMfa(req.staff!.id, actorOf(req)));
-    admin.post('/auth/mfa/verify', { preHandler: auth }, async (req) => {
+    // TRI-912: these three use `authEnroll` so an enroll-gated (factor-less enforced-role) session can
+    // complete enrollment. status/disable/recovery for a voluntary user still resolve as a full session.
+    admin.get('/auth/mfa/status', { preHandler: authEnroll }, async (req) => staffSvc.mfaStatus(req.staff!.id));
+    admin.post('/auth/mfa/enroll', { preHandler: authEnroll }, async (req) => staffSvc.enrollMfa(req.staff!.id, actorOf(req)));
+    admin.post('/auth/mfa/verify', { preHandler: authEnroll }, async (req, reply) => {
       const b = body(req) as Record<string, unknown>;
-      return staffSvc.verifyMfaEnrollment(req.staff!.id, typeof b.code === 'string' ? b.code : '', actorOf(req));
+      const result = await staffSvc.verifyMfaEnrollment(req.staff!.id, typeof b.code === 'string' ? b.code : '', actorOf(req));
+      // If this cleared an enrollment gate, promote the half-auth session to a full login and hand back
+      // the same { staff, permissions } shape a plain login returns, so the console enters immediately.
+      if (req.mfaEnrollPending) {
+        const sid = req.cookies?.[cfg.adminCookieName];
+        if (sid) await clearMfaEnrollPending(db, sid);
+        const s = req.staff!;
+        await audit(db, { actorId: s.id, action: 'staff.login', targetType: 'staff_user', targetId: s.id, after: { mfa: true, viaEnrollGate: true }, ip: req.ip ?? null });
+        return { ...result, staff: { id: s.id, email: s.email, name: s.name, role: s.role, jobTitle: s.jobTitle }, permissions: [...s.permissions] };
+      }
+      return result;
     });
     admin.post('/auth/mfa/disable', { preHandler: auth }, async (req) => {
       const b = body(req) as Record<string, unknown>;

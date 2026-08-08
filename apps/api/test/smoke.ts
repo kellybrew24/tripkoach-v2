@@ -26,6 +26,10 @@ const WEBHOOK_SECRET = 'whsec_test_tripkoach';
 const cfg = {
   ...base, dbDriver: 'pglite' as const, pgliteData: 'memory://', env: 'test',
   reservationHoldMinutes: 30,
+  // The RBAC/CRUD block below logs in as a factor-less admin/operator and expects a full session; MFA
+  // ENFORCEMENT (TRI-912) is exercised separately in its own block against an enforced app, so keep the
+  // enforced-role set empty here to keep those login assertions about RBAC, not the enroll gate.
+  mfaEnforcedRoles: [] as string[],
   paystack: {
     ...base.paystack, secretKey: 'sk_test_stub', publicKey: 'pk_test_stub',
     webhookSecret: WEBHOOK_SECRET, chargeRateOverride: undefined,
@@ -1388,6 +1392,58 @@ console.log('\n[admin MFA: enroll → verify → login challenge → recovery]')
   // After disabling, login no longer challenges.
   const login5 = await call('POST', '/api/admin/auth/login', { payload: { email: 'admin@tripkoach.com', password: 'Sup3r-Secret!' } });
   ok('mfa: after disable, login returns full session (no challenge)', login5.status === 200 && !!login5.body.staff && !login5.body.mfaRequired, JSON.stringify(login5.body));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TRI-912 · Admin MFA ENFORCEMENT: a factor-less login by an enforced role (admin/operator) is issued an
+// ENROLL-gated half-auth session — blocked from every privileged route until it enrolls a factor, then
+// promoted in place. Roles outside the enforced set (viewer) keep MFA optional. Exercised against a second
+// app with enforcement ON; the admin is factor-less again here (the block above disabled its MFA).
+console.log('\n[admin MFA enforcement: enroll gate (TRI-912)]');
+{
+  const appEnf = buildServer(db, { ...cfg, mfaEnforcedRoles: ['admin', 'operator'] }, paystackStub);
+  await appEnf.ready();
+  const callE = async (method: 'GET' | 'POST', url: string, opts: { payload?: any; cookie?: string } = {}) => {
+    const res = await appEnf.inject({ method, url, payload: opts.payload, cookies: opts.cookie ? { [COOKIE]: opts.cookie } : undefined });
+    let body: any; try { body = res.json(); } catch { body = res.body; }
+    return { status: res.statusCode, body, cookies: res.cookies as Array<{ name: string; value: string }> };
+  };
+
+  // Factor-less admin (enforced role) → login is gated, NOT a full session.
+  const gated = await callE('POST', '/api/admin/auth/login', { payload: { email: 'admin@tripkoach.com', password: 'Sup3r-Secret!' } });
+  ok('enforce: factor-less admin login → mfaEnrollmentRequired', gated.status === 200 && gated.body.mfaEnrollmentRequired === true, JSON.stringify(gated.body));
+  ok('enforce: gated login exposes no permissions', gated.body.permissions === undefined);
+  const gcookie = gated.cookies.find((c) => c.name === COOKIE)?.value ?? '';
+  ok('enforce: gated login set a session cookie', !!gcookie);
+
+  // The enroll-gated cookie is blocked from privileged routes and from /me (strict auth) until promoted.
+  ok('enforce: gated cookie → privileged route 401', (await callE('GET', '/api/admin/tours', { cookie: gcookie })).status === 401);
+  ok('enforce: gated cookie → /me 401 (not yet authed)', (await callE('GET', '/api/admin/me', { cookie: gcookie })).status === 401);
+
+  // …but it CAN reach the MFA enroll endpoints to close the gate.
+  const enroll = await callE('POST', '/api/admin/auth/mfa/enroll', { cookie: gcookie });
+  ok('enforce: gated cookie → enroll 200 with secret', enroll.status === 200 && typeof enroll.body.secret === 'string', JSON.stringify(enroll.body).slice(0, 120));
+  const esecret = enroll.body.secret as string;
+
+  // Verifying a live code confirms the factor, issues recovery codes, AND promotes the session in place.
+  const verified = await callE('POST', '/api/admin/auth/mfa/verify', { cookie: gcookie, payload: { code: totp(esecret) } });
+  ok('enforce: verify → recovery codes + promoted session', verified.status === 200
+    && Array.isArray(verified.body.recoveryCodes) && verified.body.recoveryCodes.length > 0
+    && verified.body.staff?.role === 'admin' && Array.isArray(verified.body.permissions), JSON.stringify(verified.body).slice(0, 160));
+
+  // The SAME cookie now clears strict auth — the gate is closed.
+  ok('enforce: promoted cookie → privileged route 200', (await callE('GET', '/api/admin/tours', { cookie: gcookie })).status === 200);
+  ok('enforce: promoted cookie → /me 200', (await callE('GET', '/api/admin/me', { cookie: gcookie })).status === 200);
+
+  // A now-enrolled admin logs in via the normal 2FA challenge (mfaRequired), not the enroll gate.
+  const relog = await callE('POST', '/api/admin/auth/login', { payload: { email: 'admin@tripkoach.com', password: 'Sup3r-Secret!' } });
+  ok('enforce: enrolled admin login → mfaRequired (challenge, not enroll)', relog.status === 200 && relog.body.mfaRequired === true && !relog.body.mfaEnrollmentRequired, JSON.stringify(relog.body));
+
+  // A non-enforced role (viewer) keeps MFA optional → still a full session, no gate.
+  const vlogin = await callE('POST', '/api/admin/auth/login', { payload: { email: 'viewer@tripkoach.com', password: 'Just-Look!' } });
+  ok('enforce: non-enforced viewer → full session (no gate)', vlogin.status === 200 && !!vlogin.body.staff && !vlogin.body.mfaEnrollmentRequired && Array.isArray(vlogin.body.permissions), JSON.stringify(vlogin.body));
+
+  await appEnf.close();
 }
 
 await app.close();
