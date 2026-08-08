@@ -7,7 +7,9 @@ const { Header, Footer, Breadcrumbs, TourCard, SearchField, Chip, Button, Icon, 
    for display only; GHS rate is an assumption pending a live FX feed. */
 const TK_FX = { USD: 1, GHS: 15.6 };
 const TK_SYM = { USD: "$", GHS: "GH₵" };
-function cvt(usd, cur) { return cur === "GHS" ? Math.round((usd || 0) * TK_FX.GHS) : (usd || 0); }
+// null is meaningful for tier-priced departures (price varies by party size) — preserve it
+// so the DeparturePicker can hide the per-departure price rather than showing "$0". (TRI-932)
+function cvt(usd, cur) { return usd == null ? null : (cur === "GHS" ? Math.round(usd * TK_FX.GHS) : usd); }
 function money(usd, cur) { return TK_SYM[cur] + cvt(usd, cur).toLocaleString(); }
 function cvtDeps(deps, cur) { return (deps || []).map(d => ({ ...d, price: cvt(d.price, cur) })); }
 

@@ -203,7 +203,10 @@ function departureDTO(r: any) {
     id: r.id,
     date: r.date_label,
     time: r.time_label ?? '',
-    price: fromMinor(r.price_minor),
+    // Null price = tier-priced departure (price varies by party size, like production).
+    // Pass null through rather than coercing to 0 so the FE falls back to the group-tier
+    // step-function instead of showing "$0". (TRI-932)
+    price: r.price_minor == null ? null : fromMinor(r.price_minor),
     spotsLeft: Math.max(0, Number(r.seats_total) - Number(r.seats_reserved)),
     status: r.status,
   };
