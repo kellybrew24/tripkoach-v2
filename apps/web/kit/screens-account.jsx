@@ -182,17 +182,46 @@ function ProfileWeb({ go }) {
   const [me, setMe] = React.useState(cached && typeof cached === "object" ? cached : null);
   const [loaded, setLoaded] = React.useState(live ? !!(cached && typeof cached === "object") : true);
   const [busy, setBusy] = React.useState(false);
+  // TRI-943: avatar upload state
+  const [avatarBusy, setAvatarBusy] = React.useState(false);
+  const [avatarUrl, setAvatarUrl] = React.useState((cached && cached.avatarUrl) || null);
+  const [avatarStatus, setAvatarStatus] = React.useState((cached && cached.avatarStatus) || null);
+  const avatarInputRef = React.useRef(null);
   React.useEffect(() => {
     if (!live || loaded) return;
     let alive = true;
     window.TK_AUTH.me().then(
-      (u) => { if (!alive) return; if (!u) { go("login"); return; } setMe(u); setLoaded(true); },
+      (u) => {
+        if (!alive) return;
+        if (!u) { go("login"); return; }
+        setMe(u);
+        setAvatarUrl(u.avatarUrl || null);
+        setAvatarStatus(u.avatarStatus || null);
+        setLoaded(true);
+      },
       () => { if (alive) setLoaded(true); }
     );
     return () => { alive = false; };
   }, []);
   const dv = (k, ds) => (live && me ? (me[k] || "") : ds);
   const phoneProps = (v) => (live && me && v ? { defaultValue: v } : {});
+  // TRI-943: avatar upload handler
+  async function handleAvatarChange(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file || !live) return;
+    // Basic client-side guard: 5MB + allow-list (matches backend)
+    if (file.size > 5 * 1024 * 1024) { window.tkToast("Photo must be under 5 MB."); return; }
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) { window.tkToast("Please upload a JPEG, PNG, or WebP image."); return; }
+    setAvatarBusy(true);
+    try {
+      const result = await window.TK_AUTH.uploadAvatar(file);
+      setAvatarUrl(result.avatarUrl);
+      setAvatarStatus(result.avatarStatus);
+      setToast(result.avatarStatus === "approved" ? "Photo updated" : "Photo uploaded — under review");
+    } catch (err) {
+      window.tkToast(authErrMsg(err, "We couldn't upload your photo. Please try again."));
+    } finally { setAvatarBusy(false); if (avatarInputRef.current) avatarInputRef.current.value = ""; }
+  }
   async function saveProfile() {
     if (busy) return;
     setBusy(true);
@@ -217,8 +246,21 @@ function ProfileWeb({ go }) {
       <p className="tk-body tk-muted" style={{ marginTop: -8 }}>Your details travel with every booking. Guides use them to prepare for your trip.</p>
       <div className="tk-card"><div className="tk-card__body" style={{ padding: "var(--space-6)", gap: "var(--space-4)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <span style={{ width: 64, height: 64, borderRadius: "50%", background: "var(--brand-wash)", color: "var(--brand-gold-deep)", display: "grid", placeItems: "center", fontWeight: 800, fontSize: 22 }}>AM</span>
-          <Button variant="secondary" size="sm" iconStart="user" onClick={touch}>Change photo</Button>
+          {/* TRI-943: avatar — show photo when approved/pending, initials otherwise */}
+          <span style={{ position: "relative", width: 64, height: 64, borderRadius: "50%", background: "var(--brand-wash)", color: "var(--brand-gold-deep)", display: "grid", placeItems: "center", fontWeight: 800, fontSize: 22, overflow: "hidden", flexShrink: 0 }}>
+            {avatarUrl
+              ? <img src={avatarUrl} alt="Your avatar" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%", opacity: avatarBusy ? 0.5 : 1 }} />
+              : (live && me ? (me.name || me.email || "?").split(/\s+/).map((w) => w.charAt(0)).join("").slice(0, 2).toUpperCase() : "AM")}
+            {avatarBusy && <span style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.25)", display: "grid", placeItems: "center" }}><Icon name="loader" size={20} style={{ color: "#fff" }} /></span>}
+          </span>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {/* Hidden file input — triggered by the button below */}
+            <input ref={avatarInputRef} type="file" accept="image/jpeg,image/png,image/webp" style={{ display: "none" }} onChange={handleAvatarChange} />
+            <Button variant="secondary" size="sm" iconStart="camera" disabled={avatarBusy} onClick={() => { if (live) { avatarInputRef.current && avatarInputRef.current.click(); } else { touch(); } }}>{avatarBusy ? "Uploading…" : "Change photo"}</Button>
+            {avatarStatus === "pending" && <span className="tk-caption tk-muted">Photo is under review</span>}
+            {avatarStatus === "rejected" && <span className="tk-caption" style={{ color: "var(--danger-fg)" }}>Photo was declined — please upload a different one</span>}
+            {avatarStatus === "hidden" && <span className="tk-caption" style={{ color: "var(--danger-fg)" }}>Photo is under review</span>}
+          </div>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-4)" }}>
           <FormField id="p-name" label="Full name" help="As it appears on your ID"><Input defaultValue={dv("name", "Ama Mensah")} onChange={touch} /></FormField>

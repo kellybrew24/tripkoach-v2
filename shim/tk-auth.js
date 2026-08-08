@@ -63,6 +63,9 @@
       twoFactorEnabled: !!pick(u.twoFactorEnabled, u.two_factor_enabled),
       // TRI-941: soft email-verification signal (never gates checkout). Drives the badge + nudge.
       emailVerified: !!pick(u.emailVerified, u.email_verified),
+      // TRI-943: avatar. avatarUrl is null when rejected/hidden — FE shows default placeholder.
+      avatarUrl: pick(u.avatarUrl, u.avatar_url) || null,
+      avatarStatus: pick(u.avatarStatus, u.avatar_status) || null,
       createdAt: pick(u.createdAt, u.created_at) || null,
       raw: u,
     };
@@ -214,6 +217,37 @@
     myBookings: function () {
       return api.get("/me/bookings").then(function (body) {
         return listOf(body, "bookings").map(mapBooking);
+      });
+    },
+
+    // TRI-943: upload avatar. `file` is a File/Blob. Resolves { avatarUrl, avatarStatus }.
+    // The raw bytes are POSTed with the image's content-type; filename is sent via X-Filename.
+    uploadAvatar: function (file) {
+      var base = (window.TK_CONFIG && window.TK_CONFIG.API_BASE) || "/api/v1";
+      var url = base.replace(/\/$/, "") + "/me/avatar";
+      var filename = (file && file.name) || "avatar";
+      return fetch(url, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": file.type || "application/octet-stream", "X-Filename": filename },
+        body: file,
+      }).then(function (r) {
+        return r.json().then(function (body) {
+          if (!r.ok) { var e = new Error((body && body.message) || ("Upload failed: " + r.status)); e.status = r.status; throw e; }
+          // Refresh cached /me so the avatar shows everywhere.
+          if (meCache) { meCache.avatarUrl = body.avatarUrl || null; meCache.avatarStatus = body.avatarStatus || null; }
+          return { avatarUrl: body.avatarUrl || null, avatarStatus: body.avatarStatus || null };
+        });
+      });
+    },
+
+    // TRI-943: remove avatar (revert to default placeholder).
+    deleteAvatar: function () {
+      return api.del ? api.del("/me/avatar") : fetch(
+        ((window.TK_CONFIG && window.TK_CONFIG.API_BASE) || "/api/v1").replace(/\/$/, "") + "/me/avatar",
+        { method: "DELETE", credentials: "include" }
+      ).then(function (r) { return r.json(); }).then(function () {
+        if (meCache) { meCache.avatarUrl = null; meCache.avatarStatus = null; }
+        return { avatarUrl: null, avatarStatus: null };
       });
     },
   };
