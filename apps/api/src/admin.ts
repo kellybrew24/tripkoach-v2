@@ -4,7 +4,7 @@
 
 import type { Db } from './db.ts';
 import type { Config } from './config.ts';
-import { fromMinor, toMinor, slugify } from './util.ts';
+import { fromMinor, toMinor, slugify, formatReviewDate, initials } from './util.ts';
 import { audit } from './auth.ts';
 
 export interface Actor { id: string; ip: string | null }
@@ -701,12 +701,94 @@ export function createAdminService(db: Db, _cfg: Config) {
     return { refundRequested: true, payment: await getPayment(ref) };
   }
 
+  // ── Reviews (moderation) ─────────────────────────────────────────────────
+  // Reuses the Phase-1 review states (pending/approved/rejected) + the `reply` column — no schema.
+  // Public /api/v1/tours/:slug/reviews reads live `status='approved'`, so a transition flips public
+  // visibility immediately; we also recompute the tour's cached rating/count (no trigger maintains them).
+  const REVIEW_SELECT = `
+    SELECT r.id, r.tour_id, t.slug AS tour_slug, t.title AS tour_title,
+           r.author_name, r.rating, r.title, r.text, r.verified, r.status, r.reply, r.created_at
+      FROM review r JOIN tour t ON t.id = r.tour_id`;
+
+  function mapReviewRow(r: any) {
+    return {
+      id: r.id,
+      tourId: r.tour_slug,          // friendly id; the admin SPA's mapReview also accepts tourSlug/tour_id
+      tourSlug: r.tour_slug,
+      tour: r.tour_title,
+      author: r.author_name,
+      initials: initials(r.author_name),
+      rating: Number(r.rating),
+      date: formatReviewDate(r.created_at),
+      createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : r.created_at,
+      verified: !!r.verified,
+      status: r.status,
+      title: r.title ?? '',
+      text: r.text ?? '',
+      reply: r.reply ?? null,
+    };
+  }
+
+  async function recomputeTourReviewCache(q: Db, tourId: string) {
+    await q.query(
+      `UPDATE tour SET
+         review_count_cached = (SELECT COUNT(*)::int FROM review WHERE tour_id = $1 AND status = 'approved'),
+         rating_cached       = (SELECT ROUND(AVG(rating)::numeric, 1) FROM review WHERE tour_id = $1 AND status = 'approved')
+       WHERE id = $1`, [tourId]);
+  }
+
+  async function loadReview(id: string) {
+    const r = (await db.query(`${REVIEW_SELECT} WHERE r.id = $1`, [id])).rows[0];
+    if (!r) throw notFound('review');
+    return r;
+  }
+
+  const REVIEW_STATUSES = ['pending', 'approved', 'rejected'] as const;
+
+  async function listReviews(filter: { status?: string } = {}) {
+    const status = filter.status && REVIEW_STATUSES.includes(filter.status as any) ? filter.status : undefined;
+    const where = status ? ` WHERE r.status = $1` : '';
+    const { rows } = await db.query(`${REVIEW_SELECT}${where} ORDER BY r.created_at DESC`, status ? [status] : []);
+    // Counts are always computed over ALL reviews (the admin UI's tabs/badges rely on the full picture,
+    // independent of any active filter).
+    const cRows = (await db.query(
+      `SELECT status, COUNT(*)::int AS n FROM review GROUP BY status`)).rows as Array<{ status: string; n: number }>;
+    const counts = { pending: 0, approved: 0, rejected: 0 } as Record<string, number>;
+    for (const c of cRows) if (c.status in counts) counts[c.status] = Number(c.n);
+    const total = counts.pending + counts.approved + counts.rejected;
+    return { reviews: rows.map(mapReviewRow), counts, stats: { total, published: counts.approved, pending: counts.pending, rejected: counts.rejected } };
+  }
+
+  // approve → approved · reject → rejected · unpublish/restore → pending (hidden, back in the queue).
+  const STATUS_FOR: Record<string, string> = { approve: 'approved', reject: 'rejected', unpublish: 'pending', restore: 'pending' };
+
+  async function moderateReview(id: string, action: keyof typeof STATUS_FOR, actor: Actor) {
+    const next = STATUS_FOR[action];
+    if (!next) throw new ValidationError(`unknown review action: ${action}`);
+    const cur = await loadReview(id);
+    await db.tx(async (q) => {
+      await q.query(`UPDATE review SET status = $1, updated_at = now() WHERE id = $2`, [next, id]);
+      await recomputeTourReviewCache(q, cur.tour_id);
+    });
+    await audit(db, { actorId: actor.id, action: `review.${action}`, targetType: 'review', targetId: id, before: { status: cur.status }, after: { status: next }, ip: actor.ip });
+    return { review: mapReviewRow(await loadReview(id)) };
+  }
+
+  async function replyReview(id: string, body: unknown, actor: Actor) {
+    const reply = isPlainObject(body) ? (optStr(body, 'reply', 4000) ?? null) : null;
+    const cur = await loadReview(id);
+    await db.query(`UPDATE review SET reply = $1, updated_at = now() WHERE id = $2`, [reply, id]);
+    await audit(db, { actorId: actor.id, action: 'review.reply', targetType: 'review', targetId: id, before: { reply: cur.reply ?? null }, after: { reply }, ip: actor.ip });
+    return { review: mapReviewRow(await loadReview(id)) };
+  }
+
   return {
     listRegions, createRegion, updateRegion, deleteRegion,
     listTours, getTour, createTour, updateTour, setTourPublished, deleteTour,
     listDepartures, getDeparture, createDeparture, updateDeparture, cancelDeparture,
     listBookings, getBooking, confirmBooking, cancelBooking,
     listPayments, getPayment, flagRefund,
+    listReviews, moderateReview, replyReview,
   };
 }
 

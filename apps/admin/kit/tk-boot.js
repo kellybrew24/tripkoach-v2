@@ -285,6 +285,13 @@
     saveSettings: function (v) { return req("PATCH", "/settings", v || {}); },
     listStaff: function () { return req("GET", "/staff"); },
     inviteStaff: function (v) { return req("POST", "/staff", v); },
+    // reviews moderation (TRI-893) — unpublish & restore both return a review to 'pending' (hidden)
+    listReviews: function () { return req("GET", "/reviews"); },
+    approveReview: function (id) { return req("POST", "/reviews/" + encodeURIComponent(id) + "/approve"); },
+    rejectReview: function (id) { return req("POST", "/reviews/" + encodeURIComponent(id) + "/reject"); },
+    unpublishReview: function (id) { return req("POST", "/reviews/" + encodeURIComponent(id) + "/unpublish"); },
+    restoreReview: function (id) { return req("POST", "/reviews/" + encodeURIComponent(id) + "/restore"); },
+    replyReview: function (id, reply) { return req("POST", "/reviews/" + encodeURIComponent(id) + "/reply", { reply: reply }); },
     // misc lists
     listCustomers: function () { return req("GET", "/customers"); },
     listGuides: function () { return req("GET", "/guides"); },

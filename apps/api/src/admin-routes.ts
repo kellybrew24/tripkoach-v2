@@ -119,5 +119,16 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config): void {
     });
     admin.get('/payments/:ref', perm('bookings.view'), async (req) => svc.getPayment((req.params as any).ref));
     admin.post('/payments/:ref/refund', perm('payments.refund'), async (req) => svc.flagRefund((req.params as any).ref, body(req), actorOf(req)));
+
+    // ── Reviews (moderation) ───────────────────────────────────────────────────
+    // The admin SPA hydrates the Reviews console from GET /reviews (all statuses → client-side tabs) and
+    // moderates via approve/reject/reply/unpublish(+restore). unpublish/restore both map to 'pending'
+    // (hidden from the public tour page, back in the queue) — no new state, per 005's status CHECK.
+    admin.get('/reviews', perm('reviews.moderate'), async (req) => svc.listReviews({ status: qStr(query(req), 'status') }));
+    admin.post('/reviews/:id/approve', perm('reviews.moderate'), async (req) => svc.moderateReview((req.params as any).id, 'approve', actorOf(req)));
+    admin.post('/reviews/:id/reject', perm('reviews.moderate'), async (req) => svc.moderateReview((req.params as any).id, 'reject', actorOf(req)));
+    admin.post('/reviews/:id/unpublish', perm('reviews.moderate'), async (req) => svc.moderateReview((req.params as any).id, 'unpublish', actorOf(req)));
+    admin.post('/reviews/:id/restore', perm('reviews.moderate'), async (req) => svc.moderateReview((req.params as any).id, 'restore', actorOf(req)));
+    admin.post('/reviews/:id/reply', perm('reviews.moderate'), async (req) => svc.replyReview((req.params as any).id, body(req), actorOf(req)));
   }, { prefix: cfg.adminPrefix });
 }

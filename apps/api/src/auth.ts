@@ -8,12 +8,14 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Db } from './db.ts';
 import type { Config } from './config.ts';
 
-// The full permission vocabulary (must match the CHECK in 006_staff_rbac_auth.sql).
+// The full permission vocabulary (must match the CHECK in 006_staff_rbac_auth.sql, as extended by
+// 013_reviews_moderation_perm.sql which adds 'reviews.moderate').
 export const ALL_PERMISSIONS = [
   'tours.view', 'tours.edit',
   'bookings.view', 'bookings.manage', 'bookings.cancel',
   'payments.refund', 'customers.view',
   'promos.manage', 'users.manage', 'settings.manage',
+  'reviews.moderate',
 ] as const;
 export type Permission = (typeof ALL_PERMISSIONS)[number];
 
