@@ -45,6 +45,14 @@ const AUDIT = { items: [
   { id: "a1", action: "booking.cancel", actorType: "staff", actorId: "s1", actor: "MOCK Kwame Boateng", actorEmail: "kwame@tripkoach.com", targetType: "booking", targetId: "MOCK-TK-1", before: null, after: null, ip: "1.2.3.4", createdAt: "2026-08-08T10:15:00Z" },
   { id: "a2", action: "payment.refund", actorType: "staff", actorId: "s1", actor: "MOCK Kwame Boateng", actorEmail: "kwame@tripkoach.com", targetType: "payment", targetId: "MOCK-PAY-1", before: null, after: null, ip: "1.2.3.4", createdAt: "2026-08-08T09:00:00Z" },
 ], page: 1, pageSize: 50, total: 2, totalPages: 1 };
+const SETTINGS = {
+  businessName: "MOCK TripKoach Ghana Ltd", address: "Accra", supportPhone: "+233 53 324 4042", supportEmail: "services@tripkoach.com",
+  currencyOfRecord: "USD", displayCurrency: "GHS", usdToGhsDisplayRate: 15.6, cancellationPolicy: "Policy", paymentDeadlineDays: 5,
+  fx: {
+    displayRate: { value: 15.6, editable: true, purpose: "hint" },
+    chargeRate: { value: 11.9481, editable: false, source: "open.er-api.com", establishedAt: "2026-08-08", note: "cron", purpose: "charge" },
+  },
+};
 
 function makeServer(opts) {
   opts = opts || {};
@@ -64,6 +72,8 @@ function makeServer(opts) {
     if (url.endsWith("/api/admin/payments")) return send(200, PAYMENTS);
     if (url.endsWith("/api/admin/dashboard")) return send(200, DASHBOARD);
     if (url.endsWith("/api/admin/audit-log")) return send(200, AUDIT);
+    if (url.endsWith("/api/admin/settings") && req.method === "GET") return send(200, SETTINGS);
+    if (url.endsWith("/api/admin/settings") && req.method === "PATCH") return send(200, SETTINGS);
     if (/\/api\/admin\/(departures|promos|staff|customers|guides|reviews)$/.test(url)) return send(200, {});
     // Writes
     if (/\/api\/admin\/bookings\/[^/]+\/cancel$/.test(url)) return opts.forbidWrites ? send(403, { error: { code: "forbidden", message: "No permission" } }) : send(200, { ok: true });
@@ -142,8 +152,15 @@ const pass = (name, cond, extra = "") => { console.log(`[smoke:admin] ${cond ? "
   pass("audit-log references the entity acted on", audit.html.includes("MOCK-TK-1"));
   pass("audit-log shows the entry count", audit.html.includes("2 entries"));
 
-  const noErr = [tours, bookings, payments, dash, audit].every((r) => r.errors.length === 0);
-  pass("no jsdom errors on live admin render", noErr, [tours, bookings, payments, dash, audit].flatMap((r) => r.errors).join(" | "));
+  // --- settings dual-FX hydration (TRI-898 A14/C19) ------------------------
+  const settings = await render("/settings", base);
+  const sw = settings.window;
+  pass("settings screen fetches GET /api/admin/settings", server._hits.includes("GET /api/admin/settings"), server._hits.join(" | "));
+  pass("settings hydrates business name into the form", (sw.document.getElementById("s-org") || {}).value === "MOCK TripKoach Ghana Ltd", (sw.document.getElementById("s-org") || {}).value);
+  pass("settings hydrates support email into the form", (sw.document.getElementById("s-email") || {}).value === "services@tripkoach.com", (sw.document.getElementById("s-email") || {}).value);
+
+  const noErr = [tours, bookings, payments, dash, audit, settings].every((r) => r.errors.length === 0);
+  pass("no jsdom errors on live admin render", noErr, [tours, bookings, payments, dash, audit, settings].flatMap((r) => r.errors).join(" | "));
 
   // --- 3. write path drives the guarded endpoints --------------------------
   const w = payments.window;

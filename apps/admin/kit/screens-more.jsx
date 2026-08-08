@@ -260,8 +260,32 @@ function UsersAdmin({ go }) {
 
 /* ── Settings ──────────────────────────────────────────── */
 function SettingsAdmin({ go }) {
+  const LIVE = !!(window.TK_CONFIG && window.TK_CONFIG.USE_LIVE_API);
   const [tab, setTab] = React.useState("general");
   const [toast, setToast] = React.useState(null);
+  // A14/C19 (TRI-898): hydrate from GET /api/admin/settings and surface BOTH
+  // USD→GHS rates distinctly — the editable customer-facing display rate and the
+  // read-only charge rate owned by the FX cron. Flag off → LIVE is false, `data`
+  // stays null, and every field keeps its prototype defaultValue (byte-identical).
+  const [data, setData] = React.useState(null);
+  React.useEffect(() => {
+    if (!LIVE || !window.TK_ADMIN_API || !window.TK_ADMIN_API.getSettings) return;
+    let alive = true;
+    window.TK_ADMIN_API.getSettings().then((s) => { if (alive && s) setData(s); }, () => {});
+    return () => { alive = false; };
+  }, []);
+  // Apply fetched values to whatever fields are currently mounted (fields are
+  // per-tab, so re-apply on tab switch too). Uncontrolled inputs → set imperatively.
+  React.useEffect(() => {
+    if (!data) return;
+    const set = (id, v) => { const el = document.getElementById(id); if (el != null && v != null && v !== "") el.value = v; };
+    set("s-org", data.businessName); set("s-addr", data.address);
+    set("s-phone", data.supportPhone); set("s-email", data.supportEmail);
+    set("s-cur", data.currencyOfRecord); set("s-disp", data.displayCurrency || "none");
+    set("s-rate", data.usdToGhsDisplayRate != null ? data.usdToGhsDisplayRate : (data.fx && data.fx.displayRate && data.fx.displayRate.value));
+    set("s-canc", data.cancellationPolicy); set("s-deadline", data.paymentDeadlineDays);
+  }, [data, tab]);
+  const chargeRate = data && data.fx && data.fx.chargeRate;
   const Section = ({ title, hint, children }) => (
     <div className="tk-formsection"><div className="tk-formsection__aside"><h3>{title}</h3><p>{hint}</p></div><div className="tk-formsection__body">{children}</div></div>
   );
@@ -284,6 +308,8 @@ function SettingsAdmin({ go }) {
             <FormField id="s-cur" label="Currency of record"><Select defaultValue="USD" options={[{ value: "USD", label: "US Dollar (USD)" }, { value: "GHS", label: "Ghana Cedi (GHS)" }]} /></FormField>
             <FormField id="s-disp" label="Also display prices in" help="An approximate second currency shown to customers"><Select defaultValue="none" options={[{ value: "none", label: "Don't show a second currency" }, { value: "GHS", label: "Ghana Cedi (GHS)" }]} /></FormField>
             <FormField id="s-rate" label="USD → GHS display rate" help="Used only for the approximate figure"><Input defaultValue="15.6" /></FormField>
+            {chargeRate && <FormField id="s-charge" label="USD → GHS charge rate (automated)" help={"Drives what customers are actually charged in GHS · source " + (chargeRate.source || "FX cron") + ". Set by the daily FX automation — not editable here."}><Input defaultValue={chargeRate.value} readOnly disabled /></FormField>}
+            {chargeRate && <Alert tone="info" title="Two separate rates">The <strong>display rate</strong> above is only for the approximate figure shown to customers. The <strong>charge rate</strong> is what builds each Paystack charge and is owned by the daily FX cron — editing the display rate never changes it.</Alert>}
           </Section>
         </>}
         {tab === "policy" && <>
