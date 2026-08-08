@@ -119,5 +119,30 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config): void {
     });
     admin.get('/payments/:ref', perm('bookings.view'), async (req) => svc.getPayment((req.params as any).ref));
     admin.post('/payments/:ref/refund', perm('payments.refund'), async (req) => svc.flagRefund((req.params as any).ref, body(req), actorOf(req)));
+
+    // ── Settings (org config incl display rate; charge rate is read-only) ────────
+    // TRI-898 · GET/PATCH the singleton settings row. settings.manage gates both. PATCH surfaces the
+    // customer-facing DISPLAY rate for editing but the service rejects any attempt to touch the charge rate.
+    admin.get('/settings', perm('settings.manage'), async () => svc.getSettings());
+    admin.patch('/settings', perm('settings.manage'), async (req) => svc.updateSettings(body(req), actorOf(req)));
+
+    // ── Customers (A11) ─────────────────────────────────────────────────────────
+    admin.get('/customers', perm('customers.view'), async (req) => {
+      const q = query(req);
+      return svc.listCustomers({ q: qStr(q, 'q'), page: qNum(q, 'page'), pageSize: qNum(q, 'pageSize') });
+    });
+    admin.get('/customers/:id', perm('customers.view'), async (req) => svc.getCustomer((req.params as any).id));
+
+    // ── Audit-log read (A16) — read-only; admin/settings-tier access ─────────────
+    admin.get('/audit-log', perm('settings.manage'), async (req) => {
+      const q = query(req);
+      return svc.listAuditLog({
+        action: qStr(q, 'action'), targetType: qStr(q, 'targetType'), targetId: qStr(q, 'targetId'),
+        actorId: qStr(q, 'actorId'), page: qNum(q, 'page'), pageSize: qNum(q, 'pageSize'),
+      });
+    });
+
+    // ── Dashboard aggregates (A15) ───────────────────────────────────────────────
+    admin.get('/dashboard', perm('bookings.view'), async (req) => svc.getDashboard({ range: qStr(query(req), 'range') }));
   }, { prefix: cfg.adminPrefix });
 }

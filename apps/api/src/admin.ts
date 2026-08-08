@@ -701,12 +701,281 @@ export function createAdminService(db: Db, _cfg: Config) {
     return { refundRequested: true, payment: await getPayment(ref) };
   }
 
+  // ── Settings (org config incl the customer-facing DISPLAY rate) ──────────────
+  // TRI-898 · The settings row carries TWO distinct USD→GHS rates that must never be conflated:
+  //   • usd_to_ghs_display_rate  — customer-facing "approximate" figure (mig 007, default 15.6). Editable
+  //       here; the consumer read path uses it for pricing hints (C19). Purely informational, never charged.
+  //   • usd_to_ghs_charge_rate   — the live-converged rate that actually builds Paystack charges (mig 008),
+  //       driven by the daily FX cron (TRI-873, provenance in fx_rate_history mig 010). READ-ONLY here so an
+  //       ops edit to the display figure can never move real money. This resolves the FX-doc discrepancy.
+  async function chargeRateProvenance(): Promise<{ source: string | null; at: string | null; note: string | null }> {
+    try {
+      const { rows } = await db.query(
+        `SELECT source, fetched_at, note FROM fx_rate_history WHERE status = 'ok' ORDER BY fetched_at DESC LIMIT 1`);
+      const r = rows[0];
+      return { source: r?.source ?? null, at: r?.fetched_at ?? null, note: r?.note ?? null };
+    } catch {
+      return { source: null, at: null, note: null };   // 010 not applied → no provenance, still safe
+    }
+  }
+
+  async function settingsDTO() {
+    const s = (await db.query(`SELECT * FROM settings WHERE singleton = true`)).rows[0];
+    if (!s) throw notFound('settings');
+    const displayRate = Number(s.usd_to_ghs_display_rate);
+    const chargeRate = s.usd_to_ghs_charge_rate == null ? null : Number(s.usd_to_ghs_charge_rate);
+    const prov = await chargeRateProvenance();
+    return {
+      businessName: s.business_name ?? null,
+      address: s.address ?? null,
+      supportPhone: s.support_phone ?? null,
+      supportEmail: s.support_email ?? null,
+      currencyOfRecord: s.currency_of_record,
+      displayCurrency: s.secondary_display_currency,
+      secondaryDisplayCurrency: s.secondary_display_currency,
+      usdToGhsDisplayRate: displayRate,
+      cancellationPolicy: s.cancellation_policy_text ?? null,
+      cancellationPolicyText: s.cancellation_policy_text ?? null,
+      paymentDeadlineDays: Number(s.payment_deadline_days),
+      flags: s.flags ?? {},
+      updatedAt: s.updated_at,
+      // Both FX rates surfaced side-by-side, each clearly labelled with its purpose + editability.
+      fx: {
+        displayRate: {
+          value: displayRate,
+          editable: true,
+          purpose: 'Customer-facing approximate USD→GHS figure shown for pricing hints (C19). Never charged.',
+        },
+        chargeRate: {
+          value: chargeRate,
+          editable: false,
+          source: prov.source,
+          establishedAt: prov.at,
+          note: prov.note,
+          purpose: 'Live-converged USD→GHS rate used to build Paystack charges. Driven by the daily FX cron (TRI-873); edit via FX automation, not here.',
+        },
+      },
+    };
+  }
+
+  async function getSettings() {
+    return settingsDTO();
+  }
+
+  async function updateSettings(body: unknown, actor: Actor) {
+    if (!isPlainObject(body)) throw new ValidationError('body must be an object');
+    // Guard the charge rate explicitly: it is cron-driven, never hand-edited through the settings screen.
+    if (body.usdToGhsChargeRate !== undefined || body.usd_to_ghs_charge_rate !== undefined || body.chargeRate !== undefined) {
+      throw new ValidationError(
+        'the USD→GHS charge rate is managed by the daily FX cron and cannot be edited here — only the display rate is editable',
+        'usdToGhsChargeRate');
+    }
+    const cur = (await db.query(`SELECT * FROM settings WHERE singleton = true`)).rows[0];
+    if (!cur) throw notFound('settings');
+
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    const set = (col: string, val: unknown) => { params.push(val); sets.push(`${col} = $${params.length}`); };
+
+    if (body.businessName !== undefined) set('business_name', optStr(body, 'businessName', 300) ?? null);
+    if (body.address !== undefined) set('address', optStr(body, 'address', 2000) ?? null);
+    if (body.supportPhone !== undefined) set('support_phone', optStr(body, 'supportPhone', 120) ?? null);
+    if (body.supportEmail !== undefined) set('support_email', optStr(body, 'supportEmail', 320) ?? null);
+    if (body.currencyOfRecord !== undefined) set('currency_of_record', reqStr(body, 'currencyOfRecord', 3).toUpperCase());
+    // FE sends displayCurrency; accept secondaryDisplayCurrency too.
+    const dispCur = body.displayCurrency !== undefined ? 'displayCurrency'
+      : body.secondaryDisplayCurrency !== undefined ? 'secondaryDisplayCurrency' : undefined;
+    if (dispCur) set('secondary_display_currency', reqStr(body, dispCur, 3).toUpperCase());
+    if (body.usdToGhsDisplayRate !== undefined) {
+      const rate = optMoney(body, 'usdToGhsDisplayRate');
+      if (rate == null || rate <= 0) throw new ValidationError('"usdToGhsDisplayRate" must be a positive number', 'usdToGhsDisplayRate');
+      set('usd_to_ghs_display_rate', rate);
+    }
+    const cancelField = body.cancellationPolicy !== undefined ? 'cancellationPolicy'
+      : body.cancellationPolicyText !== undefined ? 'cancellationPolicyText' : undefined;
+    if (cancelField) set('cancellation_policy_text', optStr(body, cancelField, 20000) ?? null);
+    if (body.paymentDeadlineDays !== undefined) {
+      const d = optInt(body, 'paymentDeadlineDays');
+      if (d == null || ![3, 5, 7].includes(d)) throw new ValidationError('"paymentDeadlineDays" must be one of: 3, 5, 7', 'paymentDeadlineDays');
+      set('payment_deadline_days', d);
+    }
+    if (body.flags !== undefined) {
+      if (!isPlainObject(body.flags)) throw new ValidationError('"flags" must be an object', 'flags');
+      set('flags', JSON.stringify(body.flags));
+    }
+    if (!sets.length) throw new ValidationError('no updatable settings fields provided');
+
+    await db.query(`UPDATE settings SET ${sets.join(', ')}, updated_at = now() WHERE singleton = true`, params);
+    await audit(db, {
+      actorId: actor.id, action: 'settings.update', targetType: 'settings', targetId: 'singleton',
+      before: { usd_to_ghs_display_rate: Number(cur.usd_to_ghs_display_rate), payment_deadline_days: Number(cur.payment_deadline_days) },
+      after: { fields: sets.map((s) => s.split(' = ')[0]) }, ip: actor.ip,
+    });
+    return settingsDTO();
+  }
+
+  // ── Customers (A11) — ops-side booker records + their bookings ────────────────
+  function customerRow(r: any) {
+    return {
+      id: r.id, name: r.name, email: r.email ?? null, phone: r.phone ?? null,
+      country: r.country ?? null, userId: r.user_id ?? null,
+      joined: r.joined_at, createdAt: r.created_at,
+      bookings: Number(r.booking_count ?? 0),
+      totalSpend: fromMinor(Number(r.total_spend_minor ?? 0)),
+    };
+  }
+
+  async function listCustomers(opts: { q?: string; page?: number; pageSize?: number } = {}) {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (opts.q) {
+      params.push(`%${opts.q}%`);
+      where.push(`(c.name ILIKE $${params.length} OR c.email ILIKE $${params.length} OR c.phone ILIKE $${params.length})`);
+    }
+    const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
+    const page = Math.max(1, opts.page || 1);
+    const pageSize = Math.min(100, Math.max(1, opts.pageSize || 25));
+    const total = Number((await db.query(`SELECT COUNT(*)::int AS n FROM customer c ${whereSql}`, params)).rows[0].n);
+    params.push(pageSize); const lim = params.length;
+    params.push((page - 1) * pageSize); const off = params.length;
+    // Per-customer booking count + lifetime spend (paid bookings only) derived at read time.
+    const { rows } = await db.query(
+      `SELECT c.*,
+              (SELECT COUNT(*) FROM booking b WHERE b.customer_id = c.id) AS booking_count,
+              (SELECT COALESCE(SUM(b.total_minor),0) FROM booking b
+                 WHERE b.customer_id = c.id AND b.payment_state = 'paid') AS total_spend_minor
+         FROM customer c ${whereSql}
+        ORDER BY c.created_at DESC LIMIT $${lim} OFFSET $${off}`, params);
+    return { items: rows.map(customerRow), page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
+  }
+
+  async function getCustomer(id: string) {
+    const c = (await db.query(
+      `SELECT c.*,
+              (SELECT COUNT(*) FROM booking b WHERE b.customer_id = c.id) AS booking_count,
+              (SELECT COALESCE(SUM(b.total_minor),0) FROM booking b
+                 WHERE b.customer_id = c.id AND b.payment_state = 'paid') AS total_spend_minor
+         FROM customer c WHERE c.id::text = $1`, [id])).rows[0];
+    if (!c) throw notFound('customer');
+    const bookings = (await db.query(
+      `SELECT b.ref, b.status, b.payment_state, b.party_size, b.total_minor, b.currency, b.created_at,
+              t.title AS tour_title, t.slug AS tour_slug, d.date_label
+         FROM booking b JOIN tour t ON t.id = b.tour_id JOIN departure d ON d.id = b.departure_id
+        WHERE b.customer_id = $1 ORDER BY b.created_at DESC`, [c.id])).rows;
+    return {
+      ...customerRow(c),
+      bookings: bookings.map((b) => ({
+        ref: b.ref, status: b.status, payment: b.payment_state,
+        tour: b.tour_title, tourId: b.tour_slug, date: b.date_label,
+        travellers: Number(b.party_size), total: fromMinor(b.total_minor), currency: b.currency,
+        created: b.created_at,
+      })),
+    };
+  }
+
+  // ── Audit-log read (A16) — paginated, read-only, for the AuditTimeline screen ─
+  async function listAuditLog(opts: { action?: string; targetType?: string; targetId?: string; actorId?: string; page?: number; pageSize?: number } = {}) {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    const eq = (col: string, val?: string) => { if (val) { params.push(val); where.push(`${col} = $${params.length}`); } };
+    eq('a.action', opts.action);
+    eq('a.target_type', opts.targetType);
+    eq('a.target_id', opts.targetId);
+    eq('a.actor_id', opts.actorId);
+    const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
+    const page = Math.max(1, opts.page || 1);
+    const pageSize = Math.min(200, Math.max(1, opts.pageSize || 50));
+    const total = Number((await db.query(`SELECT COUNT(*)::int AS n FROM audit_log a ${whereSql}`, params)).rows[0].n);
+    params.push(pageSize); const lim = params.length;
+    params.push((page - 1) * pageSize); const off = params.length;
+    const { rows } = await db.query(
+      `SELECT a.id, a.actor_type, a.actor_id, a.action, a.target_type, a.target_id,
+              a.before, a.after, a.ip, a.created_at, u.name AS actor_name, u.email AS actor_email
+         FROM audit_log a LEFT JOIN staff_user u ON u.id = a.actor_id
+        ${whereSql} ORDER BY a.created_at DESC LIMIT $${lim} OFFSET $${off}`, params);
+    const items = rows.map((r) => ({
+      id: r.id, action: r.action,
+      actorType: r.actor_type, actorId: r.actor_id ?? null,
+      actor: r.actor_name ?? r.actor_email ?? (r.actor_type === 'staff' ? 'Staff' : 'System'),
+      actorEmail: r.actor_email ?? null,
+      targetType: r.target_type ?? null, targetId: r.target_id ?? null,
+      before: r.before ?? null, after: r.after ?? null,
+      ip: r.ip ?? null, createdAt: r.created_at,
+    }));
+    return { items, page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
+  }
+
+  // ── Dashboard aggregates (A15) — summary counts for the console home ──────────
+  const RANGE_DAYS: Record<string, number | null> = { '7d': 7, '30d': 30, '90d': 90, ytd: null, all: null };
+  async function getDashboard(opts: { range?: string } = {}) {
+    const range = opts.range && opts.range in RANGE_DAYS ? opts.range : '30d';
+    // created_at window for booking/revenue metrics (ytd = since Jan 1; all = no bound).
+    let sinceSql = 'true';
+    if (range === 'ytd') sinceSql = `b.created_at >= date_trunc('year', now())`;
+    else if (range !== 'all') sinceSql = `b.created_at >= now() - interval '${RANGE_DAYS[range]} days'`;
+
+    // Booking counts by status within the window + total.
+    const byStatus = (await db.query(
+      `SELECT b.status, COUNT(*)::int AS n FROM booking b WHERE ${sinceSql} GROUP BY b.status`)).rows;
+    const bookingsByStatus: Record<string, number> = {};
+    let bookingsTotal = 0;
+    for (const r of byStatus) { bookingsByStatus[r.status] = Number(r.n); bookingsTotal += Number(r.n); }
+
+    // Revenue: USD of record (paid bookings) + GHS actually charged (paid payments, guarded pre-008).
+    const usdRow = (await db.query(
+      `SELECT COALESCE(SUM(b.total_minor),0)::bigint AS usd_minor
+         FROM booking b WHERE ${sinceSql} AND b.payment_state = 'paid'`)).rows[0];
+    const revenueUsd = fromMinor(Number(usdRow.usd_minor));
+    let revenueGhs: number | null = null;
+    if (await hasFxColumns(db)) {
+      const ghsRow = (await db.query(
+        `SELECT COALESCE(SUM(p.ghs_amount_minor),0)::bigint AS ghs_minor
+           FROM payment p JOIN booking b ON b.id = p.booking_id
+          WHERE p.status = 'paid' AND (${sinceSql})`)).rows[0];
+      revenueGhs = Number(ghsRow.ghs_minor) / 100;
+    }
+
+    // Upcoming departures (scheduled, dated today or later) + next few.
+    const upcomingCount = Number((await db.query(
+      `SELECT COUNT(*)::int AS n FROM departure d
+        WHERE d.status = 'scheduled' AND (d.depart_on IS NULL OR d.depart_on >= current_date)`)).rows[0].n);
+    const upcoming = (await db.query(
+      `SELECT d.id, d.date_label, d.depart_on, d.seats_total, d.seats_reserved, t.title AS tour_title, t.slug AS tour_slug
+         FROM departure d JOIN tour t ON t.id = d.tour_id
+        WHERE d.status = 'scheduled' AND (d.depart_on IS NULL OR d.depart_on >= current_date)
+        ORDER BY d.depart_on NULLS LAST, d.created_at LIMIT 5`)).rows.map((d) => ({
+          id: d.id, tour: d.tour_title, tourId: d.tour_slug, date: d.date_label, departOn: d.depart_on,
+          seatsTotal: Number(d.seats_total), booked: Number(d.seats_reserved),
+          spotsLeft: Math.max(0, Number(d.seats_total) - Number(d.seats_reserved)),
+        }));
+
+    // Seat utilisation across upcoming scheduled departures.
+    const seatRow = (await db.query(
+      `SELECT COALESCE(SUM(d.seats_total),0)::int AS total, COALESCE(SUM(d.seats_reserved),0)::int AS reserved
+         FROM departure d
+        WHERE d.status = 'scheduled' AND (d.depart_on IS NULL OR d.depart_on >= current_date)`)).rows[0];
+    const seatsTotal = Number(seatRow.total), seatsReserved = Number(seatRow.reserved);
+    const occupancyPct = seatsTotal > 0 ? Math.round((seatsReserved / seatsTotal) * 1000) / 10 : 0;
+
+    return {
+      range,
+      bookings: { total: bookingsTotal, byStatus: bookingsByStatus },
+      revenue: { usd: revenueUsd, currency: 'USD', ghs: revenueGhs, ghsCurrency: 'GHS' },
+      departures: { upcoming: upcomingCount, next: upcoming },
+      occupancy: { seatsTotal, seatsReserved, spotsLeft: Math.max(0, seatsTotal - seatsReserved), utilizationPct: occupancyPct },
+    };
+  }
+
   return {
     listRegions, createRegion, updateRegion, deleteRegion,
     listTours, getTour, createTour, updateTour, setTourPublished, deleteTour,
     listDepartures, getDeparture, createDeparture, updateDeparture, cancelDeparture,
     listBookings, getBooking, confirmBooking, cancelBooking,
     listPayments, getPayment, flagRefund,
+    getSettings, updateSettings,
+    listCustomers, getCustomer,
+    listAuditLog,
+    getDashboard,
   };
 }
 

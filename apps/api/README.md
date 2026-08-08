@@ -323,6 +323,48 @@ execution is a follow-up) → `{ refundRequested: true, payment }`.
 
 Every mutation writes an **`audit_log`** row (actor from the session, `before`/`after`, action, target, ip).
 
+### Read / reporting cluster (Phase 3 — TRI-898)
+Low-risk read + settings endpoints backing the admin console's Settings, Customers, Audit-log and Dashboard
+screens (UI already built; these closed the 404s).
+
+**Settings** — `GET /settings` [settings.manage] → the singleton org config, including **both** USD→GHS
+rates, each labelled and separated so they can never be conflated:
+```jsonc
+{
+  "businessName", "address", "supportPhone", "supportEmail",
+  "currencyOfRecord": "USD", "displayCurrency": "GHS",
+  "usdToGhsDisplayRate": 15.6,          // customer-facing approximate (mig 007) — EDITABLE here (C19)
+  "cancellationPolicy", "paymentDeadlineDays": 5, "flags": {}, "updatedAt",
+  "fx": {
+    "displayRate": { "value": 15.6, "editable": true,  "purpose": "…customer-facing pricing hints…" },
+    "chargeRate":  { "value": 11.9481, "editable": false,   // live-converged rate that builds Paystack
+                     "source": "open.er-api.com", "establishedAt": "…", "note": "…",
+                     "purpose": "…driven by the daily FX cron (TRI-873); edit via FX automation, not here…" }
+  }
+}
+```
+`PATCH /settings` [settings.manage] — accepts the editable fields (`businessName`, `address`,
+`supportPhone`, `supportEmail`, `currencyOfRecord`, `displayCurrency`, `usdToGhsDisplayRate`,
+`cancellationPolicy`, `paymentDeadlineDays`, `flags`). The **charge rate is read-only**: any attempt to set
+`usdToGhsChargeRate` returns `400` — it is owned by the FX cron. Editing the display rate never touches the
+charge rate (resolves the FX-doc discrepancy, audit A14/C19). Writes a `settings.update` audit row.
+
+**Customers** [customers.view] (mig 004) — `GET /customers?q=&page=&pageSize=` → paginated `{ items, page,
+pageSize, total, totalPages }`, each `{ id, name, email, phone, country, userId, joined, bookings,
+totalSpend }` (booking count + paid lifetime spend derived at read time). `GET /customers/:id` adds a
+`bookings[]` array (`{ ref, status, payment, tour, tourId, date, travellers, total, currency, created }`);
+unknown id → `404`.
+
+**Audit-log** [settings.manage] (mig 006) — `GET /audit-log?action=&targetType=&targetId=&actorId=&page=&
+pageSize=` → read-only paginated feed for the AuditTimeline, newest first. Each entry `{ id, action,
+actorType, actorId, actor (resolved staff name/email or "System"), actorEmail, targetType, targetId,
+before, after, ip, createdAt }`.
+
+**Dashboard** [bookings.view] — `GET /dashboard?range=7d|30d|90d|ytd|all` (default `30d`) → summary
+aggregates: `bookings { total, byStatus }`, `revenue { usd, currency, ghs, ghsCurrency }` (GHS from paid
+payments' `ghs_amount_minor`, `null` pre-008), `departures { upcoming, next[] }` (next scheduled dated
+today+), `occupancy { seatsTotal, seatsReserved, spotsLeft, utilizationPct }` over upcoming departures.
+
 ### Bootstrap a staff user (no hardcoded secret)
 ```bash
 STAFF_EMAIL=you@tripkoach.com STAFF_PASSWORD='…' STAFF_NAME='You' STAFF_ROLE=admin \
