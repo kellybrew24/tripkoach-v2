@@ -11,6 +11,7 @@ import { seed } from '../src/seed.ts';
 import { buildServer } from '../src/server.ts';
 import type { PaystackClient, PaystackInitRequest } from '../src/paystack.ts';
 import { upsertStaff } from '../src/admin-seed.ts';
+import type { EmailTransport } from '../src/email.ts';
 
 let passed = 0;
 function ok(name: string, cond: boolean, detail = '') {
@@ -536,6 +537,86 @@ console.log('\n[fx: automated daily refresh + guards (TRI-873)]');
   // With no override, settings.usd_to_ghs_charge_rate drives charges and attributes to the FX provider.
   const setDetail = await createBookingService(db, cfg, paystackStub).resolveChargeRateDetail();
   ok('fx: settings-driven rate attributes to FX provider', setDetail.rate === 15.466 && setDetail.source === 'stub-provider', JSON.stringify(setDetail));
+}
+
+console.log('\n[email: transport + template renderer (TRI-880)]');
+{
+  const { renderTemplate, interpolate, listTemplates, isTemplate } = await import('../src/email-templates.ts');
+  const { sendEmail, isEmailEnabled } = await import('../src/email.ts');
+
+  // ── Template renderer ──
+  ok('email: smoke_test + booking_pending registered', isTemplate('smoke_test') && isTemplate('booking_pending') && listTemplates().length >= 2);
+  const r = renderTemplate('smoke_test', { ref: 'SMOKE-1', to: 'ops@tripkoach.com', env: 'test' });
+  ok('email: render returns {subject,html,text}', typeof r.subject === 'string' && typeof r.html === 'string' && typeof r.text === 'string');
+  ok('email: subject interpolated', r.subject === 'TripKoach email transport check — SMOKE-1', r.subject);
+  ok('email: html + text carry vars', r.html.includes('SMOKE-1') && r.text.includes('ops@tripkoach.com'));
+  // HTML-escaping: a value with markup is neutralised in the html body, raw in text.
+  const esc = renderTemplate('smoke_test', { ref: '<b>x</b>', to: 'a@b.c', env: 'test' });
+  ok('email: html-escapes interpolated values', esc.html.includes('&lt;b&gt;x&lt;/b&gt;') && !esc.html.includes('<b>x</b>'), 'html must escape');
+  ok('email: text leaves values raw', esc.text.includes('<b>x</b>'));
+  // Guards: missing var + unknown template both throw.
+  let threwMissing = false;
+  try { renderTemplate('smoke_test', { ref: 'x', to: 'a@b.c' }); } catch { threwMissing = true; }
+  ok('email: missing var throws', threwMissing);
+  let threwUnknown = false;
+  try { renderTemplate('does_not_exist', {}); } catch { threwUnknown = true; }
+  ok('email: unknown template throws', threwUnknown);
+  ok('email: interpolate is escape-aware', interpolate('{{x}}', { x: '<i>' }, { escape: true }) === '&lt;i&gt;');
+  // booking_pending renders with real vars (registered but not wired to any flow).
+  const bp = renderTemplate('booking_pending', {
+    firstName: 'Ama', travellers: 4, tourTitle: 'Accra City Tour',
+    departureLabel: 'Sat 22 Aug 2026', totalDisplay: '$300 USD', ref: 'TK-4821',
+    manageUrl: 'https://app.tripkoach.com/bookings/TK-4821',
+  });
+  ok('email: booking_pending renders full transactional template', bp.html.includes('TK-4821') && bp.html.includes('Accra City Tour') && bp.subject.includes('TK-4821'));
+
+  // ── Send path (stub transport — no network) ──
+  const sent: any[] = [];
+  const stubTransport: EmailTransport = {
+    name: 'stub',
+    async send(msg) { sent.push(msg); return { providerMessageId: `resend_${sent.length}` }; },
+  };
+  const failTransport: EmailTransport = {
+    name: 'stub-fail',
+    async send() { throw new Error('simulated provider 5xx'); },
+  };
+  const enabledCfg = { ...cfg, email: { ...cfg.email, apiKey: 're_test_stub', from: 'TripKoach <bookings@send.tripkoach.com>', dryRun: false } };
+  const disabledCfg = { ...cfg, email: { ...cfg.email, apiKey: undefined, from: 'TripKoach <bookings@send.tripkoach.com>', dryRun: false } };
+  const logCount = async (status: string) =>
+    Number((await db.query(`SELECT COUNT(*) n FROM email_message WHERE status=$1`, [status])).rows[0].n);
+
+  ok('email: transport enabled only with key+from', isEmailEnabled(enabledCfg.email) && !isEmailEnabled(disabledCfg.email));
+
+  // A. happy path → 'sent', provider id captured, send-log row written + linked to its cause.
+  const a = await sendEmail(db, enabledCfg, { to: 'ama@example.com', template: 'smoke_test',
+    vars: { ref: 'SMOKE-A', to: 'ama@example.com', env: 'test' }, relatedType: 'smoke', relatedId: 'SMOKE-A' },
+    { transport: stubTransport });
+  ok('email: send status sent + provider id', a.status === 'sent' && a.providerMessageId === 'resend_1', JSON.stringify(a));
+  ok('email: transport actually invoked with rendered html', sent.length === 1 && sent[0].to === 'ama@example.com' && sent[0].html.includes('SMOKE-A'));
+  const aRow = (await db.query(`SELECT * FROM email_message WHERE id=$1`, [a.id])).rows[0];
+  ok('email: send-log row sent, linked, sent_at set', aRow.status === 'sent' && aRow.provider_message_id === 'resend_1' && aRow.related_id === 'SMOKE-A' && aRow.sent_at != null, JSON.stringify(aRow));
+  ok('email: send-log captured template + from', aRow.template === 'smoke_test' && aRow.from_email.includes('send.tripkoach.com'));
+
+  // B. transport failure → 'failed', error recorded, NO throw.
+  const b2 = await sendEmail(db, enabledCfg, { to: 'x@y.z', template: 'smoke_test',
+    vars: { ref: 'SMOKE-B', to: 'x@y.z', env: 'test' } }, { transport: failTransport });
+  ok('email: failure returns failed (no throw) + error', b2.status === 'failed' && /simulated provider 5xx/.test(b2.error ?? ''), JSON.stringify(b2));
+  ok('email: failed row recorded', (await logCount('failed')) === 1);
+
+  // C. disabled transport → 'skipped', dispatch not attempted.
+  const before = sent.length;
+  const c = await sendEmail(db, disabledCfg, { to: 'x@y.z', template: 'smoke_test',
+    vars: { ref: 'SMOKE-C', to: 'x@y.z', env: 'test' } }, { transport: stubTransport });
+  ok('email: disabled transport → skipped, not dispatched', c.status === 'skipped' && sent.length === before, JSON.stringify(c));
+  ok('email: skipped row recorded', (await logCount('skipped')) === 1);
+
+  // D. bad input throws before writing a row (unknown template, missing recipient).
+  let threwSendUnknown = false, threwNoTo = false;
+  const rowsBefore = Number((await db.query(`SELECT COUNT(*) n FROM email_message`)).rows[0].n);
+  try { await sendEmail(db, enabledCfg, { to: 'a@b.c', template: 'nope', vars: {} }, { transport: stubTransport }); } catch { threwSendUnknown = true; }
+  try { await sendEmail(db, enabledCfg, { to: '', template: 'smoke_test', vars: { ref: 'x', to: 'a', env: 't' } }, { transport: stubTransport }); } catch { threwNoTo = true; }
+  ok('email: unknown template + missing recipient throw', threwSendUnknown && threwNoTo);
+  ok('email: no send-log rows written on bad input', Number((await db.query(`SELECT COUNT(*) n FROM email_message`)).rows[0].n) === rowsBefore);
 }
 
 await app.close();

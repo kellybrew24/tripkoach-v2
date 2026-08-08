@@ -27,6 +27,27 @@ export interface Config {
   /** Idle-timeout for admin sessions, minutes. The console signs staff out after inactivity (sliding). */
   adminSessionIdleMinutes: number;
   fx: FxConfig;
+  email: EmailConfig;
+}
+
+// Outbound email transport (TRI-880). The shared sendEmail() lib dispatches through this. Provider is
+// Resend (reusing the legacy stack's account/domain send.tripkoach.com — DKIM/SPF live). Secrets come
+// from the environment / secret store — never code.
+export interface EmailConfig {
+  /** Provider display name recorded in email_message.provider. */
+  providerName: string;
+  /** Provider API base; overridable so smoke/tests never hit the network. */
+  apiBase: string;
+  /** Resend API key. When unset (or dryRun), the transport is disabled → emails render + log 'skipped'. */
+  apiKey: string | undefined;
+  /** Default From header, e.g. 'TripKoach <bookings@send.tripkoach.com>'. Required to actually send. */
+  from: string | undefined;
+  /** Default Reply-To header (optional). */
+  replyTo: string | undefined;
+  /** Force-disable dispatch even when an API key is present (render + log 'skipped'). Ops safety valve. */
+  dryRun: boolean;
+  /** Network timeout for the provider call, ms. */
+  timeoutMs: number;
 }
 
 // Automated daily USD→GHS FX refresh (TRI-873). The cron fetches the mid-market rate, applies the
@@ -99,6 +120,16 @@ export function loadConfig(): Config {
       bufferPct: num(process.env.FX_BUFFER_PCT) ?? 1.75,
       maxDeviationPct: num(process.env.FX_MAX_DEVIATION_PCT) ?? 5,
       timeoutMs: num(process.env.FX_TIMEOUT_MS) ?? 10_000,
+    },
+    email: {
+      providerName: process.env.EMAIL_PROVIDER_NAME || 'resend',
+      apiBase: process.env.EMAIL_API_BASE || 'https://api.resend.com',
+      // Accept both the neutral name and the TRIPKOACH_* name DevOps injects from the secret file.
+      apiKey: process.env.RESEND_API_KEY || process.env.TRIPKOACH_RESEND_API_KEY,
+      from: process.env.EMAIL_FROM || process.env.TRIPKOACH_EMAIL_FROM,
+      replyTo: process.env.EMAIL_REPLY_TO || process.env.TRIPKOACH_EMAIL_REPLY_TO,
+      dryRun: process.env.EMAIL_DRY_RUN === 'true',
+      timeoutMs: num(process.env.EMAIL_TIMEOUT_MS) ?? 10_000,
     },
   };
 }
