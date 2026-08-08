@@ -42,6 +42,7 @@ await seed(db, undefined, (m) => console.log(`  seed · ${m}`));
 
 // Stub Paystack: no network. Records init calls; verify returns success unless overridden per reference.
 const initCalls: PaystackInitRequest[] = [];
+const refundCalls: { transaction: string; amountMinor?: number }[] = [];
 const verifyStatus = new Map<string, string>();   // reference → status ('success' by default)
 const paystackStub: PaystackClient = {
   async initialize(req) {
@@ -54,6 +55,14 @@ const paystackStub: PaystackClient = {
     const last = initCalls.find((c) => c.reference === reference);
     return { status, reference, amountMinor: last?.amountMinor ?? 0, currency: 'GHS',
              providerRef: `pstk_${reference}`, raw: { reference, status } };
+  },
+  async refund(req) {
+    refundCalls.push({ transaction: req.transaction, amountMinor: req.amountMinor });
+    const amountMinor = req.amountMinor ?? 20000; // full refund of the stub charge when unspecified
+    return { id: `rfnd_${req.transaction}`, status: 'processed', amountMinor,
+             currency: req.currency ?? 'GHS', transactionRef: req.transaction,
+             raw: { id: `rfnd_${req.transaction}`, status: 'processed', amount: amountMinor,
+                    transaction: { reference: req.transaction } } };
   },
 };
 
@@ -370,7 +379,7 @@ const COOKIE = cfg.adminCookieName;
 const call = async (method: 'GET' | 'POST' | 'PATCH' | 'DELETE', url: string, opts: { payload?: any; cookie?: string } = {}) => {
   const res = await app.inject({ method, url, payload: opts.payload, cookies: opts.cookie ? { [COOKIE]: opts.cookie } : undefined });
   let body: any; try { body = res.json(); } catch { body = res.body; }
-  return { status: res.statusCode, body, cookies: res.cookies as Array<{ name: string; value: string }> };
+  return { status: res.statusCode, body, raw: res.body as string, headers: res.headers as Record<string, string>, cookies: res.cookies as Array<{ name: string; value: string }> };
 };
 
 // Seed staff: an admin (full access) and a viewer (read-only → used for the 403 path).
@@ -459,7 +468,7 @@ console.log('\n[admin booking cancel releases seats]');
   ok('audit_log row written for booking.cancel', audits >= 1, `got ${audits}`);
 }
 
-console.log('\n[admin payments view + refund FLAG]');
+console.log('\n[admin payments view + REAL refund execution (TRI-897)]');
 {
   // Attach a paid payment to the cancelled smoke booking so the payment views have a row to return.
   const bk = (await db.query(`SELECT id FROM booking WHERE ref='TK-SMOKE1'`)).rows[0];
@@ -472,17 +481,87 @@ console.log('\n[admin payments view + refund FLAG]');
   const one = list.body.items.find((p: any) => p.ref === 'PAY-SMOKE1');
   ok('payment DTO exposes usd/fx/ghs fields (null pre-008)', one && 'usdAmount' in one && 'fxRate' in one && 'ghsAmount' in one, JSON.stringify(one));
 
-  // refund is FLAG-only: 200, intent recorded, status NOT flipped to refunded.
-  const refund = await call('POST', '/api/admin/payments/PAY-SMOKE1/refund', { cookie: adminCookie, payload: { reason: 'duplicate charge' } });
-  ok('admin refund-flag → 200 refundRequested', refund.status === 200 && refund.body.refundRequested === true, JSON.stringify(refund.body));
-  ok('refund flag records intent, keeps status=paid', refund.body.payment.status === 'paid' && refund.body.payment.refundIntent?.reason === 'duplicate charge', JSON.stringify(refund.body.payment));
-  const refundAudits = Number((await db.query(`SELECT COUNT(*)::int AS n FROM audit_log WHERE action='payment.refund_requested'`)).rows[0].n);
-  ok('audit_log row written for payment.refund_requested', refundAudits >= 1, `got ${refundAudits}`);
-
-  // wrong-permission: viewer lacks payments.refund → 403
+  // wrong-permission first (before the refund lands): viewer lacks payments.refund → 403
   const vlogin = await call('POST', '/api/admin/auth/login', { payload: { email: 'viewer@tripkoach.com', password: 'Just-Look!' } });
   const vcookie = vlogin.cookies.find((c) => c.name === COOKIE)?.value ?? '';
   ok('viewer refund → 403 (missing payments.refund)', (await call('POST', '/api/admin/payments/PAY-SMOKE1/refund', { cookie: vcookie, payload: {} })).status === 403);
+
+  // REAL refund: hits Paystack (stub), flips original to refunded, records a linked negative row, audits.
+  const refund = await call('POST', '/api/admin/payments/PAY-SMOKE1/refund', { cookie: adminCookie, payload: { reason: 'duplicate charge' } });
+  ok('admin refund → 200 refunded=true', refund.status === 200 && refund.body.refunded === true, JSON.stringify(refund.body));
+  ok('refund returned Paystack refund id + status', refund.body.refundId === 'rfnd_ps_ref_smoke' && refund.body.paystackStatus === 'processed', JSON.stringify(refund.body));
+  ok('paystack.refund called against provider_ref', refundCalls.some((c) => c.transaction === 'ps_ref_smoke'), JSON.stringify(refundCalls));
+  ok('original payment flipped to refunded', refund.body.payment.status === 'refunded', JSON.stringify(refund.body.payment));
+  const refundRow = (await db.query(`SELECT amount_minor, currency, status, refund_of, refund_provider_id FROM payment WHERE refund_provider_id='rfnd_ps_ref_smoke'`)).rows[0];
+  ok('linked negative refund row recorded', refundRow && Number(refundRow.amount_minor) === -20000 && refundRow.status === 'refunded' && refundRow.refund_of != null, JSON.stringify(refundRow));
+  ok('booking payment_state → refunded', (await db.query(`SELECT payment_state FROM booking WHERE ref='TK-SMOKE1'`)).rows[0].payment_state === 'refunded');
+  ok('audit_log payment.refunded written', Number((await db.query(`SELECT COUNT(*)::int AS n FROM audit_log WHERE action='payment.refunded'`)).rows[0].n) >= 1);
+
+  // Idempotent repeat: original is already refunded → 409, no second refund row.
+  const again = await call('POST', '/api/admin/payments/PAY-SMOKE1/refund', { cookie: adminCookie, payload: {} });
+  ok('repeat refund → 409 already refunded', again.status === 409, JSON.stringify(again.body));
+  ok('exactly one refund row for the txn', Number((await db.query(`SELECT COUNT(*)::int AS n FROM payment WHERE refund_provider_id='rfnd_ps_ref_smoke'`)).rows[0].n) === 1);
+}
+
+console.log('\n[admin manual mark-paid (offline settlement)]');
+{
+  const bk = (await db.query(`SELECT id FROM booking WHERE ref='TK-SMOKE1'`)).rows[0];
+  await db.query(
+    `INSERT INTO payment (ref, booking_id, amount_minor, currency, method, status)
+     VALUES ('PAY-MANUAL1', $1, 30000, 'USD', 'bank', 'pending')`, [bk.id]);
+  const mp = await call('POST', '/api/admin/payments/PAY-MANUAL1/mark-paid', { cookie: adminCookie, payload: { note: 'bank transfer #778' } });
+  ok('mark-paid → 200 markedPaid', mp.status === 200 && mp.body.markedPaid === true, JSON.stringify(mp.body));
+  ok('payment flipped to paid', mp.body.payment.status === 'paid', JSON.stringify(mp.body.payment));
+  ok('booking confirmed + paid', (await db.query(`SELECT status, payment_state FROM booking WHERE ref='TK-SMOKE1'`)).rows[0].payment_state === 'paid');
+  ok('audit_log payment.mark_paid written', Number((await db.query(`SELECT COUNT(*)::int AS n FROM audit_log WHERE action='payment.mark_paid'`)).rows[0].n) >= 1);
+  ok('mark-paid on already-paid → 409', (await call('POST', '/api/admin/payments/PAY-MANUAL1/mark-paid', { cookie: adminCookie, payload: {} })).status === 409);
+}
+
+console.log('\n[admin reconciliation export (payments + refunds)]');
+{
+  const rep = await call('GET', '/api/admin/reports/reconciliation', { cookie: adminCookie });
+  ok('reconciliation JSON 200 with items + summary', rep.status === 200 && Array.isArray(rep.body.items) && Array.isArray(rep.body.summary), JSON.stringify({ n: rep.body?.count }));
+  ok('report includes the refund row typed refund', rep.body.items.some((r: any) => r.type === 'refund' && Number(r.amount) === -200), JSON.stringify(rep.body.items.find((r: any) => r.type === 'refund')));
+  ok('report includes charge rows typed charge', rep.body.items.some((r: any) => r.type === 'charge'));
+  const usd = rep.body.summary.find((s: any) => s.currency === 'USD');
+  ok('USD summary net = gross − refunded', usd && Math.abs(usd.net - (usd.grossPaid + usd.refunded)) < 1e-9, JSON.stringify(usd));
+
+  const csv = await call('GET', '/api/admin/reports/reconciliation.csv', { cookie: adminCookie });
+  ok('reconciliation.csv 200', csv.status === 200);
+  ok('csv is text/csv attachment', String(csv.headers?.['content-type'] || '').includes('text/csv') && String(csv.headers?.['content-disposition'] || '').includes('attachment'), JSON.stringify(csv.headers?.['content-type']));
+  ok('csv has header + summary sections', typeof csv.raw === 'string' && csv.raw.includes('ref,bookingRef') && csv.raw.includes('summary_currency'), (csv.raw || '').slice(0, 60));
+
+  // finance report is guarded too: viewer (no payments.refund) → 403
+  const vlogin = await call('POST', '/api/admin/auth/login', { payload: { email: 'viewer@tripkoach.com', password: 'Just-Look!' } });
+  const vcookie = vlogin.cookies.find((c) => c.name === COOKIE)?.value ?? '';
+  ok('viewer reconciliation → 403', (await call('GET', '/api/admin/reports/reconciliation', { cookie: vcookie })).status === 403);
+}
+
+console.log('\n[webhook refund reconciliation (idempotent, dashboard-initiated)]');
+{
+  // A paid Paystack payment that a refund webhook then settles (no prior admin call → dashboard refund).
+  const dep = await makeDeparture(3);
+  const b = await bookOne(dep, 1);
+  const init = await post(`/api/v1/bookings/${b.body.ref}/payment/init`);
+  const payRef = init.body.reference;
+  const chargeEvt = { event: 'charge.success', data: { id: 990001, reference: payRef, status: 'success', amount: init.body.amount.ghsPesewas, currency: 'GHS' } };
+  const chargeRaw = JSON.stringify(chargeEvt);
+  await post('/api/v1/payments/webhook', chargeRaw, { 'content-type': 'application/json', 'x-paystack-signature': createHmac('sha512', WEBHOOK_SECRET).update(chargeRaw).digest('hex') });
+  ok('setup: booking paid before refund', (await get(`/api/v1/bookings/${b.body.ref}`)).body.paymentState === 'paid');
+
+  const refundEvt = { event: 'refund.processed', data: { id: 990002, status: 'processed', transaction_reference: payRef, amount: init.body.amount.ghsPesewas, currency: 'GHS' } };
+  const refundRaw = JSON.stringify(refundEvt);
+  const sig = createHmac('sha512', WEBHOOK_SECRET).update(refundRaw).digest('hex');
+  const r1 = await post('/api/v1/payments/webhook', refundRaw, { 'content-type': 'application/json', 'x-paystack-signature': sig });
+  ok('refund webhook → 200 received', r1.status === 200 && r1.body.received === true, JSON.stringify(r1.body));
+  ok('original payment refunded via webhook', (await db.query(`SELECT status FROM payment WHERE ref=$1`, [payRef])).rows[0].status === 'refunded');
+  ok('booking payment_state refunded via webhook', (await get(`/api/v1/bookings/${b.body.ref}`)).body.paymentState === 'refunded');
+  ok('linked refund row from webhook (keyed on refund id 990002)', Number((await db.query(`SELECT COUNT(*)::int AS n FROM payment WHERE refund_provider_id='990002'`)).rows[0].n) === 1);
+
+  // Idempotent replay: same event id → no-op, still exactly one refund row.
+  const r2 = await post('/api/v1/payments/webhook', refundRaw, { 'content-type': 'application/json', 'x-paystack-signature': sig });
+  ok('duplicate refund webhook → 200 no-op', r2.status === 200 && r2.body.received === true);
+  ok('still exactly one refund row after replay', Number((await db.query(`SELECT COUNT(*)::int AS n FROM payment WHERE refund_provider_id='990002'`)).rows[0].n) === 1);
 }
 
 // TRI-892 P2 · Reviews write: admin invite issuance (A5) → consumer tokenized redeem→submit (C15).

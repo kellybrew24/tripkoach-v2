@@ -15,9 +15,32 @@ import { createAdminService, AdminError, ValidationError } from './admin.ts';
 import type { NotificationService } from './notifications.ts';
 import { createReviewsService, ReviewError, type ReviewsService } from './reviews.ts';
 import { createStaffService } from './staff.ts';
+import { createPaystackClient, type PaystackClient } from './paystack.ts';
 
-export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifier?: NotificationService, reviews?: ReviewsService): void {
-  const svc = createAdminService(db, cfg, notifier);
+// RFC-4180-ish CSV cell: quote when the value contains a comma, quote, or newline; double embedded quotes.
+function csvCell(v: unknown): string {
+  const s = v == null ? '' : String(v);
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+// Serialise the reconciliation report to CSV: a header, one line per payment/refund row, then a blank
+// line and per-currency summary rows so finance can eyeball gross/refunded/net without re-summing.
+function reconciliationCsv(report: {
+  items: Array<Record<string, unknown>>;
+  summary: Array<Record<string, unknown>>;
+}): string {
+  const cols = ['ref', 'bookingRef', 'customer', 'type', 'method', 'status', 'currency', 'amount', 'usdAmount', 'fxRate', 'ghsAmount', 'providerRef', 'refundProviderId', 'created'];
+  const lines = [cols.join(',')];
+  for (const r of report.items) lines.push(cols.map((c) => csvCell(r[c])).join(','));
+  lines.push('');
+  lines.push(['summary_currency', 'grossPaid', 'refunded', 'net', 'charges', 'refunds'].join(','));
+  for (const s of report.summary) {
+    lines.push([s.currency, s.grossPaid, s.refunded, s.net, s.charges, s.refunds].map(csvCell).join(','));
+  }
+  return lines.join('\r\n') + '\r\n';
+}
+
+export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifier?: NotificationService, reviews?: ReviewsService, paystack?: PaystackClient): void {
+  const svc = createAdminService(db, cfg, paystack ?? createPaystackClient(cfg.paystack), notifier);
   const reviewSvc = reviews ?? createReviewsService(db, cfg);
   const staffSvc = createStaffService(db, cfg);
   const auth = makeRequireAuth(db, cfg);
@@ -163,13 +186,12 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
     admin.post('/bookings/:ref/confirm', perm('bookings.manage'), async (req) => svc.confirmBooking((req.params as any).ref, actorOf(req)));
     admin.post('/bookings/:ref/cancel', perm('bookings.cancel'), async (req) => svc.cancelBooking((req.params as any).ref, body(req), actorOf(req)));
 
-    // ── Payments (view + refund FLAG) ──────────────────────────────────────────
+    // ── Payments (view + REAL refund + manual settlement) ──────────────────────
     admin.get('/payments', perm('bookings.view'), async (req) => {
       const q = query(req);
       return svc.listPayments({ status: qStr(q, 'status'), q: qStr(q, 'q'), page: qNum(q, 'page'), pageSize: qNum(q, 'pageSize') });
     });
     admin.get('/payments/:ref', perm('bookings.view'), async (req) => svc.getPayment((req.params as any).ref));
-    admin.post('/payments/:ref/refund', perm('payments.refund'), async (req) => svc.flagRefund((req.params as any).ref, body(req), actorOf(req)));
 
     // ── Staff management (A4) — guarded by users.manage ─────────────────────────
     admin.get('/staff', perm('users.manage'), async () => ({ staff: await staffSvc.listStaff() }));
@@ -220,5 +242,22 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
     admin.post('/promos', perm('promos.manage'), async (req, reply) => reply.code(201).send(await svc.createPromo(body(req), actorOf(req))));
     admin.patch('/promos/:id', perm('promos.manage'), async (req) => svc.updatePromo((req.params as any).id, body(req), actorOf(req)));
     admin.delete('/promos/:id', perm('promos.manage'), async (req) => svc.deactivatePromo((req.params as any).id, actorOf(req)));
+    // TRI-897: real Paystack refund (was flag-only) + manual offline settlement. Both money-touching →
+    // guarded by payments.refund, both audit-logged inside the service.
+    admin.post('/payments/:ref/refund', perm('payments.refund'), async (req) => svc.executeRefund((req.params as any).ref, body(req), actorOf(req)));
+    admin.post('/payments/:ref/mark-paid', perm('payments.refund'), async (req) => svc.markPaid((req.params as any).ref, body(req), actorOf(req)));
+
+    // ── Reconciliation export (finance): payments + refunds over a date range, JSON or CSV ──
+    admin.get('/reports/reconciliation', perm('payments.refund'), async (req) => {
+      const q = query(req);
+      return svc.reconciliationReport({ from: qStr(q, 'from'), to: qStr(q, 'to') });
+    });
+    admin.get('/reports/reconciliation.csv', perm('payments.refund'), async (req, reply) => {
+      const q = query(req);
+      const report = await svc.reconciliationReport({ from: qStr(q, 'from'), to: qStr(q, 'to') });
+      reply.header('Content-Type', 'text/csv; charset=utf-8');
+      reply.header('Content-Disposition', `attachment; filename="reconciliation${report.from ? `-${report.from}` : ''}${report.to ? `_${report.to}` : ''}.csv"`);
+      return reconciliationCsv(report);
+    });
   }, { prefix: cfg.adminPrefix });
 }

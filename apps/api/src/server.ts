@@ -56,7 +56,9 @@ export function buildServer(db: Db, cfg: Config, paystack?: PaystackClient): Fas
   // Transactional booking-lifecycle emails (TRI-889 P5.2). Inert when the email transport is unconfigured
   // (no RESEND_API_KEY / EMAIL_FROM) — every send renders + logs 'skipped'. Never throws to its callers.
   const notifier = createNotificationService(db, cfg, { log: (m) => app.log.info(m) });
-  const bookings = createBookingService(db, cfg, paystack ?? createPaystackClient(cfg.paystack), notifier);
+  // Shared Paystack client — also handed to the admin realm so refund execution (TRI-897) can call it.
+  const paystackClient = paystack ?? createPaystackClient(cfg.paystack);
+  const bookings = createBookingService(db, cfg, paystackClient, notifier);
   const reviews = createReviewsService(db, cfg);
 
   // Caddy proxies /api/* verbatim (no strip, TRI-862), so the public health check is /api/health.
@@ -166,7 +168,8 @@ export function buildServer(db: Db, cfg: Config, paystack?: PaystackClient): Fas
   }, { prefix: cfg.apiPrefix });
 
   // ── Phase 3 admin write/auth realm (TRI-869), mounted under cfg.adminPrefix (default /api/admin) ──
-  registerAdmin(app, db, cfg, notifier, reviews);
+  // paystackClient is shared with the booking service so refund execution (TRI-897) is stubbable in tests.
+  registerAdmin(app, db, cfg, notifier, reviews, paystackClient);
 
   // ── P1 consumer accounts & auth realm (TRI-881), mounted under cfg.apiPrefix (default /api/v1).
   // Encapsulated plugin: adds /auth/* + /me[...]; the Phase-1 read paths above are untouched. ──

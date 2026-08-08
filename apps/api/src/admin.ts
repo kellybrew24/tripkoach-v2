@@ -2,8 +2,10 @@
 // permission (see routes), and writes an audit_log row. Money crosses the wire as whole-currency numbers
 // with an explicit currency (mirroring the Phase 1 read contract); it is stored as integer minor units.
 
+import { randomBytes } from 'node:crypto';
 import type { Db } from './db.ts';
 import type { Config } from './config.ts';
+import type { PaystackClient } from './paystack.ts';
 import { fromMinor, toMinor, slugify, formatReviewDate, initials } from './util.ts';
 import { audit } from './auth.ts';
 import type { NotificationService } from './notifications.ts';
@@ -117,6 +119,22 @@ function humanDate(iso: string): string {
   return `${WD[d.getUTCDay()]} ${d.getUTCDate()} ${MN[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
 }
 
+// ── Refund-ref codes + date-range bounds (TRI-897) ──────────────────────────
+const REF_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ'; // no 0/O/1/I (mirrors booking.ts)
+function refCode(n: number): string {
+  const b = randomBytes(n);
+  let s = '';
+  for (let i = 0; i < n; i++) s += REF_ALPHABET[b[i] % 32];
+  return s;
+}
+/** Inclusive day bounds for a reconciliation date range. Accepts YYYY-MM-DD (UTC day) or full ISO. */
+function dayStart(iso: string): string {
+  return /^\d{4}-\d{2}-\d{2}$/.test(iso) ? `${iso}T00:00:00.000Z` : new Date(iso).toISOString();
+}
+function dayEnd(iso: string): string {
+  return /^\d{4}-\d{2}-\d{2}$/.test(iso) ? `${iso}T23:59:59.999Z` : new Date(iso).toISOString();
+}
+
 // Whether Phase-2 (008) FX columns exist on `payment`. Detected once per Db; lets the admin payment views
 // surface usd/ghs/fx when 008 has landed, while this branch still migrates & smoke-tests standalone.
 const fxCache = new WeakMap<Db, Promise<boolean>>();
@@ -145,8 +163,22 @@ function hasFxProvenanceColumns(db: Db): Promise<boolean> {
   return p;
 }
 
+// Refund linkage columns (013, TRI-897). Guarded like the FX detectors so the admin service is safe
+// against a DB where 013 hasn't landed yet (refund execution then degrades to an error, never a crash).
+const refundColCache = new WeakMap<Db, Promise<boolean>>();
+function hasRefundColumns(db: Db): Promise<boolean> {
+  let p = refundColCache.get(db);
+  if (!p) {
+    p = db.query(
+      `SELECT 1 FROM information_schema.columns WHERE table_name = 'payment' AND column_name = 'refund_provider_id'`,
+    ).then((r) => r.rows.length > 0);
+    refundColCache.set(db, p);
+  }
+  return p;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-export function createAdminService(db: Db, _cfg: Config, notifier?: NotificationService) {
+export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient, notifier?: NotificationService) {
   // ── Regions ────────────────────────────────────────────────────────────────
   async function listRegions() {
     const { rows } = await db.query(
@@ -705,19 +737,164 @@ export function createAdminService(db: Db, _cfg: Config, notifier?: Notification
     return paymentDTO(rows[0]);
   }
 
-  // Refund is FLAG-only here: record the intent (in payment.raw + audit_log). Actual Paystack refund
-  // execution is a deliberate follow-up (see README) — status is NOT flipped to 'refunded'.
-  async function flagRefund(ref: string, body: unknown, actor: Actor) {
-    const reason = isPlainObject(body) ? optStr(body, 'reason', 1000) ?? null : null;
-    const cur = (await db.query(`SELECT id, ref, status, raw FROM payment WHERE ref=$1`, [ref])).rows[0];
+  // ── Refund EXECUTION (TRI-897): real Paystack refund → linked negative row + status flip + audit ──
+  // Money-touching. Idempotent by construction: (a) the original is flipped to 'refunded' so a repeat
+  // call 409s, and (b) the refund row is keyed on the Paystack refund id via a partial-unique index, so
+  // an admin retry or a racing refund webhook records the refund at most once.
+  async function executeRefund(ref: string, body: unknown, actor: Actor) {
+    if (!(await hasRefundColumns(db))) {
+      throw new AdminError('not_ready', 'refund execution requires migration 013', 503);
+    }
+    const b = isPlainObject(body) ? body : {};
+    const reason = optStr(b, 'reason', 1000) ?? null;
+    const partial = optMoney(b, 'amount'); // whole units of the CHARGED currency (GHS); omit → full refund
+
+    const cur = (await db.query(
+      `SELECT id, ref, booking_id, amount_minor, currency, method, status, provider_ref, ghs_amount_minor
+         FROM payment WHERE ref=$1`, [ref])).rows[0];
     if (!cur) throw notFound('payment');
     if (cur.status === 'refunded') throw conflict('payment is already refunded');
-    const intent = { requestedBy: actor.id, reason, at: new Date().toISOString(), status: 'requested' };
-    await db.query(
-      `UPDATE payment SET raw = COALESCE(raw, '{}'::jsonb) || jsonb_build_object('refund_intent', $1::jsonb) WHERE id=$2`,
-      [JSON.stringify(intent), cur.id]);
-    await audit(db, { actorId: actor.id, action: 'payment.refund_requested', targetType: 'payment', targetId: ref, before: { status: cur.status }, after: { refundIntent: intent }, ip: actor.ip });
-    return { refundRequested: true, payment: await getPayment(ref) };
+    if (cur.status !== 'paid') throw conflict(`only paid payments can be refunded (status is ${cur.status})`);
+
+    // Refund in the charged currency (GHS for a Paystack card/MoMo txn); omitting the amount asks Paystack
+    // for a full refund of the original transaction, which sidesteps any USD-of-record vs GHS mismatch.
+    const chargedCurrency = cur.currency;
+    const amountMinor = partial != null ? toMinor(partial) : undefined;
+
+    let result;
+    try {
+      result = await paystack.refund({
+        transaction: cur.provider_ref || cur.ref, // Paystack txn id if we have it, else our reference
+        amountMinor,
+        currency: chargedCurrency,
+        merchantNote: reason ?? `Refund of ${cur.ref} by admin`,
+      });
+    } catch (e) {
+      await audit(db, { actorId: actor.id, action: 'payment.refund_failed', targetType: 'payment', targetId: ref, before: { status: cur.status }, after: { error: (e as Error).message, amount: partial ?? null }, ip: actor.ip });
+      const status = (e as any)?.status ?? 502;
+      throw new AdminError('paystack_error', (e as Error).message, status);
+    }
+
+    const refundedMinor = result.amountMinor || amountMinor || Number(cur.ghs_amount_minor ?? cur.amount_minor);
+    // A Paystack refund is 'processed' immediately in some cases, 'pending' in others (settled async via
+    // the refund.processed webhook). Either way the money is committed to being returned, so we flip the
+    // original to 'refunded' now; the webhook then reconciles idempotently (no double row, no double flip).
+    await db.tx(async (q) => {
+      await insertUniquePayRef(q, 'RFN', async (rfnRef) => {
+        await q.query(
+          `INSERT INTO payment (ref, booking_id, amount_minor, currency, method, status,
+                                provider_ref, raw, refund_of, refund_provider_id)
+           VALUES ($1,$2,$3,$4,$5,'refunded',$6,$7,$8,$9)
+           ON CONFLICT (refund_provider_id) WHERE refund_provider_id IS NOT NULL DO NOTHING`,
+          [rfnRef, cur.booking_id, -Math.abs(refundedMinor), chargedCurrency, cur.method,
+           result.id, JSON.stringify({ refund: result.raw, reason, paystackStatus: result.status }),
+           cur.id, result.id]);
+      });
+      await q.query(`UPDATE payment SET status='refunded' WHERE id=$1`, [cur.id]);
+      await q.query(
+        `UPDATE booking SET payment_state='refunded', updated_at=now() WHERE id=$1`, [cur.booking_id]);
+    });
+
+    await audit(db, {
+      actorId: actor.id, action: 'payment.refunded', targetType: 'payment', targetId: ref,
+      before: { status: 'paid' },
+      after: { status: 'refunded', refundId: result.id, paystackStatus: result.status, amountMinor: -Math.abs(refundedMinor), currency: chargedCurrency, partial: partial ?? null, reason },
+      ip: actor.ip,
+    });
+    return { refunded: true, refundId: result.id, paystackStatus: result.status, payment: await getPayment(ref) };
+  }
+
+  // ── Manual mark-paid (TRI-897): record an offline/bank settlement against a payment row ──
+  // For payments taken outside Paystack (bank transfer, cash). Flips the payment + booking to paid and
+  // confirms the booking, exactly like a Paystack success — but the actor + note are audited.
+  async function markPaid(ref: string, body: unknown, actor: Actor) {
+    const b = isPlainObject(body) ? body : {};
+    const note = optStr(b, 'note', 1000) ?? null;
+    const cur = (await db.query(
+      `SELECT id, ref, booking_id, status FROM payment WHERE ref=$1`, [ref])).rows[0];
+    if (!cur) throw notFound('payment');
+    if (cur.status === 'paid') throw conflict('payment is already paid');
+    if (cur.status === 'refunded') throw conflict('payment is refunded and cannot be marked paid');
+
+    await db.tx(async (q) => {
+      await q.query(
+        `UPDATE payment SET status='paid',
+                raw = COALESCE(raw,'{}'::jsonb) || jsonb_build_object('manual_settlement', $2::jsonb)
+          WHERE id=$1`,
+        [cur.id, JSON.stringify({ by: actor.id, note, at: new Date().toISOString() })]);
+      await q.query(
+        `UPDATE booking SET status='confirmed', payment_state='paid', updated_at=now() WHERE id=$1`,
+        [cur.booking_id]);
+    });
+    await audit(db, {
+      actorId: actor.id, action: 'payment.mark_paid', targetType: 'payment', targetId: ref,
+      before: { status: cur.status }, after: { status: 'paid', note }, ip: actor.ip,
+    });
+    return { markedPaid: true, payment: await getPayment(ref) };
+  }
+
+  // ── Reconciliation export (TRI-897): payments + refunds over a date range for finance ──
+  // Rows are charges (positive) and refund rows (negative). Returns structured rows + summary totals;
+  // the route serialises to CSV. Amounts are whole-currency numbers (charges USD-of-record; refunds are
+  // in the charged currency they were issued in) — `currency` on each row disambiguates.
+  async function reconciliationReport(opts: { from?: string; to?: string } = {}) {
+    const fxCols = await paymentSelect();
+    const hasRefund = await hasRefundColumns(db);
+    const refundCols = hasRefund ? 'p.refund_of, p.refund_provider_id'
+      : 'NULL::uuid AS refund_of, NULL::text AS refund_provider_id';
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (opts.from) { params.push(dayStart(opts.from)); where.push(`p.created_at >= $${params.length}`); }
+    if (opts.to) { params.push(dayEnd(opts.to)); where.push(`p.created_at <= $${params.length}`); }
+    const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
+    const { rows } = await db.query(
+      `SELECT p.ref, p.amount_minor, p.currency, p.method, p.status, p.provider_ref, p.raw, p.created_at,
+              ${fxCols}, ${refundCols}, b.ref AS booking_ref, c.name AS customer_name
+         FROM payment p JOIN booking b ON b.id=p.booking_id LEFT JOIN customer c ON c.id=b.customer_id
+        ${whereSql} ORDER BY p.created_at ASC`, params);
+
+    const items = rows.map((r) => {
+      const isRefund = r.refund_of != null || r.status === 'refunded' && Number(r.amount_minor) < 0;
+      return {
+        ref: r.ref, bookingRef: r.booking_ref, customer: r.customer_name ?? null,
+        type: isRefund ? 'refund' : 'charge', method: r.method, status: r.status,
+        currency: r.currency, amount: fromMinor(r.amount_minor),
+        usdAmount: r.usd_amount_minor == null ? null : fromMinor(r.usd_amount_minor),
+        fxRate: r.fx_rate_used == null ? null : Number(r.fx_rate_used),
+        ghsAmount: r.ghs_amount_minor == null ? null : Number(r.ghs_amount_minor) / 100,
+        providerRef: r.provider_ref ?? null,
+        refundProviderId: r.refund_provider_id ?? null,
+        created: r.created_at,
+      };
+    });
+    // Summaries by currency (minor units → whole units), plus counts. Refund rows carry negative amounts.
+    // Gross counts positive captured rows — 'paid' AND 'refunded' (a fully-refunded charge flips to
+    // 'refunded' but the money was still captured); the linked negative refund row nets it back out.
+    const byCurrency: Record<string, { grossMinor: number; refundMinor: number; charges: number; refunds: number }> = {};
+    for (const r of rows) {
+      const cur = byCurrency[r.currency] ?? (byCurrency[r.currency] = { grossMinor: 0, refundMinor: 0, charges: 0, refunds: 0 });
+      const amt = Number(r.amount_minor);
+      if (amt < 0) { cur.refundMinor += amt; cur.refunds += 1; }
+      else if (r.status === 'paid' || r.status === 'refunded') { cur.grossMinor += amt; cur.charges += 1; }
+    }
+    const summary = Object.entries(byCurrency).map(([currency, s]) => ({
+      currency, grossPaid: fromMinor(s.grossMinor), refunded: fromMinor(s.refundMinor),
+      net: fromMinor(s.grossMinor + s.refundMinor), charges: s.charges, refunds: s.refunds,
+    }));
+    return { from: opts.from ?? null, to: opts.to ?? null, count: items.length, items, summary };
+  }
+
+  // Unique-ref insert helper for admin-side inserts (refund rows). Retries on a UNIQUE ref collision.
+  async function insertUniquePayRef(q: Db, prefix: string, run: (ref: string) => Promise<void>): Promise<void> {
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const ref = `${prefix}-${refCode(6)}`;
+      try { await run(ref); return; }
+      catch (e: any) {
+        if (/unique|duplicate/i.test(String(e?.message ?? e))) continue;
+        throw e;
+      }
+    }
+    throw new AdminError('ref_collision', 'Could not allocate a unique reference', 500);
   }
 
   // ── Reviews (moderation) ─────────────────────────────────────────────────
@@ -1046,7 +1223,7 @@ export function createAdminService(db: Db, _cfg: Config, notifier?: Notification
     listTours, getTour, createTour, updateTour, setTourPublished, deleteTour,
     listDepartures, getDeparture, createDeparture, updateDeparture, cancelDeparture,
     listBookings, getBooking, confirmBooking, cancelBooking,
-    listPayments, getPayment, flagRefund,
+    listPayments, getPayment, executeRefund, markPaid, reconciliationReport,
     listReviews, moderateReview, replyReview,
     listGuides, getGuide, createGuide, updateGuide, deleteGuide,
     listPromos, getPromo, createPromo, updatePromo, deactivatePromo,
