@@ -11,6 +11,7 @@ import { createPaystackClient, type PaystackClient } from './paystack.ts';
 import { registerAdmin } from './admin-routes.ts';
 import { createNotificationService } from './notifications.ts';
 import { registerConsumer } from './consumer-routes.ts';
+import { createReviewsService, ReviewError } from './reviews.ts';
 
 /** Normalise a query value that may be absent, a single string ("a,b"), or an array into string[]. */
 function asArray(v: unknown): string[] | undefined {
@@ -24,10 +25,13 @@ function notFound(reply: any, message: string) {
   return reply.code(404).send({ error: { code: 'not_found', message } });
 }
 
-/** Map a thrown BookingError to the shared {error:{code,message}} envelope + its HTTP status. */
+/** Map a thrown BookingError/ReviewError to the shared {error:{code,message}} envelope + its HTTP status. */
 function sendBookingError(reply: any, err: unknown): any {
   if (err instanceof BookingError) {
     return reply.code(err.httpStatus).send({ error: { code: err.code, message: err.message } });
+  }
+  if (err instanceof ReviewError) {
+    return reply.code(err.httpStatus).send({ error: { code: err.code, message: err.message, field: err.field } });
   }
   reply.log?.error?.(err);
   return reply.code(500).send({ error: { code: 'internal', message: 'Internal error' } });
@@ -53,6 +57,7 @@ export function buildServer(db: Db, cfg: Config, paystack?: PaystackClient): Fas
   // (no RESEND_API_KEY / EMAIL_FROM) — every send renders + logs 'skipped'. Never throws to its callers.
   const notifier = createNotificationService(db, cfg, { log: (m) => app.log.info(m) });
   const bookings = createBookingService(db, cfg, paystack ?? createPaystackClient(cfg.paystack), notifier);
+  const reviews = createReviewsService(db, cfg);
 
   // Caddy proxies /api/* verbatim (no strip, TRI-862), so the public health check is /api/health.
   // We also expose /health for direct localhost/systemd checks. Both return the same payload.
@@ -95,6 +100,22 @@ export function buildServer(db: Db, cfg: Config, paystack?: PaystackClient): Fas
       const { slug } = req.params as { slug: string };
       const out = await getReviews(db, slug);
       return out ?? notFound(reply, `tour "${slug}" not found`);
+    });
+
+    // ── TRI-892 · Tokenized review redeem (consumer). Context for a valid unredeemed invite token,
+    //    then a one-time submit that creates a verified pending review and burns the token. ──
+    api.get('/reviews/redeem/:token', async (req, reply) => {
+      try {
+        const { token } = req.params as { token: string };
+        return await reviews.getRedeemContext(token);
+      } catch (e) { return sendBookingError(reply, e); }
+    });
+
+    api.post('/reviews/redeem/:token', async (req, reply) => {
+      try {
+        const { token } = req.params as { token: string };
+        return await reviews.submitReview(token, req.body);
+      } catch (e) { return sendBookingError(reply, e); }
     });
 
     // ── Phase 2 write paths (TRI-866): booking + Paystack payments ──
@@ -145,7 +166,7 @@ export function buildServer(db: Db, cfg: Config, paystack?: PaystackClient): Fas
   }, { prefix: cfg.apiPrefix });
 
   // ── Phase 3 admin write/auth realm (TRI-869), mounted under cfg.adminPrefix (default /api/admin) ──
-  registerAdmin(app, db, cfg, notifier);
+  registerAdmin(app, db, cfg, notifier, reviews);
 
   // ── P1 consumer accounts & auth realm (TRI-881), mounted under cfg.apiPrefix (default /api/v1).
   // Encapsulated plugin: adds /auth/* + /me[...]; the Phase-1 read paths above are untouched. ──

@@ -11,6 +11,9 @@ export interface Config {
   pgliteData: string;
   env: string;
   apiPrefix: string;
+  /** Public base URL of the consumer web SPA (no trailing slash). Used to build absolute links in
+   *  outbound email (e.g. the tokenized review-invite URL). Same-origin deploy → the SPA's own origin. */
+  webUrl: string;
   /** Run migrations automatically on boot (handy in dev; DevOps may run them as a deploy step in prod). */
   autoMigrate: boolean;
   /** Online seat-hold window in minutes (booking.reservation_expires_at = now() + this). */
@@ -125,6 +128,9 @@ export function loadConfig(): Config {
     pgliteData: process.env.PGLITE_DATA || 'memory://',
     env: process.env.NODE_ENV || 'development',
     apiPrefix: process.env.API_PREFIX || '/api/v1',
+    // Consumer SPA origin for absolute email links. Prod injects WEB_URL (e.g. https://app.tripkoach.com);
+    // strip any trailing slash so callers can concatenate paths safely.
+    webUrl: (process.env.WEB_URL || process.env.PUBLIC_WEB_URL || 'https://app.tripkoach.com').replace(/\/+$/, ''),
     autoMigrate: process.env.AUTO_MIGRATE ? process.env.AUTO_MIGRATE === 'true' : dbDriver === 'pglite',
     reservationHoldMinutes: num(process.env.RESERVATION_HOLD_MINUTES) ?? 30,
     paystack: {

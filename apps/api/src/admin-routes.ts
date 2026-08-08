@@ -12,9 +12,11 @@ import {
 } from './auth.ts';
 import { createAdminService, AdminError, ValidationError } from './admin.ts';
 import type { NotificationService } from './notifications.ts';
+import { createReviewsService, ReviewError, type ReviewsService } from './reviews.ts';
 
-export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifier?: NotificationService): void {
+export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifier?: NotificationService, reviews?: ReviewsService): void {
   const svc = createAdminService(db, cfg, notifier);
+  const reviewSvc = reviews ?? createReviewsService(db, cfg);
   const auth = makeRequireAuth(db, cfg);
   const perm = (p: Permission) => ({ preHandler: makeRequirePermission(db, cfg, p) });
   const actorOf = (req: FastifyRequest) => ({ id: req.staff!.id, ip: req.ip ?? null });
@@ -31,6 +33,9 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
       }
       if (err instanceof AdminError) {
         return reply.code(err.httpStatus).send({ error: { code: err.code, message: err.message } });
+      }
+      if (err instanceof ReviewError) {
+        return reply.code(err.httpStatus).send({ error: { code: err.code, message: err.message, field: err.field } });
       }
       if ((err as any).statusCode === 400) {
         return reply.code(400).send({ error: { code: 'bad_request', message: err.message } });
@@ -103,6 +108,10 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
     admin.post('/departures', perm('tours.edit'), async (req, reply) => reply.code(201).send(await svc.createDeparture(body(req), actorOf(req))));
     admin.patch('/departures/:id', perm('tours.edit'), async (req) => svc.updateDeparture((req.params as any).id, body(req), actorOf(req)));
     admin.post('/departures/:id/cancel', perm('tours.edit'), async (req) => svc.cancelDeparture((req.params as any).id, body(req), actorOf(req)));
+    // TRI-892 · End a departure & request reviews: mints a one-time review invite per eligible booking
+    // and emails each traveller a tokenized review link. Idempotent (no double-issue). Guarded by tours.edit
+    // like the other departure actions.
+    admin.post('/departures/:id/request-reviews', perm('tours.edit'), async (req) => reviewSvc.requestReviews((req.params as any).id, actorOf(req)));
 
     // ── Bookings (view + transitions) ──────────────────────────────────────────
     admin.get('/bookings', perm('bookings.view'), async (req) => {
