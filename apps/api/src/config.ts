@@ -28,6 +28,17 @@ export interface Config {
   adminSessionIdleMinutes: number;
   fx: FxConfig;
   email: EmailConfig;
+  notify: NotifyConfig;
+}
+
+// Transactional notifications (TRI-889). Governs the booking-lifecycle emails + the departure-reminder
+// cron. Dispatch itself flows through the shared email transport (EmailConfig) — when that is disabled
+// (no RESEND_API_KEY / EMAIL_FROM) every notification renders + logs 'skipped' and nothing is sent.
+export interface NotifyConfig {
+  /** Public web origin used to build booking-management links in emails (no trailing slash). */
+  webBaseUrl: string;
+  /** Departure-reminder lead time: email travellers whose paid booking departs this many days out. */
+  reminderDaysBefore: number;
 }
 
 // Outbound email transport (TRI-880). The shared sendEmail() lib dispatches through this. Provider is
@@ -130,6 +141,11 @@ export function loadConfig(): Config {
       replyTo: process.env.EMAIL_REPLY_TO || process.env.TRIPKOACH_EMAIL_REPLY_TO,
       dryRun: process.env.EMAIL_DRY_RUN === 'true',
       timeoutMs: num(process.env.EMAIL_TIMEOUT_MS) ?? 10_000,
+    },
+    notify: {
+      // Strip any trailing slash so `${webBaseUrl}/bookings/REF` never doubles up.
+      webBaseUrl: (process.env.WEB_BASE_URL || process.env.TRIPKOACH_WEB_BASE_URL || 'https://app.tripkoach.com').replace(/\/+$/, ''),
+      reminderDaysBefore: num(process.env.REMINDER_DAYS_BEFORE) ?? 3,
     },
   };
 }

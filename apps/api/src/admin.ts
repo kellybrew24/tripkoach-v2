@@ -6,6 +6,7 @@ import type { Db } from './db.ts';
 import type { Config } from './config.ts';
 import { fromMinor, toMinor, slugify } from './util.ts';
 import { audit } from './auth.ts';
+import type { NotificationService } from './notifications.ts';
 
 export interface Actor { id: string; ip: string | null }
 
@@ -145,7 +146,7 @@ function hasFxProvenanceColumns(db: Db): Promise<boolean> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-export function createAdminService(db: Db, _cfg: Config) {
+export function createAdminService(db: Db, _cfg: Config, notifier?: NotificationService) {
   // ── Regions ────────────────────────────────────────────────────────────────
   async function listRegions() {
     const { rows } = await db.query(
@@ -617,6 +618,8 @@ export function createAdminService(db: Db, _cfg: Config) {
       return { before: cur, seatsReleased: held ? Number(cur.party_size) : 0 };
     });
     await audit(db, { actorId: actor.id, action: 'booking.cancel', targetType: 'booking', targetId: ref, before: { status: result.before.status }, after: { status: 'cancelled', cancel_reason: reason, seatsReleased: result.seatsReleased }, ip: actor.ip });
+    // Notify the traveller their booking was cancelled (fire-and-forget; never throws). TRI-889 P5.2.
+    if (notifier) await notifier.bookingCancelled(ref, { reason });
     return { ...(await getBooking(ref)), seatsReleased: result.seatsReleased };
   }
 

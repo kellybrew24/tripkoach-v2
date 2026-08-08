@@ -246,6 +246,53 @@ The provider tolerates the exchangerate-api open shape (`{ result:"success", rat
 
 ---
 
+## Booking-lifecycle notifications + departure-reminder cron (P5.2 — TRI-889)
+
+Four transactional emails ride the P0 transport (TRI-880 — `src/email.ts` + templates in
+`src/email-templates.ts`, each `sendEmail()` logs a row in `email_message`). All are wired in
+`src/notifications.ts`; when the transport is disabled (no `RESEND_API_KEY` / `EMAIL_FROM`) they render +
+log `skipped` and dispatch nothing (inert on dev/staging). Every notify call is **fire-and-forget** — it
+never throws, so a booking/payment is never rolled back by an email fault.
+
+| Variant | Template | Fires on |
+| --- | --- | --- |
+| booking-confirmed | `booking_confirmed` | payment success — `markPaid` (webhook `charge.success` **or** server-side verify), once, on the fresh transition |
+| booking-cancelled | `booking_cancelled` | admin `POST /api/admin/bookings/:ref/cancel` |
+| payment-failed | `payment_failed` | a failed/abandoned charge — verify returning `failed|abandoned|reversed`, or a `charge.failed`/`charge.abandoned` webhook (once, on the transition) |
+| departure-reminder | `departure_reminder` | the daily reminder cron (below) |
+
+**Recipient** (`notification_preference`, migration 004): where the booking is linked to an **account**
+(`booking.user_id`), send to the account email and honour the matching `notification_preference` row
+(channel `email`) — suppress only on an explicit `enabled=false`. Absence of a row = **default send**
+(consumer toggles C17 seed rows under P1; we don't block on them). **Guest** bookings fall back to the
+lead traveller's contact email; no email → not sent.
+
+### Departure-reminder cron
+
+```sh
+# from apps/api, DATABASE_URL in the environment (systemd EnvironmentFile / cron env):
+npm run send-reminders
+#   ≡ node --experimental-strip-types src/send-reminders.ts
+```
+
+Run **once daily** (alongside the FX + expire-holds crons). Emails every **paid** (`confirmed`/`paid`),
+still-`scheduled` booking whose `departure.depart_on` is `REMINDER_DAYS_BEFORE` days out (default 3).
+Idempotent within a day: skips any booking already logged a `sent` `departure_reminder` today, so a second
+run the same day is a no-op. Exit code `1` iff a send hit a transport/provider **failure** (deliverability
+alert); `0` when everything dispatched or was `skipped`.
+
+| Env | Default | Purpose |
+| --- | --- | --- |
+| `REMINDER_DAYS_BEFORE` | `3` | reminder lead time (days out) |
+| `WEB_BASE_URL` | `https://app.tripkoach.com` | origin for the "view booking" links in emails (no trailing slash; `TRIPKOACH_WEB_BASE_URL` also accepted) |
+
+> **Note:** in a *fully* unconfigured environment (both `RESEND_API_KEY` **and** `EMAIL_FROM` unset) the
+> shared `sendEmail()` treats a missing From as caller error and throws; the notifier swallows it, so the
+> flow stays inert but writes **no** send-log row. Set `EMAIL_FROM` (even without an API key) to get a
+> `skipped` audit trail before the key is wired.
+
+---
+
 ## Admin realm (Phase 3 — TRI-869)
 
 Write/auth realm mounted at same-origin **`/api/admin`** (Caddy proxies `/api/*` verbatim →

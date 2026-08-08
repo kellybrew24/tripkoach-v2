@@ -9,6 +9,7 @@ import { listRegions, listTours, getTourBySlug, getAvailability, getReviews } fr
 import { createBookingService, BookingError, type CreateBookingInput } from './booking.ts';
 import { createPaystackClient, type PaystackClient } from './paystack.ts';
 import { registerAdmin } from './admin-routes.ts';
+import { createNotificationService } from './notifications.ts';
 
 /** Normalise a query value that may be absent, a single string ("a,b"), or an array into string[]. */
 function asArray(v: unknown): string[] | undefined {
@@ -47,7 +48,10 @@ export function buildServer(db: Db, cfg: Config, paystack?: PaystackClient): Fas
   // Read-only for consumer routes → /api/v1 responses are unchanged.
   app.register(cookie);
 
-  const bookings = createBookingService(db, cfg, paystack ?? createPaystackClient(cfg.paystack));
+  // Transactional booking-lifecycle emails (TRI-889 P5.2). Inert when the email transport is unconfigured
+  // (no RESEND_API_KEY / EMAIL_FROM) — every send renders + logs 'skipped'. Never throws to its callers.
+  const notifier = createNotificationService(db, cfg, { log: (m) => app.log.info(m) });
+  const bookings = createBookingService(db, cfg, paystack ?? createPaystackClient(cfg.paystack), notifier);
 
   // Caddy proxies /api/* verbatim (no strip, TRI-862), so the public health check is /api/health.
   // We also expose /health for direct localhost/systemd checks. Both return the same payload.
@@ -140,7 +144,7 @@ export function buildServer(db: Db, cfg: Config, paystack?: PaystackClient): Fas
   }, { prefix: cfg.apiPrefix });
 
   // ── Phase 3 admin write/auth realm (TRI-869), mounted under cfg.adminPrefix (default /api/admin) ──
-  registerAdmin(app, db, cfg);
+  registerAdmin(app, db, cfg, notifier);
 
   return app;
 }

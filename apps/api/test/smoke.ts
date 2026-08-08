@@ -29,6 +29,9 @@ const cfg = {
     ...base.paystack, secretKey: 'sk_test_stub', publicKey: 'pk_test_stub',
     webhookSecret: WEBHOOK_SECRET, chargeRateOverride: undefined,
   },
+  // A From is set but no RESEND_API_KEY → the transport stays DISABLED (skipped, no network), while the
+  // wired notification flows (TRI-889) can still write their 'skipped' send-log rows for assertions.
+  email: { ...base.email, from: 'TripKoach <bookings@send.tripkoach.com>', apiKey: undefined },
 };
 const db = await createDb(cfg);
 const applied = await migrate(db);
@@ -309,6 +312,11 @@ console.log('\n[payment: webhook signature + idempotency + confirm]');
   const conf = await get(`/api/v1/bookings/${paidBookingRef}`);
   ok('booking confirmed / paid after webhook', conf.body.status === 'confirmed' && conf.body.paymentState === 'paid', JSON.stringify({ s: conf.body.status, p: conf.body.paymentState }));
   ok('payment row paid + provider_ref persisted', (await db.query(`SELECT status, provider_ref FROM payment WHERE ref = $1`, [paidPaymentRef])).rows[0].status === 'paid');
+  // TRI-889: the wired markPaid path fired a booking-confirmed notification. The server's default email
+  // transport is unconfigured in smoke (no RESEND_API_KEY) → the send-log row lands 'skipped', proving the
+  // flow is wired end-to-end without sending real mail.
+  const confMail = (await db.query(`SELECT status, related_type FROM email_message WHERE template='booking_confirmed' AND related_id=$1`, [paidBookingRef])).rows[0];
+  ok('webhook confirm fired booking_confirmed notification (skipped, transport off)', confMail && confMail.status === 'skipped' && confMail.related_type === 'booking', JSON.stringify(confMail));
   const seatsAfter = await db.query('SELECT seats_reserved FROM departure d JOIN booking b ON b.departure_id = d.id WHERE b.ref = $1', [paidBookingRef]);
   ok('seat hold retained on confirm (reserved+confirmed hold)', Number(seatsAfter.rows[0].seats_reserved) === 2, JSON.stringify(seatsAfter.rows[0]));
 
@@ -582,8 +590,9 @@ console.log('\n[email: transport + template renderer (TRI-880)]');
   };
   const enabledCfg = { ...cfg, email: { ...cfg.email, apiKey: 're_test_stub', from: 'TripKoach <bookings@send.tripkoach.com>', dryRun: false } };
   const disabledCfg = { ...cfg, email: { ...cfg.email, apiKey: undefined, from: 'TripKoach <bookings@send.tripkoach.com>', dryRun: false } };
+  // Scope to the smoke_test template so booking-lifecycle send-log rows (TRI-889) don't perturb the count.
   const logCount = async (status: string) =>
-    Number((await db.query(`SELECT COUNT(*) n FROM email_message WHERE status=$1`, [status])).rows[0].n);
+    Number((await db.query(`SELECT COUNT(*) n FROM email_message WHERE status=$1 AND template='smoke_test'`, [status])).rows[0].n);
 
   ok('email: transport enabled only with key+from', isEmailEnabled(enabledCfg.email) && !isEmailEnabled(disabledCfg.email));
 
@@ -617,6 +626,96 @@ console.log('\n[email: transport + template renderer (TRI-880)]');
   try { await sendEmail(db, enabledCfg, { to: '', template: 'smoke_test', vars: { ref: 'x', to: 'a', env: 't' } }, { transport: stubTransport }); } catch { threwNoTo = true; }
   ok('email: unknown template + missing recipient throw', threwSendUnknown && threwNoTo);
   ok('email: no send-log rows written on bad input', Number((await db.query(`SELECT COUNT(*) n FROM email_message`)).rows[0].n) === rowsBefore);
+}
+
+console.log('\n[notifications: booking-lifecycle variants + reminder cron (TRI-889)]');
+{
+  const { renderTemplate, isTemplate } = await import('../src/email-templates.ts');
+  const { createNotificationService } = await import('../src/notifications.ts');
+
+  // ── Templates registered + render with real vars ──
+  const VARIANTS = ['booking_confirmed', 'booking_cancelled', 'payment_failed', 'departure_reminder'];
+  ok('notify: all 4 lifecycle templates registered', VARIANTS.every((t) => isTemplate(t)));
+  const cv = { firstName: 'Ama', ref: 'TK-TEST', tourTitle: 'Accra City Tour',
+    departureLabel: 'Sat 22 Aug 2026, 09:00', travellers: 2, totalDisplay: '$150 USD',
+    manageUrl: 'https://app.tripkoach.com/bookings/TK-TEST' };
+  ok('notify: booking_confirmed renders + carries ref/total', (() => { const r = renderTemplate('booking_confirmed', cv); return r.subject.includes('Accra City Tour') && r.html.includes('TK-TEST') && r.html.includes('$150 USD'); })());
+  ok('notify: payment_failed renders', renderTemplate('payment_failed', cv).subject.includes('TK-TEST'));
+  ok('notify: departure_reminder renders daysLabel', renderTemplate('departure_reminder', { ...cv, daysLabel: 'in 3 days' }).html.includes('in 3 days'));
+  ok('notify: booking_cancelled renders with empty reason', renderTemplate('booking_cancelled', { ...cv, reason: '' }).html.includes('TK-TEST'));
+
+  // ── Wired service against a stub transport (no network) ──
+  const sent: any[] = [];
+  const stub: EmailTransport = { name: 'stub', async send(m) { sent.push(m); return { providerMessageId: `nid_${sent.length}` }; } };
+  const enCfg = { ...cfg,
+    email: { ...cfg.email, apiKey: 're_test_stub', from: 'TripKoach <bookings@send.tripkoach.com>', dryRun: false },
+    notify: { webBaseUrl: 'https://app.tripkoach.com', reminderDaysBefore: 3 } };
+  const notifier = createNotificationService(db, enCfg, { transport: stub, log: () => {} });
+
+  // A guest booking → booking-confirmed to the lead (contact) email + a linked send-log row.
+  const dep = await makeDeparture(5);
+  const bk = (await bookOne(dep, 2)).body;
+  const rc = await notifier.bookingConfirmed(bk.ref);
+  ok('notify: bookingConfirmed → sent to lead contact email', rc?.status === 'sent' && sent.at(-1).to === 'ama@example.com' && sent.at(-1).subject.includes('Accra City Tour'), JSON.stringify(rc));
+  const cRow = (await db.query(`SELECT * FROM email_message WHERE template='booking_confirmed' AND related_id=$1`, [bk.ref])).rows[0];
+  ok('notify: confirmed send-log linked to booking', cRow && cRow.status === 'sent' && cRow.related_type === 'booking', JSON.stringify(cRow));
+
+  // booking-cancelled carries the reason clause.
+  await db.query(`UPDATE booking SET status='cancelled', cancel_reason='customer_request' WHERE ref=$1`, [bk.ref]);
+  const rcx = await notifier.bookingCancelled(bk.ref, { reason: 'customer_request' });
+  ok('notify: bookingCancelled → sent with reason clause', rcx?.status === 'sent' && sent.at(-1).text.includes('at your request'), JSON.stringify(rcx));
+
+  // payment-failed variant sends.
+  const rpf = await notifier.paymentFailed(bk.ref);
+  ok('notify: paymentFailed → sent', rpf?.status === 'sent' && sent.at(-1).subject.includes(bk.ref), JSON.stringify(rpf));
+
+  // ── Account preference honouring ──
+  const acct = (await db.query(`INSERT INTO user_account (email, name) VALUES ('holder@example.com','Acc Holder') RETURNING id`)).rows[0];
+  const dep2 = await makeDeparture(5);
+  const bk2 = (await bookOne(dep2, 1)).body;
+  await db.query(`UPDATE booking SET user_id=$1 WHERE ref=$2`, [acct.id, bk2.ref]);
+  // Default (no pref row) → send to the ACCOUNT email.
+  const rAcc = await notifier.bookingConfirmed(bk2.ref);
+  ok('notify: account booking defaults to send → account email', rAcc?.status === 'sent' && sent.at(-1).to === 'holder@example.com', JSON.stringify(rAcc));
+  // Explicit opt-out row → suppressed (no send, null result).
+  await db.query(`INSERT INTO notification_preference (user_id, channel, type, enabled) VALUES ($1,'email','booking_confirmations',false)`, [acct.id]);
+  const nBefore = sent.length;
+  const rOff = await notifier.bookingConfirmed(bk2.ref);
+  ok('notify: opted-out account → suppressed (no send)', rOff === null && sent.length === nBefore);
+
+  // Guest with no contact email → suppressed.
+  const dep3 = await makeDeparture(5);
+  const g3 = (await post('/api/v1/bookings', { tourSlug: 'accra-city-tour', departureId: dep3, partySize: 1, agreedTerms: true, travellers: [{ name: 'Phone Only', phone: '+233200000009', isLead: true }] })).body;
+  const gBefore = sent.length;
+  const rGuest = await notifier.bookingConfirmed(g3.ref);
+  ok('notify: guest with no email → suppressed', rGuest === null && sent.length === gBefore);
+
+  // Disabled transport (no key) → 'skipped' send-log row, dispatch not attempted.
+  const disNotifier = createNotificationService(db, { ...enCfg, email: { ...enCfg.email, apiKey: undefined } }, { transport: stub, log: () => {} });
+  const dBefore = sent.length;
+  const rDis = await disNotifier.bookingConfirmed(bk.ref);
+  ok('notify: disabled transport → skipped, not dispatched', rDis?.status === 'skipped' && sent.length === dBefore, JSON.stringify(rDis));
+
+  // ── Departure-reminder cron ── (real now so the intra-day dedup compares like-for-like dates)
+  const nowReal = new Date();
+  const t = new Date(Date.UTC(nowReal.getUTCFullYear(), nowReal.getUTCMonth(), nowReal.getUTCDate() + 3));
+  const targetStr = t.toISOString().slice(0, 10);
+  const remDep = (await db.query(
+    `INSERT INTO departure (tour_id, date_label, time_label, depart_on, price_minor, currency, seats_total, seats_reserved, status)
+     VALUES ($1, 'Reminder Departure', '09:00 · Test', $2::date, 7500, 'USD', 5, 0, 'scheduled') RETURNING id`,
+    [accraTourId, targetStr])).rows[0];
+  const remBk = (await bookOne(remDep.id, 1)).body;
+  await db.query(`UPDATE booking SET status='confirmed', payment_state='paid' WHERE ref=$1`, [remBk.ref]);
+  // A same-date UNPAID booking must NOT be reminded.
+  const remUnpaid = (await bookOne(remDep.id, 1)).body;
+  const remBefore = sent.length;
+  const rr = await notifier.sendDepartureReminders({ log: () => {} });
+  ok('notify: reminder targets depart_on = today+N', rr.target === targetStr && rr.matched >= 1, JSON.stringify(rr));
+  ok('notify: reminder emailed the paid booking only', rr.sent >= 1 && sent.slice(remBefore).some((m) => m.to === 'ama@example.com' && m.subject.includes('Accra City Tour')));
+  ok('notify: reminder did not email the unpaid same-date booking', !rr.refs.includes(remUnpaid.ref));
+  // Second run same day → deduped (already-sent guard) → nothing new.
+  const rr2 = await notifier.sendDepartureReminders({ log: () => {} });
+  ok('notify: reminder idempotent within a day', rr2.matched === 0 && rr2.sent === 0, JSON.stringify(rr2));
 }
 
 await app.close();
