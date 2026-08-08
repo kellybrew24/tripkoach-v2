@@ -11,6 +11,7 @@
     "build:prod": "node scripts/build.mjs && node scripts/stamp-prod-config.mjs",
     "smoke": "node scripts/smoke.mjs",
     "smoke:live": "node scripts/smoke-live.mjs",
+    "smoke:reviews-live": "node scripts/smoke-live-reviews.mjs",
     "smoke:admin-live": "node scripts/smoke-admin-live.mjs",
     "verify": "npm run build && npm run smoke",
     "clean": "rm -rf apps/web/dist apps/admin/dist"

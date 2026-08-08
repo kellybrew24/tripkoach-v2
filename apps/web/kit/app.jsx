@@ -42,6 +42,11 @@ function routeFromPath(pathname) {
   // ?token=…) lands here — reuse the ForgotWeb screen, which reads the token off
   // the URL and opens on its "set a new password" stage.
   if (path === "/reset-password") return { screen: "forgot", slug: null };
+  // Tokenized review-invite deep link (TRI-894): the address Backend emails
+  // travellers, `{webUrl}/reviews/redeem/:token`. Matched before the exact
+  // `/reviews` account route so the sub-path resolves to the invite landing.
+  const rv = path.match(/^\/reviews\/redeem\/(.+)$/);
+  if (rv) return { screen: "review", slug: null, token: decodeURIComponent(rv[1]) };
   const hit = ROUTES.find(([, p]) => p === path);
   return { screen: hit ? hit[0] : "home", slug: null };
 }
@@ -79,6 +84,10 @@ function WebApp() {
   const first = routeFromPath(window.location.pathname);
   const [screen, setScreen] = React.useState(first.screen);
   const [slug, setSlug] = React.useState(first.slug);
+  // Review-invite token, only set when the URL is a `/reviews/redeem/:token`
+  // deep link (TRI-894). Off that route it stays null and the invite page falls
+  // back to the fixture demo, so nothing else is affected.
+  const [reviewToken, setReviewToken] = React.useState(first.token || null);
   const [currency, setCurrency] = React.useState("USD");
   const [step, setStep] = React.useState(1);
   const [view, setView] = React.useState("results");
@@ -102,6 +111,7 @@ function WebApp() {
       const r = routeFromPath(window.location.pathname);
       setScreen(r.screen);
       setSlug(r.slug);
+      setReviewToken(r.token || null);
       window.scrollTo({ top: 0 });
     };
     window.addEventListener("popstate", onPop);
@@ -149,7 +159,7 @@ function WebApp() {
     contact: <ContactPage go={go} />,
     blog: <BlogIndex go={go} />,
     post: <BlogPost go={go} slug={slug} />,
-    review: <ReviewInvitePage go={go} />,
+    review: <ReviewInvitePage go={go} token={reviewToken} />,
   }[screen] || <HomeWeb go={go} />;
 
   const AUTH = screen === "login" || screen === "signup" || screen === "forgot";

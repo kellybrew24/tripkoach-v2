@@ -86,7 +86,111 @@ function ReviewsSection({ tour, onWrite }) {
     </div>
   );
 }
-function ReviewInvitePage({ go }) {
+// Live only when the flag is on AND the redeem client is present. Off ⇒ the
+// invite page renders the fixture demo exactly as the prototype (byte-identical).
+const LIVE_REVIEW = () => !!(window.TK_CONFIG && window.TK_CONFIG.USE_LIVE_API && window.TK_REVIEWS_API);
+
+// Live review-invite landing (TRI-894, Backend sibling TRI-892). Reached via the
+// tokenized deep link Backend emails travellers after a departure
+// (`/reviews/redeem/:token`). Reads the redeem context to prefill the tour +
+// traveller, submits the review against the same token, and renders the DS
+// invalid/already-redeemed states for 404/410. Only mounted under the flag with
+// a token present, so the fixture demo path below is untouched.
+function ReviewInviteLive({ go, token }) {
+  const [rating, setRating] = React.useState(0);
+  const [title, setTitle] = React.useState("");
+  const [text, setText] = React.useState("");
+  const [done, setDone] = React.useState(false);
+  const [ctx, setCtx] = React.useState(null);
+  const [phase, setPhase] = React.useState("loading"); // loading | ready | notfound | gone | error
+  const [submitting, setSubmitting] = React.useState(false);
+  const [submitErr, setSubmitErr] = React.useState(null);
+  const load = (alive) => {
+    setPhase("loading");
+    return window.TK_REVIEWS_API.redeemContext(token).then(
+      (c) => { if (alive !== false) { setCtx(c); setPhase("ready"); } },
+      (e) => { if (alive !== false) setPhase(e && e.status === 410 ? "gone" : e && e.status === 404 ? "notfound" : "error"); }
+    );
+  };
+  React.useEffect(() => {
+    let alive = true;
+    load(alive);
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  const tour = (ctx && ctx.tour) || { title: "", image: null };
+  const who = (ctx && ctx.prefill && ctx.prefill.name) || "";
+  const ok = rating > 0 && text.trim().length >= 10;
+
+  async function onSubmit() {
+    if (submitting) return;
+    setSubmitErr(null); setSubmitting(true);
+    try {
+      await window.TK_REVIEWS_API.submit(token, { rating, title, text });
+      setDone(true);
+    } catch (e) {
+      const gone = e && e.status === 410;
+      setSubmitErr(gone ? "This link has already been used to leave a review." : ((e && e.message) || "We couldn't submit your review. Please try again."));
+      setSubmitting(false);
+    }
+  }
+
+  // ---- Pre-form states (loading / invalid / already-redeemed / error) -------
+  const stateCard = (icon, tone, heading, msg, action) => (
+    <div className="tk-container" style={{ paddingBlock: "var(--space-9) var(--space-12)", maxWidth: 620 }}>
+      <div className="tk-card" style={{ boxShadow: "var(--elev-2)" }}><div className="tk-card__body" style={{ padding: "var(--space-7)", textAlign: "center", gap: "var(--space-3)", alignItems: "center" }}>
+        <span style={{ width: 56, height: 56, borderRadius: "50%", background: "var(--" + tone + "-bg)", color: "var(--" + tone + "-fg)", display: "grid", placeItems: "center" }}><Icon name={icon} size={28} /></span>
+        <h1 className="tk-h2" style={{ margin: 0 }}>{heading}</h1>
+        <p className="tk-body" style={{ margin: 0, color: "var(--text-muted)", maxWidth: "42ch" }}>{msg}</p>
+        {action}
+      </div></div>
+    </div>
+  );
+  if (phase === "loading") {
+    return stateCard("loader", "info", "Checking your link…", "One moment while we open your review invite.", null);
+  }
+  if (phase === "notfound") {
+    return stateCard("circle-alert", "danger", "This link isn't valid", "The review link is incomplete or has expired. If you travelled with us recently, check your latest email for the correct link.", <Button style={{ marginTop: 8 }} onClick={() => go("home")}>Explore tours</Button>);
+  }
+  if (phase === "gone") {
+    return stateCard("circle-check-big", "success", "You've already reviewed this trip", "Thanks — this invite has already been used. Your review is with our team and appears once it's approved.", <Button style={{ marginTop: 8 }} onClick={() => go("home")}>Back to tours</Button>);
+  }
+  if (phase === "error") {
+    return stateCard("triangle-alert", "warning", "Something went wrong", "We couldn't open your review invite just now. Please try again in a moment.", <Button style={{ marginTop: 8 }} onClick={() => load(true)}>Try again</Button>);
+  }
+
+  // ---- Ready: the DS invite form (or the post-submit thank-you) -------------
+  return (
+    <div className="tk-container" style={{ paddingBlock: "var(--space-9) var(--space-12)", maxWidth: 620 }}>
+      {done ? (
+        <div className="tk-card" style={{ boxShadow: "var(--elev-2)" }}><div className="tk-card__body" style={{ padding: "var(--space-7)", textAlign: "center", gap: "var(--space-3)", alignItems: "center" }}>
+          <span style={{ width: 56, height: 56, borderRadius: "50%", background: "var(--success-bg)", color: "var(--success-fg)", display: "grid", placeItems: "center" }}><Icon name="circle-check-big" size={28} /></span>
+          <h1 className="tk-h2" style={{ margin: 0 }}>Thank you{who ? ", " + String(who).split(" ")[0] : ""}!</h1>
+          <p className="tk-body" style={{ margin: 0, color: "var(--text-muted)", maxWidth: "40ch" }}>Your review is with our team. Once it's approved it'll appear on the {tour.title} page — usually within a day.</p>
+          <Button style={{ marginTop: 8 }} onClick={() => go("home")}>Back to tours</Button>
+        </div></div>
+      ) : (
+        <div className="tk-card" style={{ boxShadow: "var(--elev-2)" }}><div className="tk-card__body" style={{ padding: "var(--space-6)", gap: "var(--space-4)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 60, height: 60, borderRadius: "var(--radius-md)", overflow: "hidden", flex: "none" }}><TourImage src={tour.image} alt={tour.title} label={tour.title} gi={0} showLabel={false} /></div>
+            <div><span className="tk-overline" style={{ color: "var(--brand-ink)" }}>How was your trip?</span><h1 className="tk-h3" style={{ margin: "2px 0 0" }}>{tour.title}</h1></div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", background: "var(--success-bg)", borderRadius: "var(--radius-md)" }}><Icon name="shield-check" size={16} style={{ color: "var(--success-fg)" }} /><span className="tk-body-sm">Verified traveller — only you can use this private link.</span></div>
+          <div><span className="tk-label" style={{ display: "block", marginBottom: 4 }}>Your rating</span><StarInput value={rating} onChange={setRating} /></div>
+          <FormField id="iv-title" label="Title" optional><Input id="iv-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Sum it up in a few words" /></FormField>
+          <FormField id="iv-text" label="Your review" required hint="At least 10 characters."><Textarea id="iv-text" rows={5} value={text} onChange={(e) => setText(e.target.value)} placeholder="What did you enjoy? How was your guide?" /></FormField>
+          {submitErr && <Alert tone="error" title="We couldn't submit that">{submitErr}</Alert>}
+          <Button size="lg" block disabled={!ok || submitting} iconStart="check" onClick={onSubmit}>{submitting ? "Submitting…" : "Submit review"}</Button>
+          <p className="tk-caption" style={{ textAlign: "center", margin: 0 }}>Only you can use this link. Reviews are checked before they appear publicly.</p>
+        </div></div>
+      )}
+    </div>
+  );
+}
+
+function ReviewInvitePage({ go, token }) {
+  if (LIVE_REVIEW() && token) return <ReviewInviteLive go={go} token={token} />;
   const inv = window.TK_INVITE || {};
   const tour = (window.TK_DATA.tours.find(t => t.id === inv.tourId)) || { title: inv.tour, image: null };
   const [rating, setRating] = React.useState(0);
@@ -120,7 +224,7 @@ function ReviewInvitePage({ go }) {
     </div>
   );
 }
-Object.assign(window, { Stars, StarInput, ReviewCard, ReviewModal, ReviewsSection, ReviewInvitePage });
+Object.assign(window, { Stars, StarInput, ReviewCard, ReviewModal, ReviewsSection, ReviewInviteLive, ReviewInvitePage });
 
 const NAV = [{ label: "Tours", href: "#browse" }, { label: "Regions", href: "#regions" }, { label: "Marketplace", href: "#marketplace" }, { label: "Stories", href: "#blog" }, { label: "About", href: "#about" }];
 

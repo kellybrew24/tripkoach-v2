@@ -45,11 +45,12 @@ const APPS = {
     screens: ["screens-home.jsx", "screens-pages.jsx", "screens-blog.jsx", "screens-account.jsx", "screens-web.jsx"],
     app: "app.jsx",
     // Web-only shims. Loaded after tk-api.js (they use TK_API) and before app.js.
-    // Admin never books or holds consumer accounts, so these are NOT in
-    // SHARED_SHIM — the admin build is untouched.
+    // Admin never books, holds consumer accounts, or redeems review invites, so
+    // these are NOT in SHARED_SHIM — the admin build is untouched.
     //   tk-booking.js (TRI-867): booking + Paystack-checkout client.
     //   tk-auth.js    (TRI-882): consumer accounts & auth client.
-    extraShim: ["tk-booking.js", "tk-auth.js"],
+    //   tk-reviews.js (TRI-894): tokenized review-invite redeem/submit client.
+    extraShim: ["tk-booking.js", "tk-auth.js", "tk-reviews.js"],
     // data.js (window.TK_DATA / TK_IMG) must load before blog.js.
     data: ["data.js", "blog.js"],
     title: "TripKoach — guided tours across Ghana",
