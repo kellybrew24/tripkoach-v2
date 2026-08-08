@@ -31,6 +31,12 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const DS = join(ROOT, "design-system");
+const SHIM = join(ROOT, "shim");
+
+// Runtime shim shared by both apps (TRI-861). config.js MUST load first (before
+// the data fixtures and app.js); tk-api.js before app.js. tk-boot.js is per-app
+// (it holds the app-specific read wiring) and is copied from each kit dir.
+const SHARED_SHIM = ["config.js", "tk-api.js"];
 
 const APPS = {
   web: {
@@ -135,6 +141,14 @@ function buildApp(name) {
   // 3. Data fixtures (plain JS, window-assigning — used verbatim).
   for (const d of cfg.data) cpSync(join(cfg.kit, d), join(dist, "data", d));
 
+  // 3a. Runtime shim (TRI-861): shared config + API client, plus the per-app
+  //     boot gate. Copied verbatim (NOT transpiled — these are plain classic
+  //     scripts, no JSX). config.js ships with USE_LIVE_API off, so the built
+  //     app is byte-for-byte the fixture prototype until DevOps overwrites
+  //     config.js at deploy to point at the same-origin /api proxy.
+  for (const f of SHARED_SHIM) cpSync(join(SHIM, f), join(dist, f));
+  cpSync(join(cfg.kit, "tk-boot.js"), join(dist, "tk-boot.js"));
+
   // 4. Build-time-transpiled application script (screens + app, in kit order).
   let appJs = "/* Built by scripts/build.mjs — do not edit. Sources live in apps/" + name + "/kit + design-system/. */\n";
   for (const f of [...cfg.screens, cfg.app]) appJs += wrapFile(cfg.kit, f);
@@ -159,7 +173,10 @@ ${cfg.headCss}</style>
 <script src="vendor/react.production.min.js"></script>
 <script src="vendor/react-dom.production.min.js"></script>
 <script src="_ds_bundle.js"></script>
+<script src="config.js"></script>
 ${dataTags}
+<script src="tk-api.js"></script>
+<script src="tk-boot.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

@@ -31,7 +31,10 @@ async function runOne(name) {
     "vendor/react.production.min.js",
     "vendor/react-dom.production.min.js",
     "_ds_bundle.js",
+    "config.js",
     ...(name === "web" ? ["data/data.js", "data/blog.js"] : ["data/data.js", "data/admin-data.js"]),
+    "tk-api.js",
+    "tk-boot.js",
     "app.js",
   ];
 

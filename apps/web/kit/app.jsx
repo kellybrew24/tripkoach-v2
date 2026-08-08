@@ -90,4 +90,10 @@ function WebApp() {
   return AUTH ? body : <Shell currency={currency} setCurrency={setCurrency} go={go}>{body}</Shell>;
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<WebApp />);
+// Render through the boot gate (TRI-861): with USE_LIVE_API off it renders
+// immediately from fixtures; with it on, tk-boot hydrates the read screens from
+// the live /api endpoints first. The `|| (fn => fn())` fallback keeps the DS
+// browser-preview (which doesn't load the shim) rendering as before.
+(window.TK_BOOT || ((fn) => fn()))(() =>
+  ReactDOM.createRoot(document.getElementById("root")).render(<WebApp />)
+);
