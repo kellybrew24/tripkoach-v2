@@ -1382,6 +1382,13 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
       joined: r.joined_at, createdAt: r.created_at,
       bookings: Number(r.booking_count ?? 0),
       totalSpend: fromMinor(Number(r.total_spend_minor ?? 0)),
+      // TRI-969: profile fields the customer captured on their account (guests → null).
+      emergencyName: r.emergency_name ?? null,
+      emergencyPhone: r.emergency_phone ?? null,
+      dietaryNeeds: r.dietary_needs ?? null,
+      language: r.language ?? null,
+      displayCurrency: r.display_currency ?? null,
+      twoFactorEnabled: r.user_id ? !!r.two_factor_enabled : null,
       // TRI-941: account state derived from the linked user_account (guests have no account → both null).
       hasAccount: !!r.user_id,
       emailVerified: r.user_id ? !!r.email_verified_at : null,
@@ -1402,8 +1409,14 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
   // account) OR booking.customer_id (the guest contact); we aggregate on both.
   // TRI-943 avatar moderation surface (avatar_status/avatar_url) is only meaningful
   // for registered accounts; guest booking-contacts carry NULLs.
+  // TRI-969: profile fields the customer entered on their account (emergency
+  // contact, dietary needs, language, display currency, 2FA) live ONLY on
+  // user_account — guest booking-contacts carry NULLs. Kept in the shared
+  // PERSON_SQL so both the list and the detail view can surface them.
   const PERSON_SQL = `
     SELECT u.id AS id, u.name, u.email, u.phone, u.country,
+           u.emergency_name, u.emergency_phone, u.dietary_needs,
+           u.language, u.display_currency, u.two_factor_enabled,
            u.id AS user_id, u.created_at AS joined_at, u.created_at AS created_at,
            u.email_verified_at, u.avatar_status, am.url AS avatar_url,
            (SELECT COUNT(*) FROM booking b
@@ -1416,6 +1429,8 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
       FROM user_account u LEFT JOIN media_asset am ON am.id = u.avatar_media_id
     UNION ALL
     SELECT c.id AS id, c.name, c.email, c.phone, c.country,
+           NULL::text AS emergency_name, NULL::text AS emergency_phone, NULL::text AS dietary_needs,
+           NULL::text AS language, NULL::text AS display_currency, NULL::boolean AS two_factor_enabled,
            NULL::uuid AS user_id, c.joined_at AS joined_at, c.created_at AS created_at,
            NULL::timestamptz AS email_verified_at, NULL::text AS avatar_status, NULL::text AS avatar_url,
            (SELECT COUNT(*) FROM booking b WHERE b.customer_id = c.id) AS booking_count,

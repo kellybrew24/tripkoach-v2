@@ -1014,6 +1014,26 @@ console.log('\n[admin customers view (TRI-898)]');
   ok('GET /customers/:id unknown → 404', (await call('GET', '/api/admin/customers/00000000-0000-0000-0000-000000000000', { cookie: adminCookie })).status === 404);
   const q = await call('GET', '/api/admin/customers?q=Cancel', { cookie: adminCookie });
   ok('customers search q=Cancel matches', q.status === 200 && q.body.items.some((c: any) => c.email === 'cancel@example.com'), JSON.stringify(q.body.total));
+
+  // TRI-969: an account that filled in emergency contact + profile prefs must
+  // surface those on the admin detail view, alongside its full booking history.
+  const acct = (await db.query(
+    `INSERT INTO user_account (email, name, phone, country, emergency_name, emergency_phone, dietary_needs, language, display_currency, two_factor_enabled)
+     VALUES ('erin.emergency@example.com','Erin Emergency','+233200000969','Ghana','Kofi Next-of-Kin','+233240000969','No shellfish','en','GHS', true)
+     RETURNING id`)).rows[0];
+  const dep969 = (await db.query(`SELECT id, tour_id FROM departure LIMIT 1`)).rows[0];
+  await db.query(
+    `INSERT INTO booking (ref, user_id, tour_id, departure_id, party_size, unit_price_minor, total_minor, currency, status, payment_state)
+     VALUES ('TK-EMRG969',$1,$2,$3,2,15000,30000,'USD','confirmed','paid')`,
+    [acct.id, dep969.tour_id, dep969.id]);
+  const eDetail = await call('GET', `/api/admin/customers/${acct.id}`, { cookie: adminCookie });
+  ok('TRI-969 account detail 200', eDetail.status === 200, JSON.stringify({ s: eDetail.status }));
+  ok('TRI-969 emergency contact surfaced', eDetail.body.emergencyName === 'Kofi Next-of-Kin' && eDetail.body.emergencyPhone === '+233240000969', JSON.stringify({ n: eDetail.body.emergencyName, p: eDetail.body.emergencyPhone }));
+  ok('TRI-969 profile fields surfaced', eDetail.body.dietaryNeeds === 'No shellfish' && eDetail.body.displayCurrency === 'GHS' && eDetail.body.twoFactorEnabled === true, JSON.stringify({ d: eDetail.body.dietaryNeeds, c: eDetail.body.displayCurrency, t: eDetail.body.twoFactorEnabled }));
+  ok('TRI-969 booking history reflects account booking', Array.isArray(eDetail.body.bookings) && eDetail.body.bookings.some((b: any) => b.ref === 'TK-EMRG969'), JSON.stringify(eDetail.body.bookings));
+  const eList = await call('GET', '/api/admin/customers?q=erin.emergency', { cookie: adminCookie });
+  const eRow = eList.body.items?.find((c: any) => c.email === 'erin.emergency@example.com');
+  ok('TRI-969 list row also carries emergency contact', eList.status === 200 && eRow && eRow.emergencyName === 'Kofi Next-of-Kin', JSON.stringify(eRow));
 }
 
 console.log('\n[admin audit-log read (TRI-898)]');

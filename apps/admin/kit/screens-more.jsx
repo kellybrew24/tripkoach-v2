@@ -1,6 +1,6 @@
 const NS = window.TripKoachDesignSystem_c9e4af;
 const { DataTable, FilterBar, Drawer, RoleMatrix, RowMenu, StatusBadge, Badge, Button, IconButton, Icon, Price, Modal,
-  Alert, SearchField, EmptyState, FormField, Input, PhoneInput, Select, Switch, Checkbox, Textarea, Tabs, BookingRow, Toast } = NS;
+  Alert, SearchField, EmptyState, FormField, Input, PhoneInput, Select, Switch, Checkbox, Textarea, Tabs, BookingRow, Toast, Spinner } = NS;
 
 function payBadge(p) {
   const map = { paid: "paid", pending: "pending", refunded: "refunded", failed: "failed", unpaid: "pending" };
@@ -11,12 +11,29 @@ function payBadge(p) {
 /* ── Customers ─────────────────────────────────────────── */
 function CustomersAdmin({ go, state, setState }) {
   const A = window.TK_ADMIN;
+  const LIVE = !!(window.TK_CONFIG && window.TK_CONFIG.USE_LIVE_API);
   const [q, setQ] = React.useState("");
   const [toast, setToast] = React.useState(null);
   const [country, setCountry] = React.useState(null);
   const [band, setBand] = React.useState(null);
   const [menu, setMenu] = React.useState(null);
+  // TRI-969: the list row only carries summary fields. The full profile
+  // (emergency contact, dietary needs, preferences) + the complete booking
+  // history come from GET /admin/customers/:id — fetched when the drawer opens.
+  const [detail, setDetail] = React.useState(null);
+  const [detailStatus, setDetailStatus] = React.useState("idle");
   const open = A.customers.find(c => c.id === state.detailRef);
+  React.useEffect(() => {
+    setDetail(null);
+    if (!open || !LIVE || !window.TK_ADMIN_API) { setDetailStatus("idle"); return; }
+    let live = true;
+    setDetailStatus("loading");
+    window.TK_ADMIN_API.getCustomer(open.id).then(
+      (r) => { if (live) { setDetail(r || null); setDetailStatus("ok"); } },
+      () => { if (live) setDetailStatus("error"); }
+    );
+    return () => { live = false; };
+  }, [state.detailRef, LIVE]);
   const custBookings = (id) => A.bookings.filter(b => b.customerId === id);
   const spend = (id) => custBookings(id).filter(b => b.payment === "paid").reduce((s, b) => s + b.total, 0);
   const countries = [...new Set(A.customers.map(c => c.country))].sort();
@@ -36,6 +53,19 @@ function CustomersAdmin({ go, state, setState }) {
     { divider: true },
     { label: "Export bookings (CSV)", icon: "download", onClick: () => setToast("Exporting " + r.name + "'s bookings") },
   ];
+  // Detail view — prefer the fetched profile (live), fall back to the list row / fixtures.
+  const detailBookings = detail && Array.isArray(detail.bookings) ? detail.bookings : null;
+  const bookingList = detailBookings ? detailBookings : (open ? custBookings(open.id) : []);
+  const spendAmount = detail && typeof detail.totalSpend === "number" ? detail.totalSpend : (open ? spend(open.id) : 0);
+  const tripsCount = detailBookings ? detailBookings.length : (open ? open.bookings : 0);
+  const pendingCount = bookingList.filter(b => b.status === "pending").length;
+  const emName = (detail && detail.emergencyName) || (open && open.emergencyName) || "";
+  const emPhone = (detail && detail.emergencyPhone) || (open && open.emergencyPhone) || "";
+  const emDietRaw = (detail && detail.dietaryNeeds) || (open && open.diet) || "";
+  const emDiet = emDietRaw && emDietRaw !== "—" ? emDietRaw : "";
+  const prefLang = (detail && detail.language) || (open && open.language) || "";
+  const prefCurrency = (detail && detail.displayCurrency) || (open && open.displayCurrency) || "";
+  const twoFA = detail ? detail.twoFactorEnabled : (open ? open.twoFactorEnabled : null);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div className="tk-tablewrap" style={{ position: "relative" }}>
@@ -82,14 +112,14 @@ function CustomersAdmin({ go, state, setState }) {
                 {/* TRI-941: account verification state (live only — undefined for fixtures). */}
                 {open.emailVerified === true && <span className="tk-badge tk-badge--confirmed">Email verified</span>}
                 {open.emailVerified === false && <span className="tk-badge tk-badge--pending">Email unverified</span>}
-                {custBookings(open.id).some(b => b.status === "pending") && <span className="tk-badge tk-badge--pending">Has pending</span>}
-                {spend(open.id) >= 1000 && <Badge tone="solid">VIP</Badge>}
+                {pendingCount > 0 && <span className="tk-badge tk-badge--pending">Has pending</span>}
+                {spendAmount >= 1000 && <Badge tone="solid">VIP</Badge>}
               </div>
               <div className="tk-caption">{open.country} · member since {open.joined}</div>
             </div>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10 }}>
-            {[["Trips", open.bookings], ["Lifetime value", "$" + spend(open.id).toLocaleString()], ["Pending", custBookings(open.id).filter(b => b.status === "pending").length]].map(([k, v]) => (
+            {[["Trips", tripsCount], ["Lifetime value", "$" + spendAmount.toLocaleString()], ["Pending", pendingCount]].map(([k, v]) => (
               <div key={k} className="tk-card" style={{ padding: "12px 14px" }}><div className="tk-caption">{k}</div><div style={{ fontWeight: 800, fontSize: 20, fontFamily: "var(--font-display)", letterSpacing: "-0.02em", color: "var(--text-strong)" }}>{v}</div></div>
             ))}
           </div>
@@ -103,16 +133,24 @@ function CustomersAdmin({ go, state, setState }) {
           <section>
             <h3 className="tk-h6" style={{ marginBottom: 8 }}>Emergency contact &amp; needs</h3>
             <div className="tk-summary" style={{ padding: 0 }}>
-              {[["Emergency contact", open.emergencyName || "—"], ["Emergency number", open.emergencyPhone || "—"], ["Dietary needs", open.diet || "—"]].map(([k, v]) => <div className="tk-summary__line" key={k}><span>{k}</span><span style={{ fontWeight: 600, color: "var(--text-strong)" }}>{v}</span></div>)}
+              {[["Emergency contact", emName || "—"], ["Emergency number", emPhone || "—"], ["Dietary needs", emDiet || "—"]].map(([k, v]) => <div className="tk-summary__line" key={k}><span>{k}</span><span style={{ fontWeight: 600, color: "var(--text-strong)" }}>{v}</span></div>)}
             </div>
           </section>
+          {open.hasAccount && (prefLang || prefCurrency || twoFA != null) && <section>
+            <h3 className="tk-h6" style={{ marginBottom: 8 }}>Account preferences</h3>
+            <div className="tk-summary" style={{ padding: 0 }}>
+              {[["Language", prefLang || "—"], ["Display currency", prefCurrency || "—"], ["Two-factor auth", twoFA == null ? "—" : (twoFA ? "Enabled" : "Off")]].map(([k, v]) => <div className="tk-summary__line" key={k}><span>{k}</span><span style={{ fontWeight: 600, color: "var(--text-strong)" }}>{v}</span></div>)}
+            </div>
+          </section>}
           <section>
             <h3 className="tk-h6" style={{ marginBottom: 8 }}>Booking history</h3>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {custBookings(open.id).map(b => (
+              {detailStatus === "loading" && <div style={{ padding: 24, display: "grid", placeItems: "center" }}><Spinner /></div>}
+              {detailStatus === "error" && <Alert tone="warning" title="Couldn't load booking history">The customer's profile loaded, but their trips couldn't be fetched. Try reopening.</Alert>}
+              {bookingList.map(b => (
                 <BookingRow key={b.ref} reference={b.ref} title={b.tour} date={b.date} travellers={b.travellers + " travellers"} total={b.total} status={b.status} onClick={() => go("bookings", b.ref)} />
               ))}
-              {custBookings(open.id).length === 0 && <p className="tk-caption">No bookings yet.</p>}
+              {detailStatus !== "loading" && bookingList.length === 0 && <p className="tk-caption">No bookings yet.</p>}
             </div>
           </section>
         </>}
