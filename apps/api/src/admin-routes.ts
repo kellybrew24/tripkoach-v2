@@ -7,16 +7,19 @@ import type { Db } from './db.ts';
 import type { Config } from './config.ts';
 import {
   verifyPassword, createSession, revokeSession, resolveSession,
+  resolvePendingSession, clearMfaPending,
   setSessionCookie, clearSessionCookie, permissionsFor,
   makeRequireAuth, makeRequirePermission, audit, type Permission,
 } from './auth.ts';
 import { createAdminService, AdminError, ValidationError } from './admin.ts';
 import type { NotificationService } from './notifications.ts';
 import { createReviewsService, ReviewError, type ReviewsService } from './reviews.ts';
+import { createStaffService } from './staff.ts';
 
 export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifier?: NotificationService, reviews?: ReviewsService): void {
   const svc = createAdminService(db, cfg, notifier);
   const reviewSvc = reviews ?? createReviewsService(db, cfg);
+  const staffSvc = createStaffService(db, cfg);
   const auth = makeRequireAuth(db, cfg);
   const perm = (p: Permission) => ({ preHandler: makeRequirePermission(db, cfg, p) });
   const actorOf = (req: FastifyRequest) => ({ id: req.staff!.id, ip: req.ip ?? null });
@@ -58,14 +61,52 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
         await audit(db, { actorId: u?.id ?? null, action: 'staff.login_failed', targetType: 'staff_user', targetId: u?.id ?? null, after: { email }, ip: req.ip ?? null });
         return reply.code(401).send({ error: { code: 'invalid_credentials', message: 'That email and password do not match.' } });
       }
+      const trust = b.trustDevice === true || b.trust === true;
+      // MFA-enabled staff get a half-auth session (mfa_pending); the auth guard rejects it until the
+      // second factor clears it via POST /auth/mfa. The cookie is set now so the challenge can find it.
+      if (u.mfa_enabled) {
+        const sid = await createSession(db, cfg, u.id, {
+          ip: req.ip, userAgent: req.headers['user-agent'], trustedDevice: trust, mfaPending: true,
+        });
+        setSessionCookie(reply, cfg, sid);
+        await audit(db, { actorId: u.id, action: 'staff.mfa_challenge', targetType: 'staff_user', targetId: u.id, ip: req.ip ?? null });
+        return { mfaRequired: true };
+      }
       const sid = await createSession(db, cfg, u.id, {
-        ip: req.ip, userAgent: req.headers['user-agent'], trustedDevice: b.trustDevice === true,
+        ip: req.ip, userAgent: req.headers['user-agent'], trustedDevice: trust,
       });
       setSessionCookie(reply, cfg, sid);
       await audit(db, { actorId: u.id, action: 'staff.login', targetType: 'staff_user', targetId: u.id, ip: req.ip ?? null });
       return {
         staff: { id: u.id, email: u.email, name: u.name ?? null, role: u.role, jobTitle: u.job_title ?? null },
         permissions: [...await permissionsFor(db, u.role)],
+      };
+    });
+
+    // ── MFA login challenge — completes a half-auth (mfa_pending) session ───────
+    // The FE posts the 6-digit authenticator code (or a recovery code) here after login returned
+    // { mfaRequired: true }. On success we clear mfa_pending and return the same { staff, permissions }
+    // shape as a plain login, so the console hydrates identically (window.TK_ADMIN_ENTER).
+    admin.post('/auth/mfa', async (req: FastifyRequest, reply: FastifyReply) => {
+      const sid = req.cookies?.[cfg.adminCookieName];
+      const pending = sid ? await resolvePendingSession(db, sid) : null;
+      if (!pending) {
+        return reply.code(401).send({ error: { code: 'no_challenge', message: 'No pending sign-in to verify. Please sign in again.' } });
+      }
+      const b = (req.body ?? {}) as Record<string, unknown>;
+      const code = typeof b.code === 'string' ? b.code : '';
+      const ok = await staffSvc.verifyChallenge(pending.staffId, code);
+      if (!ok) {
+        await audit(db, { actorId: pending.staffId, action: 'staff.mfa_failed', targetType: 'staff_user', targetId: pending.staffId, ip: req.ip ?? null });
+        return reply.code(401).send({ error: { code: 'invalid_code', message: "That code didn't match or has expired." } });
+      }
+      await clearMfaPending(db, pending.sessionId);
+      const ctx = await resolveSession(db, cfg, pending.sessionId);
+      await audit(db, { actorId: pending.staffId, action: 'staff.login', targetType: 'staff_user', targetId: pending.staffId, after: { mfa: true }, ip: req.ip ?? null });
+      if (!ctx) return reply.code(401).send({ error: { code: 'unauthorized', message: 'Session expired. Please sign in again.' } });
+      return {
+        staff: { id: ctx.id, email: ctx.email, name: ctx.name, role: ctx.role, jobTitle: ctx.jobTitle },
+        permissions: [...ctx.permissions],
       };
     });
 
@@ -129,5 +170,30 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
     });
     admin.get('/payments/:ref', perm('bookings.view'), async (req) => svc.getPayment((req.params as any).ref));
     admin.post('/payments/:ref/refund', perm('payments.refund'), async (req) => svc.flagRefund((req.params as any).ref, body(req), actorOf(req)));
+
+    // ── Staff management (A4) — guarded by users.manage ─────────────────────────
+    admin.get('/staff', perm('users.manage'), async () => ({ staff: await staffSvc.listStaff() }));
+    admin.post('/staff', perm('users.manage'), async (req, reply) => reply.code(201).send(await staffSvc.inviteStaff(body(req), actorOf(req))));
+    admin.patch('/staff/:id', perm('users.manage'), async (req) => staffSvc.updateStaff((req.params as any).id, body(req), actorOf(req)));
+    admin.post('/staff/:id/resend-invite', perm('users.manage'), async (req) => staffSvc.resendInvite((req.params as any).id, actorOf(req)));
+    admin.post('/staff/:id/disable', perm('users.manage'), async (req) => staffSvc.setStatus((req.params as any).id, 'disabled', actorOf(req)));
+    admin.post('/staff/:id/enable', perm('users.manage'), async (req) => staffSvc.setStatus((req.params as any).id, 'active', actorOf(req)));
+
+    // ── Invite accept (PUBLIC — the opaque token is the credential; no session) ──
+    admin.get('/staff/accept', async (req) => ({ invite: await staffSvc.previewInvite(qStr(query(req), 'token') ?? '') }));
+    admin.post('/staff/accept', async (req) => staffSvc.acceptInvite(body(req)));
+
+    // ── Admin MFA (self-service; the current staff enrolls/manages their OWN factor) ──
+    admin.get('/auth/mfa/status', { preHandler: auth }, async (req) => staffSvc.mfaStatus(req.staff!.id));
+    admin.post('/auth/mfa/enroll', { preHandler: auth }, async (req) => staffSvc.enrollMfa(req.staff!.id, actorOf(req)));
+    admin.post('/auth/mfa/verify', { preHandler: auth }, async (req) => {
+      const b = body(req) as Record<string, unknown>;
+      return staffSvc.verifyMfaEnrollment(req.staff!.id, typeof b.code === 'string' ? b.code : '', actorOf(req));
+    });
+    admin.post('/auth/mfa/disable', { preHandler: auth }, async (req) => {
+      const b = body(req) as Record<string, unknown>;
+      return staffSvc.disableMfa(req.staff!.id, typeof b.code === 'string' ? b.code : '', actorOf(req));
+    });
+    admin.post('/auth/mfa/recovery-codes', { preHandler: auth }, async (req) => staffSvc.regenerateRecoveryCodes(req.staff!.id, actorOf(req)));
   }, { prefix: cfg.adminPrefix });
 }

@@ -166,20 +166,27 @@ export async function sendEmail(
   // ── Validate + render up front (throws on programmer error, before touching the DB). ──
   const to = (input.to ?? '').trim();
   if (!to) throw new Error('sendEmail: missing recipient (to)');
-  const from = input.from ?? email.from;
-  if (!from) throw new Error('sendEmail: no From address configured (set EMAIL_FROM)');
   const replyTo = input.replyTo ?? email.replyTo;
   const rendered: RenderedEmail = renderTemplate(input.template, vars);
 
+  // A From is required to actually DISPATCH, but not to record a 'skipped' row: isEmailEnabled() already
+  // requires a From, so a missing From means the transport is disabled anyway. In that case we log the
+  // skip against a placeholder sender rather than throwing — so a dev/unconfigured environment can still
+  // exercise every caller (e.g. staff invites) and get a send-log row, never a 500.
+  const enabled = isEmailEnabled(email);
+  const from = input.from ?? email.from;
+  if (enabled && !from) throw new Error('sendEmail: no From address configured (set EMAIL_FROM)');
+  const fromForLog = from ?? '(unconfigured)';
+
   const id = await insertQueued(db, {
-    to, from, replyTo, subject: rendered.subject, template: input.template, vars,
+    to, from: fromForLog, replyTo, subject: rendered.subject, template: input.template, vars,
     provider: email.providerName, relatedType: input.relatedType, relatedId: input.relatedId,
   });
 
   const base = { id, to, subject: rendered.subject, template: input.template };
 
   // ── GUARD: disabled transport → skip dispatch, record 'skipped'. ──
-  if (!isEmailEnabled(email)) {
+  if (!enabled) {
     const reason = email.dryRun ? 'EMAIL_DRY_RUN set' : 'no RESEND_API_KEY / From configured';
     await finalize(db, id, 'skipped', { error: `transport disabled (${reason})` });
     log(`[email] SKIPPED template=${input.template} to=${to} — ${reason}`);
@@ -191,7 +198,7 @@ export async function sendEmail(
   // ── Dispatch. On failure: record 'failed' + error, never throw. ──
   try {
     const { providerMessageId } = await transport.send({
-      to, from, replyTo, subject: rendered.subject, html: rendered.html, text: rendered.text,
+      to, from: from!, replyTo, subject: rendered.subject, html: rendered.html, text: rendered.text,
     });
     await finalize(db, id, 'sent', { providerMessageId });
     log(`[email] SENT template=${input.template} to=${to} via ${transport.name} id=${providerMessageId}`);

@@ -60,22 +60,46 @@ export async function permissionsFor(db: Db, role: string): Promise<Set<string>>
 }
 
 // ── Sessions ─────────────────────────────────────────────────────────────────
-/** Create a server-side staff session; returns its id (used as the opaque cookie bearer). */
+/** Create a server-side staff session; returns its id (used as the opaque cookie bearer). When
+ *  `mfaPending` is true the session is a half-auth login state (see resolveSession / clearMfaPending). */
 export async function createSession(
   db: Db, cfg: Config, staffId: string,
-  meta: { ip?: string; userAgent?: string; trustedDevice?: boolean },
+  meta: { ip?: string; userAgent?: string; trustedDevice?: boolean; mfaPending?: boolean },
 ): Promise<string> {
   const { rows } = await db.query<{ id: string }>(
-    `INSERT INTO session (subject_type, subject_id, expires_at, trusted_device, ip, user_agent)
-     VALUES ('staff', $1, now() + ($2 * interval '1 minute'), $3, $4, $5)
+    `INSERT INTO session (subject_type, subject_id, expires_at, trusted_device, ip, user_agent, mfa_pending)
+     VALUES ('staff', $1, now() + ($2 * interval '1 minute'), $3, $4, $5, $6)
      RETURNING id`,
-    [staffId, cfg.adminSessionIdleMinutes, !!meta.trustedDevice, meta.ip ?? null, meta.userAgent ?? null],
+    [staffId, cfg.adminSessionIdleMinutes, !!meta.trustedDevice, meta.ip ?? null, meta.userAgent ?? null, !!meta.mfaPending],
   );
   return rows[0].id;
 }
 
 export async function revokeSession(db: Db, sessionId: string): Promise<void> {
   await db.query(`UPDATE session SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL`, [sessionId]);
+}
+
+/** A live-but-unpromoted session awaiting its second factor (POST /auth/mfa). Returns null unless the
+ *  session is live (not expired/revoked), its staff user is active, AND it is still mfa_pending. */
+export async function resolvePendingSession(
+  db: Db, sessionId: string,
+): Promise<{ sessionId: string; staffId: string } | null> {
+  if (!sessionId) return null;
+  const { rows } = await db.query<any>(
+    `SELECT s.id AS session_id, u.id AS staff_id, u.status
+       FROM session s JOIN staff_user u ON u.id = s.subject_id
+      WHERE s.id = $1 AND s.subject_type = 'staff'
+        AND s.revoked_at IS NULL AND s.expires_at > now() AND s.mfa_pending = true`,
+    [sessionId],
+  );
+  const r = rows[0];
+  if (!r || r.status !== 'active') return null;
+  return { sessionId: r.session_id, staffId: r.staff_id };
+}
+
+/** Promote a pending session to fully authenticated once the second factor has verified. */
+export async function clearMfaPending(db: Db, sessionId: string): Promise<void> {
+  await db.query(`UPDATE session SET mfa_pending = false, last_seen_at = now() WHERE id = $1`, [sessionId]);
 }
 
 /** Resolve a live staff session → full StaffContext, applying sliding idle expiry. null if absent/expired/revoked. */
@@ -86,7 +110,8 @@ export async function resolveSession(db: Db, cfg: Config, sessionId: string): Pr
        FROM session s
        JOIN staff_user u ON u.id = s.subject_id
       WHERE s.id = $1 AND s.subject_type = 'staff'
-        AND s.revoked_at IS NULL AND s.expires_at > now()`,
+        AND s.revoked_at IS NULL AND s.expires_at > now()
+        AND s.mfa_pending = false`,   // a half-auth (awaiting 2FA) session is NOT authenticated
     [sessionId],
   );
   const r = rows[0];

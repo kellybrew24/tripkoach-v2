@@ -310,8 +310,10 @@ numbers with an explicit `currency` (USD), same as the read contract. Errors use
 - `POST /api/admin/auth/logout` — revokes the current session, clears the cookie → `{ ok: true }`.
 - `GET /api/admin/me` — (auth) → `{ staff, permissions }`.
 - Sessions have a **sliding 30-min idle expiry** (`ADMIN_SESSION_IDLE_MINUTES`) and honour `revoked_at`.
-- MFA (TOTP) schema exists (migration 006) but enforcement is a deliberate **follow-up** — password +
-  server-side session is live now. Account lockout is likewise a follow-up.
+- **MFA (TOTP) is live** (TRI-895, admin-MFA-only per board TRI-878). When `staff_user.mfa_enabled`, login
+  returns `{ mfaRequired: true }` and issues a **half-auth** `session` (`mfa_pending=true`, cookie set); the
+  auth guard rejects it until the second factor clears it. See **Staff MFA** below. Account lockout is still
+  a follow-up.
 
 ### AuthZ — RBAC
 A preHandler resolves session → `staff_user` → role → the `role_permission` matrix and attaches the
@@ -367,6 +369,37 @@ usdAmount, fxRate, ghsAmount, refundIntent }`. The `usd/fx/ghs` fields are surfa
 `POST /payments/:ref/refund` [payments.refund] `{ reason? }` — **refund FLAG only**: records the intent in
 `payment.raw.refund_intent` + audit; **does not** flip status to `refunded` (actual Paystack refund
 execution is a follow-up) → `{ refundRequested: true, payment }`.
+
+**Staff management (A4, TRI-895)** — all `[users.manage]` unless noted; every mutation is audited.
+- `GET /staff` → `{ staff: [{ id, name, email, role, status, jobTitle, mfaEnabled, initials, lastActiveAt,
+  last, createdAt }] }` (status ∈ `invited|active|disabled`).
+- `POST /staff` `{ email, name?, role?='operator', jobTitle? }` → `201 { staff, invite: { id, expiresAt,
+  emailStatus, acceptUrl?, token? } }`. Creates an **invited** `staff_user` + a hashed opaque token
+  (`staff_invite`, mig **013**) and **emails the accept-link** via the shared `sendEmail()` lib (Resend;
+  `skipped` when the transport is unconfigured). The `acceptUrl`/`token` are returned **only when the email
+  was not dispatched** (dev/unconfigured), so the flow is still completable; withheld once genuinely sent.
+  Re-inviting a still-**invited** address refreshes role/name and re-issues; inviting an **active** or
+  **disabled** address → `409`.
+- `PATCH /staff/:id` `{ role?, name?, jobTitle?, status? }` (status only `active|disabled` here).
+- `POST /staff/:id/disable` · `POST /staff/:id/enable` — disable revokes the member's live sessions.
+- `POST /staff/:id/resend-invite` — re-issues a fresh token + email for a pending account.
+- **Last-admin guard:** demoting/disabling the only remaining active admin → `409`.
+- `GET /staff/accept?token=` **(public)** → `{ invite: { valid, email?, name?, role?, expiresAt?, reason? } }`
+  — preview for the accept screen.
+- `POST /staff/accept` **(public — the token is the credential)** `{ token, password, name? }` → sets an
+  **argon2id** password, flips the user to **active** (can now log in), marks the token used. Bad token
+  `400`, expired `410`, already used `409`, weak password (<10 chars) `400`.
+
+**Staff MFA (TOTP, TRI-895)** — self-service on the current session; issuer = `MFA_ISSUER`.
+- `GET /auth/mfa/status` (auth) → `{ enabled, pendingEnrollment, recoveryCodesRemaining }`.
+- `POST /auth/mfa/enroll` (auth) → `{ secret, otpauthUri, issuer }` — issues a **pending** `mfa_factor`.
+- `POST /auth/mfa/verify` (auth) `{ code }` → confirms enrollment, flips `mfa_enabled=true`, returns the
+  **one-time** `{ enabled: true, recoveryCodes: string[10] }`. Wrong code `400`.
+- `POST /auth/mfa/disable` (auth) `{ code }` — requires a live TOTP or recovery code → `{ enabled: false }`.
+- `POST /auth/mfa/recovery-codes` (auth) → regenerates → `{ recoveryCodes }` (invalidates the old set).
+- `POST /auth/mfa` **(login challenge)** `{ code }` — completes a `mfa_pending` session with a live TOTP or
+  a single-use recovery code → `{ staff, permissions }` (same shape as a plain login). `401` on bad/expired
+  code or no pending challenge.
 
 Every mutation writes an **`audit_log`** row (actor from the session, `before`/`after`, action, target, ip).
 
@@ -445,6 +478,9 @@ migrating a fresh PGlite DB → `migrations applied: 12`; no renumbering, no col
 006_staff_rbac_auth → 007_content_leads_config → 008_write_path_payments_fx →
 009_admin_rbac_seed → 010_fx_rate_automation → 011_email_transport → 012_consumer_auth
 ```
+(012 = reviews-write, TRI-892, on a sibling branch; **013_staff_invites_mfa** (TRI-895) adds the
+`staff_invite` table + `mfa_factor.confirmed_at` + `session.mfa_pending`. Reconcile 012↔013 numbering on
+the epic merge — they touch disjoint tables, so order between them is immaterial.)
 008 (Phase 2 FX cols) and 009 (Phase 3 admin) are already integrated on this branch; 010 (FX automation:
 `fx_rate_history` + `payment.fx_source/fx_rate_at`) stacks on top, then 011 (P0 email transport:
 `email_message` send-log, TRI-880) and 012 (P1 consumer auth: `password_reset_token` + indexes, TRI-881).

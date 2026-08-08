@@ -12,6 +12,7 @@ import { buildServer } from '../src/server.ts';
 import type { PaystackClient, PaystackInitRequest } from '../src/paystack.ts';
 import { upsertStaff } from '../src/admin-seed.ts';
 import type { EmailTransport } from '../src/email.ts';
+import { totp } from '../src/totp.ts';
 
 let passed = 0;
 function ok(name: string, cond: boolean, detail = '') {
@@ -906,6 +907,124 @@ console.log('\n[consumer: read paths + admin realm still intact]');
 {
   ok('consumer /api/v1/tours still 200 total 11', (await get('/api/v1/tours?pageSize=60')).body.total === 11);
   ok('admin realm login still 200 (no cross-realm cookie bleed)', (await call('POST', '/api/admin/auth/login', { payload: { email: 'admin@tripkoach.com', password: 'Sup3r-Secret!' } })).status === 200);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TRI-895 P3 · Staff management (invite→provision→accept) + admin MFA (TOTP).
+// ─────────────────────────────────────────────────────────────────────────────
+console.log('\n[staff mgmt: invite → accept → login]');
+{
+  // Fresh admin session (the earlier one was revoked in the session-revocation test).
+  const adminLogin = await call('POST', '/api/admin/auth/login', { payload: { email: 'admin@tripkoach.com', password: 'Sup3r-Secret!' } });
+  const admin = adminLogin.cookies.find((c) => c.name === COOKIE)?.value ?? '';
+  ok('staff: re-login admin 200', adminLogin.status === 200 && !!admin);
+
+  // RBAC: viewer lacks users.manage → 403 on the staff list.
+  const vlogin = await call('POST', '/api/admin/auth/login', { payload: { email: 'viewer@tripkoach.com', password: 'Just-Look!' } });
+  const vcookie = vlogin.cookies.find((c) => c.name === COOKIE)?.value ?? '';
+  ok('staff: viewer list staff → 403 (missing users.manage)', (await call('GET', '/api/admin/staff', { cookie: vcookie })).status === 403);
+  ok('staff: unauthenticated invite → 401', (await call('POST', '/api/admin/staff', { payload: { email: 'x@y.z' } })).status === 401);
+
+  // Invite a new operator. Email transport is disabled in smoke → 'skipped', so the accept token is
+  // surfaced in the response for manual/testing redemption.
+  const invited = await call('POST', '/api/admin/staff', { cookie: admin, payload: { email: 'Nana@tripkoach.com', name: 'Nana Kwabena', role: 'operator' } });
+  ok('staff: invite → 201', invited.status === 201, JSON.stringify(invited.body));
+  ok('staff: invited user is status=invited operator', invited.body.staff?.status === 'invited' && invited.body.staff?.role === 'operator', JSON.stringify(invited.body.staff));
+  ok('staff: invite email skipped (no key) + token surfaced', invited.body.invite?.emailStatus === 'skipped' && typeof invited.body.invite?.token === 'string', JSON.stringify(invited.body.invite));
+  ok('staff: email lower-cased', invited.body.staff?.email === 'nana@tripkoach.com', invited.body.staff?.email);
+  const inviteToken = invited.body.invite.token as string;
+  const newStaffId = invited.body.staff.id as string;
+  // A send-log row was written for the invite (template staff_invite, related_type staff_invite).
+  const inviteLog = (await db.query(`SELECT * FROM email_message WHERE template='staff_invite' ORDER BY created_at DESC LIMIT 1`)).rows[0];
+  ok('staff: invite wrote a send-log row', !!inviteLog && inviteLog.related_type === 'staff_invite' && inviteLog.to_email === 'nana@tripkoach.com', JSON.stringify(inviteLog?.status));
+
+  ok('staff: list shows the invited user', (await call('GET', '/api/admin/staff', { cookie: admin })).body.staff.some((s: any) => s.email === 'nana@tripkoach.com'));
+
+  // Duplicate invite of an active member is a conflict; re-inviting the pending one is allowed (resend).
+  ok('staff: invite existing active admin → 409', (await call('POST', '/api/admin/staff', { cookie: admin, payload: { email: 'admin@tripkoach.com' } })).status === 409);
+
+  // Accept preview (public): valid before redemption.
+  const preview = await call('GET', `/api/admin/staff/accept?token=${encodeURIComponent(inviteToken)}`);
+  ok('staff: accept preview valid', preview.status === 200 && preview.body.invite?.valid === true && preview.body.invite?.email === 'nana@tripkoach.com', JSON.stringify(preview.body));
+
+  // Redeem with a weak password → 400; then a strong one → activated.
+  ok('staff: accept weak password → 400', (await call('POST', '/api/admin/staff/accept', { payload: { token: inviteToken, password: 'short' } })).status === 400);
+  const accept = await call('POST', '/api/admin/staff/accept', { payload: { token: inviteToken, password: 'Nana-Str0ng-Pass!' } });
+  ok('staff: accept → 200 ok', accept.status === 200 && accept.body.ok === true, JSON.stringify(accept.body));
+  // Token is single-use: a second redemption is rejected.
+  ok('staff: accept reused token → 409', (await call('POST', '/api/admin/staff/accept', { payload: { token: inviteToken, password: 'Another-Pass-1!' } })).status === 409);
+
+  // The provisioned staff can now log in and is active.
+  const newLogin = await call('POST', '/api/admin/auth/login', { payload: { email: 'nana@tripkoach.com', password: 'Nana-Str0ng-Pass!' } });
+  ok('staff: provisioned user can log in', newLogin.status === 200 && newLogin.body.staff?.role === 'operator', JSON.stringify(newLogin.body));
+  const nanaCookie = newLogin.cookies.find((c) => c.name === COOKIE)?.value ?? '';
+
+  // PATCH role, then disable / re-enable.
+  ok('staff: PATCH role → viewer', (await call('PATCH', `/api/admin/staff/${newStaffId}`, { cookie: admin, payload: { role: 'viewer' } })).body.role === 'viewer');
+  const disabled = await call('POST', `/api/admin/staff/${newStaffId}/disable`, { cookie: admin });
+  ok('staff: disable → status disabled', disabled.status === 200 && disabled.body.status === 'disabled');
+  ok('staff: disabled user session revoked → /me 401', (await call('GET', '/api/admin/me', { cookie: nanaCookie })).status === 401);
+  ok('staff: disabled user cannot log in → 401', (await call('POST', '/api/admin/auth/login', { payload: { email: 'nana@tripkoach.com', password: 'Nana-Str0ng-Pass!' } })).status === 401);
+  ok('staff: re-enable → active', (await call('POST', `/api/admin/staff/${newStaffId}/enable`, { cookie: admin })).body.status === 'active');
+
+  // Last-admin guard: cannot demote/disable the only active admin.
+  const adminRow = (await db.query(`SELECT id FROM staff_user WHERE email='admin@tripkoach.com'`)).rows[0];
+  ok('staff: cannot demote the last active admin → 409', (await call('PATCH', `/api/admin/staff/${adminRow.id}`, { cookie: admin, payload: { role: 'operator' } })).status === 409);
+  ok('staff: cannot disable the last active admin → 409', (await call('POST', `/api/admin/staff/${adminRow.id}/disable`, { cookie: admin })).status === 409);
+}
+
+console.log('\n[admin MFA: enroll → verify → login challenge → recovery]');
+{
+  const adminLogin = await call('POST', '/api/admin/auth/login', { payload: { email: 'admin@tripkoach.com', password: 'Sup3r-Secret!' } });
+  const admin = adminLogin.cookies.find((c) => c.name === COOKIE)?.value ?? '';
+
+  const status0 = await call('GET', '/api/admin/auth/mfa/status', { cookie: admin });
+  ok('mfa: initial status disabled', status0.status === 200 && status0.body.enabled === false);
+
+  // Enroll → secret + otpauth URI.
+  const enroll = await call('POST', '/api/admin/auth/mfa/enroll', { cookie: admin });
+  ok('mfa: enroll returns secret + otpauth URI', enroll.status === 200 && typeof enroll.body.secret === 'string' && /^otpauth:\/\/totp\//.test(enroll.body.otpauthUri || ''), JSON.stringify(enroll.body));
+  const secret = enroll.body.secret as string;
+
+  // Verify with a wrong code → 400; then a real code → enabled + one-time recovery codes.
+  ok('mfa: verify wrong code → 400', (await call('POST', '/api/admin/auth/mfa/verify', { cookie: admin, payload: { code: '000000' } })).status === 400);
+  const verify = await call('POST', '/api/admin/auth/mfa/verify', { cookie: admin, payload: { code: totp(secret) } });
+  ok('mfa: verify → enabled + 10 recovery codes', verify.status === 200 && verify.body.enabled === true && Array.isArray(verify.body.recoveryCodes) && verify.body.recoveryCodes.length === 10, JSON.stringify(verify.body?.enabled));
+  const recoveryCodes = verify.body.recoveryCodes as string[];
+
+  // Now a fresh login must challenge for MFA (returns mfaRequired, no staff payload yet).
+  const login2 = await call('POST', '/api/admin/auth/login', { payload: { email: 'admin@tripkoach.com', password: 'Sup3r-Secret!' } });
+  ok('mfa: login now returns mfaRequired', login2.status === 200 && login2.body.mfaRequired === true && !login2.body.staff, JSON.stringify(login2.body));
+  const pendingCookie = login2.cookies.find((c) => c.name === COOKIE)?.value ?? '';
+  // The half-auth session cannot touch protected routes yet.
+  ok('mfa: pending session → /me 401 (half-auth)', (await call('GET', '/api/admin/me', { cookie: pendingCookie })).status === 401);
+  ok('mfa: pending session write → 401', (await call('GET', '/api/admin/staff', { cookie: pendingCookie })).status === 401);
+  // Wrong challenge code → 401; correct TOTP → promoted to full session with staff+permissions.
+  ok('mfa: challenge wrong code → 401', (await call('POST', '/api/admin/auth/mfa', { cookie: pendingCookie, payload: { code: '111111' } })).status === 401);
+  const challenge = await call('POST', '/api/admin/auth/mfa', { cookie: pendingCookie, payload: { code: totp(secret) } });
+  ok('mfa: challenge TOTP → full session', challenge.status === 200 && challenge.body.staff?.role === 'admin' && Array.isArray(challenge.body.permissions), JSON.stringify(challenge.body?.staff));
+  ok('mfa: promoted session → /me 200', (await call('GET', '/api/admin/me', { cookie: pendingCookie })).status === 200);
+
+  // Recovery code path: a fresh login, then complete the challenge with a single-use recovery code.
+  const login3 = await call('POST', '/api/admin/auth/login', { payload: { email: 'admin@tripkoach.com', password: 'Sup3r-Secret!' } });
+  const pending3 = login3.cookies.find((c) => c.name === COOKIE)?.value ?? '';
+  const rc = recoveryCodes[0];
+  const recover = await call('POST', '/api/admin/auth/mfa', { cookie: pending3, payload: { code: rc } });
+  ok('mfa: challenge with recovery code → full session', recover.status === 200 && recover.body.staff?.role === 'admin');
+  // The same recovery code cannot be reused.
+  const login4 = await call('POST', '/api/admin/auth/login', { payload: { email: 'admin@tripkoach.com', password: 'Sup3r-Secret!' } });
+  const pending4 = login4.cookies.find((c) => c.name === COOKIE)?.value ?? '';
+  ok('mfa: recovery code is single-use → 401 on reuse', (await call('POST', '/api/admin/auth/mfa', { cookie: pending4, payload: { code: rc } })).status === 401);
+
+  // Complete pending4 with TOTP so we hold a full session, then disable MFA (requires a live code).
+  const promote4 = await call('POST', '/api/admin/auth/mfa', { cookie: pending4, payload: { code: totp(secret) } });
+  ok('mfa: pending4 promoted via TOTP', promote4.status === 200);
+  ok('mfa: disable without code → 400', (await call('POST', '/api/admin/auth/mfa/disable', { cookie: pending4, payload: {} })).status === 400);
+  const disable = await call('POST', '/api/admin/auth/mfa/disable', { cookie: pending4, payload: { code: totp(secret) } });
+  ok('mfa: disable with TOTP → enabled false', disable.status === 200 && disable.body.enabled === false, JSON.stringify(disable.body));
+  // After disabling, login no longer challenges.
+  const login5 = await call('POST', '/api/admin/auth/login', { payload: { email: 'admin@tripkoach.com', password: 'Sup3r-Secret!' } });
+  ok('mfa: after disable, login returns full session (no challenge)', login5.status === 200 && !!login5.body.staff && !login5.body.mfaRequired, JSON.stringify(login5.body));
 }
 
 await app.close();
