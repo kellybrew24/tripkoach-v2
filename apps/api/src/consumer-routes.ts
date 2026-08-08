@@ -13,9 +13,16 @@ import { createConsumerService, ConsumerError } from './consumer.ts';
 import {
   createUserSession, revokeUserSession, setUserCookie, clearUserCookie, makeRequireUser, resolveUserSession,
 } from './consumer-auth.ts';
+import { createMediaService, MediaError } from './media.ts';
+import { createStorage, type Storage } from './storage.ts';
+import { createAvatarService, AvatarError, AVATAR_MAX_BYTES } from './avatar.ts';
 
-export function registerConsumer(app: FastifyInstance, db: Db, cfg: Config): void {
+export function registerConsumer(app: FastifyInstance, db: Db, cfg: Config, storage?: Storage): void {
   const svc = createConsumerService(db, cfg);
+  // TRI-943: avatar upload rides the shared TRI-918 R2 media pipeline. Storage is 'enabled' only when the
+  // R2 credentials are present; unconfigured → the upload route answers 503 (same posture as admin media).
+  const mediaSvc = createMediaService(db, cfg, storage ?? createStorage(cfg.media));
+  const avatarSvc = createAvatarService(db, cfg, mediaSvc);
   const requireUser = makeRequireUser(db, cfg);
   const authed = { preHandler: requireUser };
   const body = (req: FastifyRequest) => (req.body ?? {}) as unknown;
@@ -24,8 +31,12 @@ export function registerConsumer(app: FastifyInstance, db: Db, cfg: Config): voi
   app.register(async (api) => {
     // Map service errors to the shared { error: { code, message } } envelope.
     api.setErrorHandler((err: any, _req, reply) => {
-      if (err instanceof ConsumerError) {
+      if (err instanceof ConsumerError || err instanceof AvatarError || err instanceof MediaError) {
         return reply.code(err.httpStatus).send({ error: { code: err.code, message: err.message, ...(err.field ? { field: err.field } : {}) } });
+      }
+      // Fastify raises FST_ERR_CTP_BODY_TOO_LARGE (413) when an avatar upload exceeds the route bodyLimit.
+      if ((err as any).statusCode === 413 || (err as any).code === 'FST_ERR_CTP_BODY_TOO_LARGE') {
+        return reply.code(413).send({ error: { code: 'too_large', message: 'Image exceeds the upload size limit.' } });
       }
       if (err?.statusCode === 400) {
         return reply.code(400).send({ error: { code: 'bad_request', message: err.message } });
@@ -33,6 +44,12 @@ export function registerConsumer(app: FastifyInstance, db: Db, cfg: Config): voi
       api.log.error(err);
       return reply.code(500).send({ error: { code: 'internal', message: 'Internal error' } });
     });
+
+    // TRI-943: buffer raw avatar image bytes (the SPA sends the File/Blob directly; curl uses
+    // --data-binary). Scoped to THIS consumer plugin — the JSON /auth + /me paths are untouched because
+    // Fastify keeps the built-in application/json parser for every other content type.
+    const AVATAR_CTYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/octet-stream'];
+    api.addContentTypeParser(AVATAR_CTYPES, { parseAs: 'buffer' }, (_req, buf, done) => done(null, buf));
 
     // ── Signup (creates the account, links guest bookings, opens a session) ──
     const signup = async (req: FastifyRequest, reply: FastifyReply) => {
@@ -89,5 +106,34 @@ export function registerConsumer(app: FastifyInstance, db: Db, cfg: Config): voi
 
     // ── My bookings (authed) ──
     api.get('/me/bookings', authed, async (req: FastifyRequest) => ({ bookings: await svc.listMyBookings(req.account!.id) }));
+
+    // ── Avatar (TRI-943) ──────────────────────────────────────────────────────
+    const avatarActor = (req: FastifyRequest) => ({ id: req.account!.id, ip: req.ip ?? null });
+    // Upload my avatar. Raw image bytes in the body; filename via ?filename= or X-Filename. Hardened
+    // validation + Option A auto-approve live inside the service.
+    api.post('/me/avatar', {
+      preHandler: requireUser,
+      // Allow the avatar cap (+slack) past Fastify's 1MB default, scoped to this route only.
+      bodyLimit: AVATAR_MAX_BYTES + 1024,
+    }, async (req: FastifyRequest, reply: FastifyReply) => {
+      const raw = req.body;
+      const bytes = Buffer.isBuffer(raw) ? raw : Buffer.isBuffer((raw as any)?.data) ? (raw as any).data : null;
+      if (!bytes) {
+        return reply.code(415).send({ error: { code: 'unsupported_type', message: 'Send the raw image bytes with an image/* Content-Type.' } });
+      }
+      const q = (req.query ?? {}) as Record<string, unknown>;
+      const filename = (q.filename != null ? String(q.filename) : undefined) ?? (req.headers['x-filename'] as string | undefined) ?? null;
+      const declaredType = (req.headers['content-type'] as string | undefined) ?? null;
+      return avatarSvc.uploadAvatar(req.account!.id, bytes, { filename, declaredType }, avatarActor(req));
+    });
+    // Clear my avatar back to the default placeholder.
+    api.delete('/me/avatar', authed, async (req: FastifyRequest) => avatarSvc.deleteAvatar(req.account!.id, avatarActor(req)));
+
+    // Report another customer's avatar → auto-hides on first report (rate-limited).
+    api.post('/avatars/:userId/report', authed, async (req: FastifyRequest) => {
+      const b = (req.body ?? {}) as { reason?: unknown };
+      const reason = typeof b.reason === 'string' ? b.reason : null;
+      return avatarSvc.reportAvatar(req.account!.id, (req.params as any).userId, reason, avatarActor(req));
+    });
   }, { prefix: cfg.apiPrefix });
 }

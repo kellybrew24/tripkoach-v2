@@ -12,6 +12,7 @@ import type { Config } from './config.ts';
 import { hashPassword, verifyPassword, audit } from './auth.ts';
 import { revokeAllUserSessions } from './consumer-auth.ts';
 import { sendEmail, type SendOptions } from './email.ts';
+import { avatarUrlFor } from './avatar.ts';
 import { fromMinor } from './util.ts';
 
 // ── Errors (mapped to the shared {error:{code,message}} envelope by the route layer) ──
@@ -92,12 +93,19 @@ export function createConsumerService(db: Db, cfg: Config) {
       twoFactorEnabled: u.two_factor_enabled,
       emailVerified: !!u.email_verified_at,       // TRI-941: soft email-verification signal (never a gate)
       emailVerifiedAt: u.email_verified_at ?? null,
+      // TRI-943: avatar. avatarUrl is null when rejected/hidden (FE renders the default placeholder).
+      avatarStatus: u.avatar_status ?? null,
+      avatarUrl: avatarUrlFor(u.avatar_status, u.avatar_url),
       createdAt: u.created_at,
     };
   }
 
   async function loadUser(userId: string): Promise<any | null> {
-    return (await db.query(`SELECT * FROM user_account WHERE id = $1`, [userId])).rows[0] ?? null;
+    // LEFT JOIN the avatar's media_asset so the profile DTO can surface its CDN url (TRI-943).
+    return (await db.query(
+      `SELECT u.*, am.url AS avatar_url
+         FROM user_account u LEFT JOIN media_asset am ON am.id = u.avatar_media_id
+        WHERE u.id = $1`, [userId])).rows[0] ?? null;
   }
 
   async function getProfile(userId: string) {

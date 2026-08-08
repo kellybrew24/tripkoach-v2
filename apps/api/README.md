@@ -524,7 +524,9 @@ Phase 1: `user_account`, `notification_preference`).
 
 ### Profile & preferences (authed — session cookie required; **401** otherwise)
 - `GET  /api/v1/me` → `{ user }` — full profile (name, email, phone, country, photoUrl, emergency contact,
-  dietaryNeeds, language, displayCurrency, dataSaver, twoFactorEnabled, createdAt).
+  dietaryNeeds, language, displayCurrency, dataSaver, twoFactorEnabled, emailVerified, **avatarUrl**,
+  **avatarStatus**, createdAt). `avatarUrl` is `null` (FE shows the default placeholder) when `avatarStatus`
+  is `rejected`/`hidden`; `avatarStatus` is `null` when no avatar is set (see Avatar below).
 - `PATCH /api/v1/me` → `{ user }` — partial update of any profile field (email change is uniqueness-checked;
   `displayCurrency` upper-cased).
 - `POST /api/v1/me/password` → `{ ok }` — body `{ currentPassword, newPassword }`; wrong current → **401**.
@@ -539,6 +541,52 @@ Phase 1: `user_account`, `notification_preference`).
   automatically at signup/login when the lead-traveller (or ops-customer) email matches the account email.
 
 Every consumer mutation writes an `audit_log` row with `actor_type='user'`.
+
+## Customer avatar upload + image moderation (TRI-942 / TRI-946)
+
+Board posture **Option A "show-then-moderate"**: a valid avatar goes **live immediately** once it clears the
+hardened automated gate (magic-byte sniff + type allow-list + size + dimension caps in the shared TRI-918
+media pipeline). A customer report or an admin action auto-hides it into a moderation queue. The paid image
+classifier is a fast-follow that swaps the `moderateImage()` seam body (returns `{allowed:true}` in v1) with
+**no route/schema change**. Storage rides the existing R2 pipeline (SigV4 PUT → SHA-256 dedupe → immutable
+`cdn.tripkoach.com` URL, recorded in `media_asset`). Migration **`022_avatar_moderation.sql`** adds
+`user_account.{avatar_media_id, avatar_status, avatar_updated_at}` (+ CHECK on status) and the append-only
+`avatar_moderation_action` audit table.
+
+**`avatarStatus`** ∈ `null` (none) | `pending` | `approved` | `rejected` | `hidden`.
+**Serving rule (FE relies on this):** `avatarUrl` is `null` unless status is `approved` or `pending`; when
+`rejected`/`hidden`, `/me` returns `avatarUrl:null` so the FE falls back to the DS placeholder. (Admins still
+see the real image in the moderation queue.)
+
+### Consumer (authed — session cookie; **401** otherwise)
+- `POST   /api/v1/me/avatar` → `{ avatarUrl, avatarStatus }` — body is the **raw image bytes** (send the
+  `File`/`Blob` directly with an `image/*` `Content-Type`; curl `--data-binary`). Optional `?filename=` or
+  `X-Filename` header. Hardened caps: **≤5MB**, **≤4096×4096**, types **jpeg/png/webp** (no GIF). Bad type /
+  oversize → **415/413/400** before any upload. On a clean gate the avatar is `approved` and live at once.
+- `DELETE /api/v1/me/avatar` → `{ avatarUrl:null, avatarStatus:null }` — clears back to the default.
+- `POST   /api/v1/avatars/:userId/report` → `{ ok:true, hidden }` — report another customer's avatar; the
+  first report on a visible avatar flips it to `hidden` and enqueues it. Rate-limited **max 5/hour** per
+  reporter (across targets) → **429**; reporting your own → **400**; target has no avatar → **404**.
+- `GET /api/v1/me` now also returns `avatarUrl` + `avatarStatus` (per the serving rule above).
+
+### Admin (session cookie + `content.manage`)
+- `GET  /api/admin/avatars/queue?status=pending,hidden` → `{ items, statuses }` — each item: `userId, name,
+  email, avatarStatus, avatarUrl` (real image, even when hidden), `media{id,contentType,width,height,byteSize}`,
+  `lastReportReason, reportCount, updatedAt`. Default statuses `pending,hidden` (`flagged` is a synonym for
+  `hidden`).
+- `POST /api/admin/avatars/:userId/approve` — → `approved` (live again).
+- `POST /api/admin/avatars/:userId/reject`  — → `rejected` (hidden from `/me` + public).
+- `POST /api/admin/avatars/:userId/remove`  — → `hidden` (queued/removed).
+  Each optional `{ reason }`; returns `{ userId, avatarStatus, avatarUrl }`. Every action writes an
+  `avatar_moderation_action` row **and** a shared `audit_log` entry (`avatar.{approve,reject,remove}`).
+  *(A JSON alias `GET /api/admin/moderation/avatars` + `POST /api/admin/moderation/avatars/:userId` with
+  `{action}` in the body hits the same service, for callers that prefer action-in-body.)*
+- `GET /api/admin/customers` and `/api/admin/customers/:id` now include `avatarUrl` + `avatarStatus`
+  (null for guests with no linked account).
+
+**Ops env (all optional overrides):** `AVATAR_MAX_BYTES`, `AVATAR_MAX_DIMENSION`, `AVATAR_ALLOWED_TYPES`,
+`AVATAR_REPORT_MAX_PER_WINDOW` (default 5), `AVATAR_REPORT_WINDOW_SECONDS` (default 3600). Upload requires R2
+storage configured (same creds as admin media); unconfigured → **503**.
 
 ### Migration coordination (Phase 2 ↔ Phase 3)
 Phase 2 (TRI-866) owns `008_write_path_payments_fx.sql`; this phase adds **`009_admin_rbac_seed.sql`**

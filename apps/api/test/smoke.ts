@@ -1488,6 +1488,77 @@ console.log('\n[consumer: email verification (TRI-941)]');
   ok('expired verify token → 400', (await ucall('POST', '/api/v1/auth/verify-email', { payload: { token: nanaTok } })).status === 400);
 }
 
+console.log('\n[consumer: avatar upload + moderation (TRI-943)]');
+{
+  const PNG_A = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+  const GIF_A = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
+  const putAvatar = async (bytes: Buffer, contentType: string, cookie: string) =>
+    app.inject({ method: 'POST', url: '/api/v1/me/avatar', payload: bytes,
+      headers: { 'content-type': contentType, ...(cookie ? { cookie: `${UCOOKIE}=${cookie}` } : {}) } });
+
+  // Two customers: an owner who uploads, and a reporter.
+  const owner = await ucall('POST', '/api/v1/auth/signup', { payload: { email: 'ava@example.com', password: 'Av4-Str0ng!', name: 'Ava Owner' } });
+  const ownerCookie = owner.cookie;
+  const reporter = await ucall('POST', '/api/v1/auth/signup', { payload: { email: 'rep@example.com', password: 'Rep0-Str0ng!', name: 'Rex Reporter' } });
+  const reporterCookie = reporter.cookie;
+
+  // AuthZ + validation.
+  ok('avatar upload without session → 401', (await putAvatar(PNG_A, 'image/png', '')).statusCode === 401);
+  ok('avatar GIF rejected (not in avatar allow-list) → 415', (await putAvatar(GIF_A, 'image/gif', ownerCookie)).statusCode === 415);
+  ok('avatar non-image bytes → 415', (await putAvatar(Buffer.from('nope'), 'image/png', ownerCookie)).statusCode === 415);
+
+  // Happy path: valid PNG → Option A auto-approve, live immediately.
+  const up = await putAvatar(PNG_A, 'image/png', ownerCookie);
+  ok('avatar upload → 200', up.statusCode === 200, JSON.stringify(up.json()));
+  const upBody = up.json();
+  ok('avatar auto-approved (status=approved)', upBody.avatarStatus === 'approved', JSON.stringify(upBody));
+  ok('avatar url under cdn.tripkoach.com', /^https:\/\/cdn\.tripkoach\.com\/media\//.test(upBody.avatarUrl || ''), upBody.avatarUrl);
+
+  // /me exposes avatar; a system 'approve' moderation row was written.
+  const meAva = await ucall('GET', '/api/v1/me', { cookie: ownerCookie });
+  ok('/me exposes avatarUrl + avatarStatus=approved', meAva.body.user.avatarStatus === 'approved' && !!meAva.body.user.avatarUrl, JSON.stringify({ s: meAva.body.user.avatarStatus, u: meAva.body.user.avatarUrl }));
+  const avaId = (await db.query(`SELECT id FROM user_account WHERE email='ava@example.com'`)).rows[0].id;
+  ok('system approve action logged', Number((await db.query(`SELECT COUNT(*)::int n FROM avatar_moderation_action WHERE user_id=$1 AND action='approve' AND actor_type='system'`, [avaId])).rows[0].n) === 1);
+
+  // Report path: reporter cannot report own avatar; first report on ava auto-hides it.
+  ok('report own avatar → 400', (await ucall('POST', `/api/v1/avatars/${(await db.query(`SELECT id FROM user_account WHERE email='rep@example.com'`)).rows[0].id}/report`, { cookie: reporterCookie, payload: { reason: 'self' } })).status === 400);
+  const rep = await ucall('POST', `/api/v1/avatars/${avaId}/report`, { cookie: reporterCookie, payload: { reason: 'Inappropriate' } });
+  ok('report avatar → 200 hidden=true', rep.status === 200 && rep.body.ok === true && rep.body.hidden === true, JSON.stringify(rep.body));
+  ok('reported avatar now hidden in DB', (await db.query(`SELECT avatar_status FROM user_account WHERE id=$1`, [avaId])).rows[0].avatar_status === 'hidden');
+  const meHidden = await ucall('GET', '/api/v1/me', { cookie: ownerCookie });
+  ok('/me hides avatarUrl when hidden (status still visible to owner)', meHidden.body.user.avatarUrl === null && meHidden.body.user.avatarStatus === 'hidden', JSON.stringify(meHidden.body.user));
+  ok('report + auto_flag actions logged', Number((await db.query(`SELECT COUNT(*)::int n FROM avatar_moderation_action WHERE user_id=$1 AND action IN ('report','auto_flag')`, [avaId])).rows[0].n) === 2);
+
+  // Admin queue + moderation.
+  const alogin = await call('POST', '/api/admin/auth/login', { payload: { email: 'admin@tripkoach.com', password: 'Sup3r-Secret!' } });
+  const aCookie = alogin.cookies.find((c) => c.name === COOKIE)?.value ?? '';
+  const queue = await call('GET', '/api/admin/avatars/queue', { cookie: aCookie });
+  ok('admin moderation queue 200', queue.status === 200 && Array.isArray(queue.body.items), JSON.stringify(queue.body).slice(0, 80));
+  const qItem = queue.body.items.find((i: any) => i.userId === avaId);
+  ok('hidden avatar surfaces in queue with report reason', qItem?.avatarStatus === 'hidden' && qItem?.lastReportReason === 'Inappropriate' && qItem?.reportCount === 1, JSON.stringify(qItem));
+  ok('admin sees the real avatar url even when hidden', /^https:\/\/cdn/.test(qItem?.avatarUrl || ''), qItem?.avatarUrl);
+
+  ok('moderate unknown verb → 404', (await call('POST', `/api/admin/avatars/${avaId}/nuke`, { cookie: aCookie, payload: {} })).status === 404);
+  const approve = await call('POST', `/api/admin/avatars/${avaId}/approve`, { cookie: aCookie, payload: { reason: 'looks fine' } });
+  ok('admin approve → status approved + url restored', approve.status === 200 && approve.body.avatarStatus === 'approved' && /^https:\/\/cdn/.test(approve.body.avatarUrl || ''), JSON.stringify(approve.body));
+  ok('/me url restored after admin approve', !!(await ucall('GET', '/api/v1/me', { cookie: ownerCookie })).body.user.avatarUrl);
+  const reject = await call('POST', `/api/admin/avatars/${avaId}/reject`, { cookie: aCookie, payload: { reason: 'nope' } });
+  ok('admin reject → status rejected, /me url null', reject.body.avatarStatus === 'rejected' && (await ucall('GET', '/api/v1/me', { cookie: ownerCookie })).body.user.avatarUrl === null);
+  ok('admin moderation writes shared audit-log', Number((await db.query(`SELECT COUNT(*)::int n FROM audit_log WHERE action IN ('avatar.approve','avatar.reject') AND target_id=$1`, [avaId])).rows[0].n) === 2);
+
+  // Admin customers view surfaces avatar status.
+  await db.query(`INSERT INTO customer (user_id, name, email) VALUES ($1,'Ava Owner','ava@example.com') ON CONFLICT DO NOTHING`, [avaId]);
+  const custList = await call('GET', '/api/admin/customers?pageSize=100', { cookie: aCookie });
+  const avaCust = custList.body.items.find((c: any) => c.email === 'ava@example.com');
+  ok('admin customers surface avatarStatus', avaCust?.avatarStatus === 'rejected', JSON.stringify({ s: avaCust?.avatarStatus }));
+
+  // Owner clears their avatar back to default.
+  const del = await ucall('DELETE', '/api/v1/me/avatar', { cookie: ownerCookie });
+  ok('DELETE /me/avatar → 200 null/null', del.status === 200 && del.body.avatarUrl === null && del.body.avatarStatus === null, JSON.stringify(del.body));
+  ok('cleared avatar in DB (media_id + status null)', (await db.query(`SELECT avatar_media_id, avatar_status FROM user_account WHERE id=$1`, [avaId])).rows[0].avatar_media_id === null);
+}
+
 console.log('\n[admin: customers surface email verification (TRI-941)]');
 {
   // The customer (ops) table is populated independently of guest bookings; seed a customer linked to the

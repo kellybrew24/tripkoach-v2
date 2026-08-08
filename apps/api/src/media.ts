@@ -130,6 +130,19 @@ export interface UploadInput {
   declaredType?: string | null;
 }
 
+// Per-call validation overrides. When omitted the media config defaults apply (admin library uploads use
+// none). The avatar path (TRI-943) passes a stricter allow-list + a smaller size cap + a dimension cap so
+// the SAME magic-byte-authoritative pipeline enforces them — validation stays inside the sniffer, never in
+// a caller that could be bypassed. All caps are checked BEFORE the R2 PUT so a rejection wastes no upload.
+export interface UploadLimits {
+  /** Override the max byte size (defaults to cfg.media.maxBytes). */
+  maxBytes?: number;
+  /** Reject when the sniffed width OR height exceeds this many pixels. */
+  maxDimension?: number;
+  /** Override the allowed (sniffed) MIME types (defaults to cfg.media.allowedTypes). */
+  allowedTypes?: readonly string[];
+}
+
 export function createMediaService(db: Db, cfg: Config, storage: Storage) {
   const m = cfg.media;
 
@@ -148,21 +161,30 @@ export function createMediaService(db: Db, cfg: Config, storage: Storage) {
     return { assets: rows.map(rowToAsset), total, limit, offset };
   }
 
-  async function upload(input: UploadInput, actor: MediaActor) {
+  async function upload(input: UploadInput, actor: MediaActor, limits: UploadLimits = {}) {
     if (!storage.enabled) {
       throw new MediaError('storage_unconfigured', 'Image storage is not configured on this environment.', 503);
     }
+    const maxBytes = limits.maxBytes != null ? Math.min(limits.maxBytes, m.maxBytes) : m.maxBytes;
+    const allowedTypes = limits.allowedTypes ?? m.allowedTypes;
     const buf = input.bytes;
     if (!buf || buf.length === 0) throw new MediaError('empty', 'No image bytes were uploaded.', 400, 'file');
-    if (buf.length > m.maxBytes) {
-      throw new MediaError('too_large', `Image exceeds the ${Math.round(m.maxBytes / (1024 * 1024))}MB limit.`, 413, 'file');
+    if (buf.length > maxBytes) {
+      throw new MediaError('too_large', `Image exceeds the ${Math.round(maxBytes / (1024 * 1024))}MB limit.`, 413, 'file');
     }
     const sniff = sniffImage(buf);
     if (!sniff) {
       throw new MediaError('unsupported_type', 'File is not a recognised image (JPEG, PNG, WebP, or GIF).', 415, 'file');
     }
-    if (!m.allowedTypes.includes(sniff.contentType)) {
+    if (!allowedTypes.includes(sniff.contentType)) {
       throw new MediaError('unsupported_type', `Images of type ${sniff.contentType} are not allowed.`, 415, 'file');
+    }
+    // Dimension cap (avatar path): reject oversize images before we spend an R2 PUT. Only enforced when a
+    // cap is supplied AND the sniffer could read the dimensions (a valid image with unreadable dims passes).
+    if (limits.maxDimension != null && sniff.width != null && sniff.height != null &&
+        (sniff.width > limits.maxDimension || sniff.height > limits.maxDimension)) {
+      throw new MediaError('dimensions_too_large',
+        `Image dimensions (${sniff.width}×${sniff.height}) exceed the ${limits.maxDimension}×${limits.maxDimension} limit.`, 400, 'file');
     }
 
     const sha = createHash('sha256').update(buf).digest('hex');
