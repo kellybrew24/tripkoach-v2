@@ -389,7 +389,11 @@ function AcctItem({ icon, label, tone, onClick }) {
   );
 }
 
-function Shell({ children, currency, setCurrency, go }) {
+// Maps the active screen to the nav item that should read as current (TRI-940).
+// Tour detail highlights Tours; a blog post highlights Stories. Screens with no
+// nav home (home, checkout, account…) map to undefined ⇒ no item is marked active.
+const NAV_CURRENT = { browse: "#browse", tour: "#browse", regions: "#regions", marketplace: "#marketplace", blog: "#blog", post: "#blog", about: "#about" };
+function Shell({ children, currency, setCurrency, go, screen }) {
   const [menu, setMenu] = React.useState(false);
   // Reactive session state (TRI-922). The prototype hardcoded `signedIn` on the
   // DS <Header> (avatar always) AND always rendered a custom "Sign in" button, so
@@ -447,7 +451,7 @@ function Shell({ children, currency, setCurrency, go }) {
   };
   return (
     <div style={{ background: "var(--bg-page)", minHeight: "100%" }} onClick={onNav}>
-      <Header items={NAV} current="#browse" signedIn={authed !== false} logoSrc="../../assets/logo-badge.png"
+      <Header items={NAV} current={NAV_CURRENT[screen]} signedIn={authed !== false} logoSrc="../../assets/logo-badge.png"
         right={<>
           <CurrencyToggle value={currency} onChange={setCurrency} />
           <IconButton icon="menu" label="Open menu" variant="ghost" className="tk-only-mobile" onClick={() => setMenu(true)} />
@@ -504,10 +508,21 @@ function FilterPanel({ tours, filters, toggle, onClear }) {
   );
 }
 
-function BrowseWeb({ go, currency, view }) {
+function BrowseWeb({ go, currency, view, initialRegion }) {
   const tours = window.TK_DATA.tours;
-  const [filters, setFilters] = React.useState({ region: [], price: [], duration: [], category: [] });
+  // Seed the region filter from a /browse?region=<name> deep link (TRI-940). Only
+  // apply it when it names a real tour region so a stale/unknown slug is ignored
+  // (shown filter always corresponds to actual data) rather than yielding 0 tours.
+  const seedRegion = initialRegion && tours.some(t => t.region === initialRegion) ? [initialRegion] : [];
+  const [filters, setFilters] = React.useState({ region: seedRegion, price: [], duration: [], category: [] });
   const [query, setQuery] = React.useState("");
+  // Keep the region filter in sync with the deep link across in-place route
+  // changes (browser back/forward between /browse and /browse?region=…), where
+  // BrowseWeb stays mounted and the state initializer above does not re-run.
+  React.useEffect(() => {
+    const next = initialRegion && tours.some(t => t.region === initialRegion) ? [initialRegion] : [];
+    setFilters(f => (f.region.length === next.length && f.region.every((x, i) => x === next[i]) ? f : { ...f, region: next }));
+  }, [initialRegion]);
   const toggle = (key, val) => setFilters(f => ({ ...f, [key]: f[key].includes(val) ? f[key].filter(x => x !== val) : [...f[key], val] }));
   const clear = () => setFilters({ region: [], price: [], duration: [], category: [] });
   const shown = tours.filter(t => matchesFilters(t, filters) && (!query || (t.title + t.region + t.category).toLowerCase().includes(query.toLowerCase())));

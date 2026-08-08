@@ -55,7 +55,7 @@ function RegionsPage({ go }) {
       <Wrap>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "var(--space-5)" }}>
           {regions.map(r => (
-            <a key={r.name + r.slug} href="#browse" onClick={(e) => { e.preventDefault(); go("browse"); }}
+            <a key={r.name + r.slug} href={"/browse?region=" + encodeURIComponent(r.name)} onClick={(e) => { e.preventDefault(); go("browse", r.name); }}
               className="tk-card tk-card--interactive" style={{ display: "flex", overflow: "hidden", textDecoration: "none", color: "inherit" }}>
               <div className="tk-media" style={{ flex: "0 0 38%", aspectRatio: "1" }}><img src={IMG(r.slug)} alt="" loading="lazy" /></div>
               <div className="tk-card__body" style={{ justifyContent: "center", gap: "var(--space-2)" }}>

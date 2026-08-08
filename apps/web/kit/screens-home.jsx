@@ -95,8 +95,13 @@ function HomeWeb({ go }) {
           </p>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "var(--space-4)" }}>
-          {REGIONS.map((r, i) => (
-            <a key={r.name} href="#" onClick={(e) => { e.preventDefault(); go("browse"); }} className="tk-region"
+          {REGIONS
+            // Count from live data and drop regions with no running tours (e.g.
+            // the stale "Savannah" card), so every card deep-links to real results.
+            .map(r => ({ ...r, count: window.TK_REGION_TOURS ? window.TK_REGION_TOURS(r.name).length : r.count }))
+            .filter(r => r.count > 0)
+            .map((r, i) => (
+            <a key={r.name} href={"/browse?region=" + encodeURIComponent(r.name)} onClick={(e) => { e.preventDefault(); go("browse", r.name); }} className="tk-region"
               style={{ position: "relative", display: "block", borderRadius: "var(--radius-card)", overflow: "hidden", aspectRatio: i === 0 ? "2 / 1.35" : "1 / 1", gridColumn: i === 0 ? "span 2" : "span 1", gridRow: i === 0 ? "span 1" : "auto", textDecoration: "none", background: "var(--n-800)", boxShadow: "var(--elev-1)" }}>
               <img src={IMG(r.slug)} alt="" loading="lazy" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", transition: "transform var(--dur-slow) var(--ease-standard)" }} />
               <span style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(20,19,18,0) 30%, rgba(20,19,18,.78) 100%)" }} />

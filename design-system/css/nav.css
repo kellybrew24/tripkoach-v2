@@ -5,8 +5,13 @@
 @media (min-width:1024px){.tk-header__nav{display:flex}}
 .tk-navlink{display:inline-flex;align-items:center;min-height:40px;padding:0 var(--space-3);border-radius:var(--radius-sm);
   color:var(--text-body);font-size:var(--text-body-sm-size);font-weight:var(--fw-semibold);text-decoration:none;transition:var(--transition-control)}
-.tk-navlink:hover{background:var(--bg-subtle);color:var(--text-strong);text-decoration:none}
+/* Hover (TRI-940): perceptible surface tint + a muted underline that previews
+   the active treatment. Kept distinct from — and lower contrast than — the
+   aria-current gold underline below, which still wins on the active item. */
+.tk-navlink:hover{background:var(--bg-subtle);color:var(--text-strong);text-decoration:none;box-shadow:inset 0 -2px 0 var(--text-muted)}
+.tk-navlink:focus-visible{outline:2px solid var(--brand-gold);outline-offset:2px}
 .tk-navlink[aria-current="page"]{color:var(--text-strong);box-shadow:inset 0 -2px 0 var(--brand-gold)}
+.tk-navlink[aria-current="page"]:hover{box-shadow:inset 0 -2px 0 var(--brand-gold)}
 .tk-bottomnav{position:sticky;bottom:0;z-index:var(--z-header);display:flex;background:var(--surface-card);
   border-block-start:1px solid var(--border-subtle);padding-block-end:env(safe-area-inset-bottom)}
 .tk-bottomnav__item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;

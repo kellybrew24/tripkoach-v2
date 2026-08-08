@@ -35,7 +35,7 @@ function pathForScreen(screen, slug) {
   if (screen === "booking" && slug) return "/booking/" + encodeURIComponent(slug);
   return PATH_BY_SCREEN[screen] || "/";
 }
-function routeFromPath(pathname) {
+function routeFromPath(pathname, search) {
   const path = (pathname || "/").replace(/\/+$/, "") || "/";
   const m = path.match(/^\/blog\/(.+)$/);
   if (m) return { screen: "post", slug: decodeURIComponent(m[1]) };
@@ -54,7 +54,14 @@ function routeFromPath(pathname) {
   const rv = path.match(/^\/reviews\/redeem\/(.+)$/);
   if (rv) return { screen: "review", slug: null, token: decodeURIComponent(rv[1]) };
   const hit = ROUTES.find(([, p]) => p === path);
-  return { screen: hit ? hit[0] : "home", slug: null };
+  const screen = hit ? hit[0] : "home";
+  // Deep-link region filter (TRI-940): /browse?region=<name> pre-applies that
+  // region on the Tours screen. Only the browse route reads it; elsewhere null.
+  let region = null;
+  if (screen === "browse") {
+    try { region = new URLSearchParams(search || "").get("region") || null; } catch (_) { region = null; }
+  }
+  return { screen, slug: null, region };
 }
 
 // In-page loader shown while a tour detail hydrates from the API (TRI-888). Kept
@@ -96,9 +103,12 @@ function postNeedsHydration(slug) {
 }
 
 function WebApp() {
-  const first = routeFromPath(window.location.pathname);
+  const first = routeFromPath(window.location.pathname, window.location.search);
   const [screen, setScreen] = React.useState(first.screen);
   const [slug, setSlug] = React.useState(first.slug);
+  // Active region filter for the Tours screen, driven by /browse?region=<name>
+  // deep links from the home + regions grids (TRI-940). null ⇒ no pre-filter.
+  const [browseRegion, setBrowseRegion] = React.useState(first.region || null);
   // Review-invite token, only set when the URL is a `/reviews/redeem/:token`
   // deep link (TRI-894). Off that route it stays null and the invite page falls
   // back to the fixture demo, so nothing else is affected.
@@ -116,21 +126,26 @@ function WebApp() {
     // Tour nav carries a slug only in live mode; flag off drops it, so the URL
     // stays /tour and TourWeb falls back to tours[0] (byte-identical prototype).
     const tourSlug = s === "tour" ? (LIVE_API() ? payload || null : null) : null;
+    // Browse nav carries an optional region name to pre-apply as a filter (TRI-940).
+    const region = s === "browse" ? (payload || null) : null;
     // Booking detail carries the booking ref as its slug (TRI-938).
     const nextSlug = s === "post" ? payload : s === "tour" ? tourSlug : s === "booking" ? (payload || null) : slug;
     if (s === "post") setSlug(payload);
     else if (s === "tour") setSlug(tourSlug);
     else if (s === "booking") setSlug(payload || null);
+    if (s === "browse") setBrowseRegion(region);
     setScreen(s === "post" ? "post" : s);
-    const url = pathForScreen(s, nextSlug);
-    if (url !== window.location.pathname) window.history.pushState({ screen: s, slug: nextSlug }, "", url);
+    let url = pathForScreen(s, nextSlug);
+    if (s === "browse" && region) url += "?region=" + encodeURIComponent(region);
+    if (url !== window.location.pathname + window.location.search) window.history.pushState({ screen: s, slug: nextSlug, region }, "", url);
     window.scrollTo({ top: 0 });
   };
   React.useEffect(() => {
     const onPop = () => {
-      const r = routeFromPath(window.location.pathname);
+      const r = routeFromPath(window.location.pathname, window.location.search);
       setScreen(r.screen);
       setSlug(r.slug);
+      setBrowseRegion(r.region || null);
       setReviewToken(r.token || null);
       window.scrollTo({ top: 0 });
     };
@@ -172,7 +187,7 @@ function WebApp() {
     );
   const body = {
     home: <HomeWeb go={go} />,
-    browse: <BrowseWeb go={go} currency={currency} view={view} />,
+    browse: <BrowseWeb go={go} currency={currency} view={view} initialRegion={browseRegion} />,
     tour: tourBody,
     checkout: <CheckoutWeb go={go} step={step} setStep={setStep} currency={currency} />,
     confirm: <ConfirmWeb go={go} currency={currency} />,
@@ -198,7 +213,7 @@ function WebApp() {
   }[screen] || <HomeWeb go={go} />;
 
   const AUTH = screen === "login" || screen === "signup" || screen === "forgot";
-  return AUTH ? body : <Shell currency={currency} setCurrency={setCurrency} go={go}>{body}</Shell>;
+  return AUTH ? body : <Shell currency={currency} setCurrency={setCurrency} go={go} screen={screen}>{body}</Shell>;
 }
 
 // Render through the boot gate (TRI-861): with USE_LIVE_API off it renders
