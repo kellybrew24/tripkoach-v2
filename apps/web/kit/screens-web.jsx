@@ -101,7 +101,7 @@ function ReviewInvitePage({ go }) {
           <span style={{ width: 56, height: 56, borderRadius: "50%", background: "var(--success-bg)", color: "var(--success-fg)", display: "grid", placeItems: "center" }}><Icon name="circle-check-big" size={28} /></span>
           <h1 className="tk-h2" style={{ margin: 0 }}>Thank you, {String(inv.name || "").split(" ")[0]}!</h1>
           <p className="tk-body" style={{ margin: 0, color: "var(--text-muted)", maxWidth: "40ch" }}>Your review is with our team. Once it's approved it'll appear on the {tour.title} page — usually within a day.</p>
-          <Button style={{ marginTop: 8 }} onClick={() => go("tour")}>Back to the tour</Button>
+          <Button style={{ marginTop: 8 }} onClick={() => go("tour", tour.id || inv.tourId)}>Back to the tour</Button>
         </div></div>
       ) : (
         <div className="tk-card" style={{ boxShadow: "var(--elev-2)" }}><div className="tk-card__body" style={{ padding: "var(--space-6)", gap: "var(--space-4)" }}>
@@ -373,7 +373,7 @@ function BrowseWeb({ go, currency, view }) {
           ) : (
             <>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: "var(--space-5)" }}>
-                {shown.map(t => <div key={t.id} onClick={() => go("tour")}><TourCard {...t} price={cvt(t.price, currency)} currency={currency} reviewCount={t.reviews} /></div>)}
+                {shown.map(t => <div key={t.id} onClick={() => go("tour", t.id)}><TourCard {...t} price={cvt(t.price, currency)} currency={currency} reviewCount={t.reviews} /></div>)}
               </div>
               <Pagination page={1} pages={1} resultsLabel={"Showing " + shown.length + " of " + tours.length + " tours"} />
             </>
@@ -389,11 +389,21 @@ function pkgTour(t, pkgId) {
   if (!p) return t;
   return { ...t, tiers: p.tiers, price: p.tiers[p.tiers.length - 1].price, included: (p.includes || t.included), stops: p.stops, packageName: p.name, packageId: p.id, duration: p.duration || t.duration };
 }
-function TourWeb({ go, currency }) {
-  const t0 = window.TK_DATA.tours[0];
+function TourWeb({ go, currency, slug }) {
+  // Slug-addressable tour detail (TRI-888/C2). A slug is only ever passed in live
+  // mode; without one — the fixture prototype and every flag-off build — this
+  // falls back to tours[0], so behaviour there is byte-for-byte unchanged.
+  const tours = window.TK_DATA.tours;
+  const t0 = (slug && tours.find(t => t.id === slug || t.slug === slug)) || tours[0];
   const [pkgId, setPkgId] = React.useState(t0.defaultPackage || (t0.packages && t0.packages[0].id));
   const t = t0.packages ? pkgTour(t0, pkgId) : t0;
-  const [dep, setDep] = React.useState("d2");
+  // Prototype default is the fixture id "d2"; live departures carry their own API
+  // ids, so pick a real one (flag off ⇒ always "d2", byte-identical).
+  const [dep, setDep] = React.useState(() => {
+    if (!(window.TK_CONFIG && window.TK_CONFIG.USE_LIVE_API)) return "d2";
+    const deps = t0.departures || [];
+    return deps.some(x => x.id === "d2") ? "d2" : ((deps[1] || deps[0] || {}).id || "d2");
+  });
   const d = t.departures.find(x => x.id === dep);
   return (
     <div className="tk-container" style={{ paddingBlock: "var(--space-6) var(--space-12)", maxWidth: 1200, display: "flex", flexDirection: "column", gap: "var(--space-5)" }}>

@@ -123,7 +123,7 @@ function HomeWeb({ go }) {
             <Button variant="secondary" iconEnd="arrow-right" onClick={() => go("browse")}>View all 11 tours</Button>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "var(--space-5)" }}>
-            {popular.map(t => <div key={t.id} onClick={() => go("tour")} style={{ cursor: "pointer" }}><TourCard {...t} reviewCount={t.reviews} /></div>)}
+            {popular.map(t => <div key={t.id} onClick={() => go("tour", t.id)} style={{ cursor: "pointer" }}><TourCard {...t} reviewCount={t.reviews} /></div>)}
           </div>
         </Section>
       </div>

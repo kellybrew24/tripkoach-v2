@@ -320,7 +320,7 @@ function ReviewsWeb({ go }) {
         {mine.map((r, i) => (
           <div key={i} className="tk-card"><div className="tk-card__body" style={{ padding: "var(--space-5)", gap: "var(--space-2)" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-              <a href="#tour" onClick={(e) => { e.preventDefault(); go("tour"); }} className="tk-h6" style={{ margin: 0, textDecoration: "none", color: "var(--text-strong)" }}>{tourTitle(r.tourId)}</a>
+              <a href="#tour" onClick={(e) => { e.preventDefault(); go("tour", r.tourId); }} className="tk-h6" style={{ margin: 0, textDecoration: "none", color: "var(--text-strong)" }}>{tourTitle(r.tourId)}</a>
               {statusChip(r.status)}
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>{Stars ? <Stars value={r.rating} /> : null}<span className="tk-caption">{r.date || "Recently"}</span></div>

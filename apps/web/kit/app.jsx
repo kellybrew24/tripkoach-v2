@@ -26,14 +26,49 @@ const ROUTES = [
 const PATH_BY_SCREEN = Object.fromEntries(ROUTES.map(([s, p]) => [s, p]));
 function pathForScreen(screen, slug) {
   if (screen === "post") return "/blog/" + encodeURIComponent(slug || "");
+  // Tour detail is slug-addressable so any tour is a shareable, deep-linkable
+  // page (TRI-888/C2). No slug ⇒ the bare /tour path (the fixture prototype and
+  // the flag-off build never pass one, so behaviour there is unchanged).
+  if (screen === "tour" && slug) return "/tour/" + encodeURIComponent(slug);
   return PATH_BY_SCREEN[screen] || "/";
 }
 function routeFromPath(pathname) {
   const path = (pathname || "/").replace(/\/+$/, "") || "/";
   const m = path.match(/^\/blog\/(.+)$/);
   if (m) return { screen: "post", slug: decodeURIComponent(m[1]) };
+  const t = path.match(/^\/tour\/(.+)$/);
+  if (t) return { screen: "tour", slug: decodeURIComponent(t[1]) };
   const hit = ROUTES.find(([, p]) => p === path);
   return { screen: hit ? hit[0] : "home", slug: null };
+}
+
+// In-page loader shown while a tour detail hydrates from the API (TRI-888). Kept
+// dependency-free (no DS namespace in app.jsx) and token-driven so it matches the
+// pre-React boot spinner. Only ever rendered in live mode.
+function TourDetailLoading() {
+  return (
+    <div
+      className="tk-container"
+      style={{ paddingBlock: "var(--space-10) var(--space-12)", maxWidth: 1200, minHeight: "60vh", display: "grid", placeItems: "center" }}
+      aria-busy="true"
+    >
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "var(--space-4)" }}>
+        <span className="tk-spin" style={{ width: 34, height: 34, borderRadius: "50%", border: "3px solid var(--border-subtle)", borderTopColor: "var(--brand)", display: "inline-block" }} />
+        <p className="tk-body" style={{ margin: 0, color: "var(--text-muted)" }}>Loading tour…</p>
+      </div>
+    </div>
+  );
+}
+
+// Live per-slug tour hydration (TRI-888/C2). Flag off ⇒ this whole layer is
+// inert: nav never carries a tour slug, so `slug` stays null and the tour screen
+// renders tours[0] exactly as the fixture prototype did.
+const LIVE_API = () => !!(window.TK_CONFIG && window.TK_CONFIG.USE_LIVE_API);
+function tourNeedsHydration(slug) {
+  if (!LIVE_API() || !slug || !window.TK_HYDRATE_TOUR) return false;
+  const tours = (window.TK_DATA && window.TK_DATA.tours) || [];
+  const t = tours.find((x) => x.id === slug || x.slug === slug);
+  return !(t && t._hydrated);
 }
 
 function WebApp() {
@@ -43,9 +78,16 @@ function WebApp() {
   const [currency, setCurrency] = React.useState("USD");
   const [step, setStep] = React.useState(1);
   const [view, setView] = React.useState("results");
+  // Which tour slug is hydrated and ready to render. null while a live per-slug
+  // fetch is in flight, which gates the tour body behind a loader below.
+  const [ready, setReady] = React.useState(() => (tourNeedsHydration(first.slug) ? null : first.slug));
   const go = (s, payload) => {
-    const nextSlug = s === "post" ? payload : slug;
+    // Tour nav carries a slug only in live mode; flag off drops it, so the URL
+    // stays /tour and TourWeb falls back to tours[0] (byte-identical prototype).
+    const tourSlug = s === "tour" ? (LIVE_API() ? payload || null : null) : null;
+    const nextSlug = s === "post" ? payload : s === "tour" ? tourSlug : slug;
     if (s === "post") setSlug(payload);
+    else if (s === "tour") setSlug(tourSlug);
     setScreen(s === "post" ? "post" : s);
     const url = pathForScreen(s, nextSlug);
     if (url !== window.location.pathname) window.history.pushState({ screen: s, slug: nextSlug }, "", url);
@@ -61,10 +103,29 @@ function WebApp() {
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
+  // Lazily hydrate any tour whose slug-routed page opens (nav, deep-link or
+  // back/forward). The lead tour is pre-hydrated at boot, so it resolves instantly.
+  React.useEffect(() => {
+    if (screen !== "tour") return;
+    if (!tourNeedsHydration(slug)) { setReady(slug); return; }
+    let cancelled = false;
+    setReady(null);
+    window.TK_HYDRATE_TOUR(slug).then(
+      () => { if (!cancelled) setReady(slug); },
+      () => { if (!cancelled) setReady(slug); }
+    );
+    return () => { cancelled = true; };
+  }, [screen, slug]);
+  const tourBody =
+    screen === "tour" && LIVE_API() && slug && ready !== slug ? (
+      <TourDetailLoading />
+    ) : (
+      <TourWeb go={go} currency={currency} slug={slug} />
+    );
   const body = {
     home: <HomeWeb go={go} />,
     browse: <BrowseWeb go={go} currency={currency} view={view} />,
-    tour: <TourWeb go={go} currency={currency} />,
+    tour: tourBody,
     checkout: <CheckoutWeb go={go} step={step} setStep={setStep} currency={currency} />,
     confirm: <ConfirmWeb go={go} currency={currency} />,
     bookings: <BookingsWeb go={go} currency={currency} />,

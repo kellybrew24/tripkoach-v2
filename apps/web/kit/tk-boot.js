@@ -152,6 +152,59 @@
     return [];
   }
 
+  // ---- per-tour hydration (TRI-888, gap C2) ---------------------------------
+  // Fetch detail + availability + reviews for ONE tour and fold them into the
+  // existing summary object IN PLACE (the tour screen reads it synchronously, so
+  // mutating the object the catalogue already handed React keeps every reference
+  // valid). Idempotent — a hydrated tour short-circuits — and resolves even when
+  // a sub-request fails, degrading to the summary while guaranteeing the arrays
+  // TourWeb reads are defined so the screen can never throw.
+  //
+  // The three read endpoints are LIVE (audit §3, C2/C3/C16). The availability /
+  // reviews resolver accepts a slug OR a UUID, so we key every call off the slug
+  // (the Phase-0 `:slug` contract) and fall back to the raw API id defensively.
+  function hydrateTour(tour) {
+    if (!tour) return Promise.resolve(tour);
+    if (tour._hydrated) return Promise.resolve(tour);
+    var slug = tour.slug || tour.id;
+    var key = slug != null ? slug : tour._apiId;
+    return Promise.all([
+      api.get("/tours/" + encodeURIComponent(key)).catch(function () { return null; }),
+      api.get("/tours/" + encodeURIComponent(key) + "/availability").catch(function () { return null; }),
+      api.get("/tours/" + encodeURIComponent(key) + "/reviews").catch(function () { return null; }),
+    ]).then(function (d) {
+      enrichTourDetail(tour, d[0]);
+      var deps = list(d[1], "departures").map(mapDeparture);
+      if (deps.length) tour.departures = deps;
+      var reviews = list(d[2], "reviews").map(function (r) { return mapReview(r, tour.id); });
+      setReviewsFor(tour.id, reviews);
+      // Backfill only what a degraded sub-request left missing; the API supplies
+      // all of these today, so this is a no-op on the happy path.
+      if (!Array.isArray(tour.departures)) tour.departures = [];
+      if (!Array.isArray(tour.highlights)) tour.highlights = [];
+      if (!Array.isArray(tour.included)) tour.included = [];
+      if (!Array.isArray(tour.excluded)) tour.excluded = [];
+      if (!Array.isArray(tour.itinerary)) tour.itinerary = [];
+      tour._hydrated = true;
+      return tour;
+    });
+  }
+
+  // The boot gate exposes on-demand hydration so slug-aware routing (app.jsx)
+  // can pull any tour's detail/departures/reviews when its page opens. Resolves
+  // (never rejects) — an unknown slug or a fetch failure still lets the screen
+  // render from summary data rather than blocking on an error.
+  window.TK_HYDRATE_TOUR = function (slug) {
+    var D = window.TK_DATA || {};
+    var tours = Array.isArray(D.tours) ? D.tours : [];
+    var tour = null;
+    for (var i = 0; i < tours.length; i++) {
+      if (tours[i].id === slug || tours[i].slug === slug) { tour = tours[i]; break; }
+    }
+    if (!tour) return Promise.resolve(null);
+    return hydrateTour(tour).catch(function () { return tour; });
+  };
+
   // ---- live load ------------------------------------------------------------
   function loadLiveData() {
     return Promise.all([api.get("/regions"), api.get("/tours")]).then(function (res) {
@@ -168,30 +221,15 @@
         .filter(Boolean);
 
       var tours = list(toursBody, "tours").map(mapTourSummary);
-      if (!tours.length) {
-        // Genuine empty catalogue is a valid state (screens have EmptyState);
-        // still hydrate globals so the app renders the empty read screen.
-        commit(tours, regionNames);
-        return;
-      }
+      // We're live — drop the fixture reviews so nothing stale shows through; each
+      // tour's approved reviews are merged back in as its page hydrates.
+      commit(tours, regionNames);
+      if (!tours.length) return; // empty catalogue is valid (screens have EmptyState)
 
-      // Enrich the tour the detail route surfaces (the kit's tour screen renders
-      // tours[0]); this is the read screen that needs detail + availability +
-      // reviews. Slug-routed per-tour fetching lands when the tour route becomes
-      // slug-aware — the shim already carries _apiId for that.
-      var lead = tours[0];
-      var detailReqs = [
-        api.get("/tours/" + encodeURIComponent(lead.slug)).catch(function () { return null; }),
-        api.get("/tours/" + encodeURIComponent(lead._apiId) + "/availability").catch(function () { return null; }),
-        api.get("/tours/" + encodeURIComponent(lead._apiId) + "/reviews").catch(function () { return null; }),
-      ];
-      return Promise.all(detailReqs).then(function (d) {
-        enrichTourDetail(lead, d[0]);
-        var deps = list(d[1], "departures").map(mapDeparture);
-        if (deps.length) lead.departures = deps;
-        var reviews = list(d[2], "reviews").map(function (r) { return mapReview(r, lead.id); });
-        commit(tours, regionNames, reviews);
-      });
+      // Eagerly hydrate the lead tour so the home/browse landing feels instant and
+      // a deep-link to `/tour` (no slug) resolves. Every OTHER tour hydrates lazily
+      // via TK_HYDRATE_TOUR when its slug-routed page opens (gap C2).
+      return hydrateTour(tours[0]);
     });
   }
 
@@ -199,17 +237,26 @@
   // to the array (data.js's TK_REGION_TOURS closes over the original tours array;
   // TK_REVIEWS_FOR reads window.TK_REVIEWS fresh each call). Reassigning would
   // orphan those closures — clearing + repushing keeps every helper valid.
-  function commit(tours, regionNames, reviews) {
+  function commit(tours, regionNames) {
     var D = (window.TK_DATA = window.TK_DATA || {});
     if (!Array.isArray(D.tours)) D.tours = [];
     D.tours.length = 0;
     Array.prototype.push.apply(D.tours, tours);
     D.regions = regionNames;
-    if (reviews) {
-      if (!Array.isArray(window.TK_REVIEWS)) window.TK_REVIEWS = [];
-      window.TK_REVIEWS.length = 0;
-      Array.prototype.push.apply(window.TK_REVIEWS, reviews);
-    }
+    // Start from an empty review set in live mode; hydration fills it per tour.
+    if (!Array.isArray(window.TK_REVIEWS)) window.TK_REVIEWS = [];
+    window.TK_REVIEWS.length = 0;
+  }
+
+  // Replace the review set for one tour in-place: drop any prior entries for that
+  // id (re-hydration stays idempotent) then append the fresh approved reviews.
+  // TK_REVIEWS_FOR filters window.TK_REVIEWS by tourId, so multiple tours' reviews
+  // coexist happily.
+  function setReviewsFor(tourId, reviews) {
+    if (!Array.isArray(window.TK_REVIEWS)) window.TK_REVIEWS = [];
+    var kept = window.TK_REVIEWS.filter(function (r) { return r.tourId !== tourId; });
+    window.TK_REVIEWS.length = 0;
+    Array.prototype.push.apply(window.TK_REVIEWS, kept.concat(reviews || []));
   }
 
   // ---- DS-consistent loading / error states (pre-React, token-driven) -------
