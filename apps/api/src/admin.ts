@@ -683,10 +683,20 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
       : 'NULL::text AS fx_source, NULL::timestamptz AS fx_rate_at';
     return `${fxCols}, ${provCols}`;
   }
+  // The per-payment `amount` is expressed in the row's `currency`. TRI-931: initPayment persists GHS
+  // charge rows with amount_minor = USD-minor (kept as the USD-of-record) while the real GHS charge lives
+  // in ghs_amount_minor — so `amount_minor` alone, labelled GHS, understated the charge by the FX rate
+  // (~15.6×). Refund rows conversely store the GHS figure directly in amount_minor with ghs_amount_minor
+  // NULL. So for GHS rows prefer ghs_amount_minor when present, else fall back to amount_minor (refunds /
+  // legacy). Non-GHS rows use amount_minor verbatim.
+  function displayAmountMinor(r: any): number {
+    if (r.currency === 'GHS' && r.ghs_amount_minor != null) return Number(r.ghs_amount_minor);
+    return Number(r.amount_minor);
+  }
   function paymentDTO(r: any) {
     return {
       id: r.ref, ref: r.ref, bookingRef: r.booking_ref, customer: r.customer_name ?? null,
-      amount: fromMinor(r.amount_minor), currency: r.currency, method: r.method, status: r.status,
+      amount: fromMinor(displayAmountMinor(r)), currency: r.currency, method: r.method, status: r.status,
       providerRef: r.provider_ref ?? null, created: r.created_at,
       usdAmount: r.usd_amount_minor == null ? null : fromMinor(r.usd_amount_minor),
       fxRate: r.fx_rate_used == null ? null : Number(r.fx_rate_used),
@@ -860,7 +870,7 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
       return {
         ref: r.ref, bookingRef: r.booking_ref, customer: r.customer_name ?? null,
         type: isRefund ? 'refund' : 'charge', method: r.method, status: r.status,
-        currency: r.currency, amount: fromMinor(r.amount_minor),
+        currency: r.currency, amount: fromMinor(displayAmountMinor(r)),
         usdAmount: r.usd_amount_minor == null ? null : fromMinor(r.usd_amount_minor),
         fxRate: r.fx_rate_used == null ? null : Number(r.fx_rate_used),
         ghsAmount: r.ghs_amount_minor == null ? null : Number(r.ghs_amount_minor) / 100,
@@ -875,7 +885,7 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     const byCurrency: Record<string, { grossMinor: number; refundMinor: number; charges: number; refunds: number }> = {};
     for (const r of rows) {
       const cur = byCurrency[r.currency] ?? (byCurrency[r.currency] = { grossMinor: 0, refundMinor: 0, charges: 0, refunds: 0 });
-      const amt = Number(r.amount_minor);
+      const amt = displayAmountMinor(r); // TRI-931: sum the real charged amount (GHS), not USD-minor mislabelled GHS
       if (amt < 0) { cur.refundMinor += amt; cur.refunds += 1; }
       else if (r.status === 'paid' || r.status === 'refunded') { cur.grossMinor += amt; cur.charges += 1; }
     }
