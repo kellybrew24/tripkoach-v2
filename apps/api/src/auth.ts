@@ -153,14 +153,17 @@ export async function audit(
   db: Db,
   entry: {
     actorId: string | null; action: string;
+    /** Who acted. Defaults to 'staff' (admin realm); the consumer realm (TRI-881) passes 'user'. */
+    actorType?: string;
     targetType?: string; targetId?: string | null;
     before?: unknown; after?: unknown; ip?: string | null;
   },
 ): Promise<void> {
   await db.query(
     `INSERT INTO audit_log (actor_type, actor_id, action, target_type, target_id, before, after, ip)
-     VALUES ('staff', $1, $2, $3, $4, $5, $6, $7)`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
     [
+      entry.actorType ?? 'staff',
       entry.actorId, entry.action, entry.targetType ?? null, entry.targetId ?? null,
       entry.before === undefined ? null : JSON.stringify(entry.before),
       entry.after === undefined ? null : JSON.stringify(entry.after),

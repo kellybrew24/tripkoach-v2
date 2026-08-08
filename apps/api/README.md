@@ -376,6 +376,56 @@ STAFF_EMAIL=you@tripkoach.com STAFF_PASSWORD='…' STAFF_NAME='You' STAFF_ROLE=a
   DATABASE_URL=… npm run admin-seed        # idempotent by email; hashes with argon2id
 ```
 
+---
+
+## Consumer accounts & auth (P1 — TRI-881)
+
+The customer-facing auth spine, mounted on the **same `/api/v1`** base as the read/booking paths (an
+encapsulated plugin — the Phase-1 read paths and Phase-2 booking writes are **untouched**). Sessions are
+server-side + revocable with sliding idle expiry, on `subject_type='user'` in the shared `session` table
+(closes gap **G-ConsumerSession**: `session` always allowed `'user'`, but only the admin realm had a code
+path). AuthN is an **httpOnly session cookie** (`tk_user_session`, scoped to `/api/v1`, `Secure`+`SameSite`
+from `COOKIE_*`); passwords are **argon2id** (the same hashing as the admin realm, `src/auth.ts`). Errors
+use the shared `{ error: { code, message, field? } }` envelope. Migration **`012_consumer_auth.sql`** adds
+only the greenfield `password_reset_token` table (the account/notification tables already exist from
+Phase 1: `user_account`, `notification_preference`).
+
+### AuthN
+- `POST /api/v1/auth/signup` (alias `/auth/register`) → **201** — body `{ email, password (≥8), name?, phone?,
+  country?, agreedTerms? }`. Creates the account, seeds default notification prefs, **links any guest
+  bookings** made with the same contact email, opens a session (sets cookie). Returns
+  `{ user, linkedBookings }`. Duplicate email → **409**.
+- `POST /api/v1/auth/login` → **200** — body `{ email, password }`. Sets the session cookie; re-links any
+  new guest bookings. Bad credentials → **401** (`invalid_credentials`).
+- `POST /api/v1/auth/logout` → **200** — revokes the session, clears the cookie.
+
+### Password reset (web `ForgotWeb` 4-stage; audit gap C10)
+- `POST /api/v1/auth/password-reset/request` → **200 always** — body `{ email }`. Creates a single-use,
+  time-boxed token (default 60 min; only its **sha256 is stored**), emails the reset link via the P0
+  transport (`src/email.ts`, template `password_reset`). Returns `{ ok: true }` for **any** email (no user
+  enumeration); a transport misconfig never 500s the request.
+- `POST /api/v1/auth/password-reset/consume` → **200** — body `{ token, password (≥8) }`. Sets the new
+  password, marks the token consumed (single-use), **revokes all existing sessions** for the user. Invalid/
+  expired/used token → **400** (`invalid_token`).
+
+### Profile & preferences (authed — session cookie required; **401** otherwise)
+- `GET  /api/v1/me` → `{ user }` — full profile (name, email, phone, country, photoUrl, emergency contact,
+  dietaryNeeds, language, displayCurrency, dataSaver, twoFactorEnabled, createdAt).
+- `PATCH /api/v1/me` → `{ user }` — partial update of any profile field (email change is uniqueness-checked;
+  `displayCurrency` upper-cased).
+- `POST /api/v1/me/password` → `{ ok }` — body `{ currentPassword, newPassword }`; wrong current → **401**.
+- `GET  /api/v1/me/notifications` → `{ notifications: { email: {…}, whatsapp: {…} } }` — the full
+  channel×type map (7 types), defaulting any unset row (all on except `marketing_offers`).
+- `PUT  /api/v1/me/notifications` → `{ notifications }` — partial `{ channel: { type: bool } }` upsert;
+  unknown channel/type → **400**.
+
+### My bookings (authed) — links guest bookings to the account (audit gap C14)
+- `GET /api/v1/me/bookings` → `{ bookings: [...] }` — every booking on `booking.user_id`, newest first
+  (ref, status, paymentState, total, currency, partySize, tour, departure). Guest bookings are attached
+  automatically at signup/login when the lead-traveller (or ops-customer) email matches the account email.
+
+Every consumer mutation writes an `audit_log` row with `actor_type='user'`.
+
 ### Migration coordination (Phase 2 ↔ Phase 3)
 Phase 2 (TRI-866) owns `008_write_path_payments_fx.sql`; this phase adds **`009_admin_rbac_seed.sql`**
 (role_permission matrix + settings singleton) only — it does **not** edit or renumber 008. 009 must apply
@@ -388,16 +438,17 @@ edit once 008 lands. Keep the sequence monotonic on merge to the shared `tripkoa
 ## Production migration + seed strategy (Phase 4 — TRI-873)
 
 **Linearized migration set** (applies cleanly on an empty DB in this order — verified by `npm run smoke`
-migrating a fresh PGlite DB → `migrations applied: 10`; no renumbering, no collisions):
+migrating a fresh PGlite DB → `migrations applied: 12`; no renumbering, no collisions):
 
 ```
 001_catalogue → 002_inventory → 003_booking_payments → 004_people → 005_reviews →
 006_staff_rbac_auth → 007_content_leads_config → 008_write_path_payments_fx →
-009_admin_rbac_seed → 010_fx_rate_automation
+009_admin_rbac_seed → 010_fx_rate_automation → 011_email_transport → 012_consumer_auth
 ```
 008 (Phase 2 FX cols) and 009 (Phase 3 admin) are already integrated on this branch; 010 (FX automation:
-`fx_rate_history` + `payment.fx_source/fx_rate_at`) stacks on top. The runner tracks applied files in
-`schema_migrations` and is idempotent, so re-running is safe.
+`fx_rate_history` + `payment.fx_source/fx_rate_at`) stacks on top, then 011 (P0 email transport:
+`email_message` send-log, TRI-880) and 012 (P1 consumer auth: `password_reset_token` + indexes, TRI-881).
+The runner tracks applied files in `schema_migrations` and is idempotent, so re-running is safe.
 
 **Apply migrations (prod):**
 ```bash

@@ -26,6 +26,8 @@ export interface Config {
   adminCookieSameSite: 'lax' | 'strict' | 'none';
   /** Idle-timeout for admin sessions, minutes. The console signs staff out after inactivity (sliding). */
   adminSessionIdleMinutes: number;
+  /** Consumer (subject_type='user') auth — TRI-881. Cookie + session/reset windows for the client SPA. */
+  consumer: ConsumerConfig;
   fx: FxConfig;
   email: EmailConfig;
   notify: NotifyConfig;
@@ -39,6 +41,20 @@ export interface NotifyConfig {
   webBaseUrl: string;
   /** Departure-reminder lead time: email travellers whose paid booking departs this many days out. */
   reminderDaysBefore: number;
+}
+
+// Consumer accounts & auth (TRI-881). Mirrors the admin session model (revocable, sliding idle expiry)
+// but on subject_type='user', with a longer default idle window suited to a customer-facing app and its
+// own cookie. Cookie Secure/SameSite reuse the shared COOKIE_* env (same browser/TLS posture as admin).
+export interface ConsumerConfig {
+  /** Session cookie name for the consumer realm (httpOnly + Secure + SameSite). */
+  cookieName: string;
+  /** Idle-timeout for consumer sessions, minutes (sliding). Default 14 days. */
+  sessionIdleMinutes: number;
+  /** Password-reset token lifetime, minutes. Default 60. */
+  resetTokenTtlMinutes: number;
+  /** Public app origin used to build the password-reset link in the email (no trailing slash). */
+  appBaseUrl: string;
 }
 
 // Outbound email transport (TRI-880). The shared sendEmail() lib dispatches through this. Provider is
@@ -124,6 +140,12 @@ export function loadConfig(): Config {
     adminCookieSecure: process.env.COOKIE_SECURE ? process.env.COOKIE_SECURE === 'true' : true,
     adminCookieSameSite: (process.env.COOKIE_SAMESITE as 'lax' | 'strict' | 'none') || 'lax',
     adminSessionIdleMinutes: Number(process.env.ADMIN_SESSION_IDLE_MINUTES || 30),
+    consumer: {
+      cookieName: process.env.USER_COOKIE_NAME || 'tk_user_session',
+      sessionIdleMinutes: num(process.env.USER_SESSION_IDLE_MINUTES) ?? 20_160, // 14 days
+      resetTokenTtlMinutes: num(process.env.PASSWORD_RESET_TTL_MINUTES) ?? 60,
+      appBaseUrl: (process.env.APP_BASE_URL || 'https://app.tripkoach.com').replace(/\/+$/, ''),
+    },
     fx: {
       providerName: process.env.FX_PROVIDER_NAME || 'open.er-api.com',
       providerUrl: process.env.FX_PROVIDER_URL || 'https://open.er-api.com/v6/latest/USD',
