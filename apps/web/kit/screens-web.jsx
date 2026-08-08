@@ -370,11 +370,38 @@ function MobileMenu({ onClose, go }) {
   );
 }
 
+const ACCT_ITEM = { display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "9px 12px", background: "none", border: 0, borderRadius: "var(--radius-sm, 8px)", cursor: "pointer", font: "inherit", fontSize: 14, fontWeight: 600, color: "var(--text-default)", textAlign: "start" };
+function AcctItem({ icon, label, tone, onClick }) {
+  const [hov, setHov] = React.useState(false);
+  return (
+    <button role="menuitem" onClick={onClick} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+      style={{ ...ACCT_ITEM, color: tone === "danger" ? "var(--danger-fg, #b42318)" : ACCT_ITEM.color, background: hov ? "var(--bg-subtle, rgba(0,0,0,.05))" : "none" }}>
+      <Icon name={icon} size={16} />{label}
+    </button>
+  );
+}
+
 function Shell({ children, currency, setCurrency, go }) {
   const [menu, setMenu] = React.useState(false);
+  // Account dropdown (TRI-920): the top-right avatar opens a Settings / Sign out
+  // menu when live. `acct` holds the viewport anchor (or null when closed). Flag
+  // off ⇒ the prototype's straight-to-profile navigation is preserved verbatim.
+  const [acct, setAcct] = React.useState(null);
+  React.useEffect(() => {
+    if (!acct) return undefined;
+    const onKey = (e) => { if (e.key === "Escape") setAcct(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [acct]);
   const onNav = (e) => {
     const accountBtn = e.target.closest('button[aria-label="Your account"]');
-    if (accountBtn) { e.preventDefault(); go && go("profile"); return; }
+    if (accountBtn) {
+      e.preventDefault();
+      if (!LIVE_AUTH()) { go && go("profile"); return; }
+      const r = accountBtn.getBoundingClientRect();
+      setAcct((cur) => cur ? null : { top: Math.round(r.bottom + 8), right: Math.max(12, Math.round(window.innerWidth - r.right)) });
+      return;
+    }
     const a = e.target.closest("a");
     if (!a) return;
     if (a.getAttribute("aria-label") === "TripKoach home") { e.preventDefault(); go && go("home"); return; }
@@ -393,6 +420,14 @@ function Shell({ children, currency, setCurrency, go }) {
       <main>{children}</main>
       <Footer columns={FOOT} logoSrc="../../assets/logo-badge.png" />
       {menu && <MobileMenu go={go} onClose={() => setMenu(false)} />}
+      {acct && <>
+        <div onClick={() => setAcct(null)} style={{ position: "fixed", inset: 0, zIndex: 60 }} />
+        <div role="menu" aria-label="Account" style={{ position: "fixed", top: acct.top, right: acct.right, zIndex: 61, minWidth: 190, padding: 6, background: "var(--bg-surface, #fff)", border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-md, 12px)", boxShadow: "var(--shadow-lg, 0 12px 32px rgba(16,24,40,.16))", display: "flex", flexDirection: "column", gap: 2 }}>
+          <AcctItem icon="settings" label="Settings" onClick={() => { setAcct(null); go && go("account-settings"); }} />
+          <div style={{ height: 1, background: "var(--border-subtle)", margin: "4px 6px" }} />
+          <AcctItem icon="log-out" label="Sign out" tone="danger" onClick={async () => { setAcct(null); try { if (window.TK_AUTH) await window.TK_AUTH.logout(); } catch (_) {} go && go("login"); }} />
+        </div>
+      </>}
     </div>
   );
 }
@@ -601,6 +636,25 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
   const [busy, setBusy] = React.useState(false);
   const [payState, setPayState] = React.useState("idle");
   const [err, setErr] = React.useState(null);
+  // Lead traveller prefill from the signed-in account (TRI-920). The fields live
+  // in state (not the DOM) so they survive the step unmount between Travellers →
+  // Review → Payment — previously the values were read from the DOM at pay time,
+  // after those inputs had unmounted, and the booking was submitted with an empty
+  // lead. Controlled inputs also let the real profile populate once /me resolves.
+  // Flag off ⇒ liveAuth is false and the DS prototype defaults render unchanged.
+  const liveAuth = live && !!window.TK_AUTH;
+  const [leadInfo, setLeadInfo] = React.useState({ name: "", email: "", phone: "", idNumber: "" });
+  const leadSeeded = React.useRef(false);
+  React.useEffect(() => {
+    if (!liveAuth) return undefined;
+    let alive = true;
+    const seed = (u) => { if (alive && u && !leadSeeded.current) { leadSeeded.current = true; setLeadInfo({ name: u.name || "", email: u.email || "", phone: u.phone || "", idNumber: "" }); } };
+    const cached = window.TK_AUTH.cachedMe();
+    if (cached && typeof cached === "object") seed(cached);
+    else window.TK_AUTH.me().then(seed, () => {});
+    return () => { alive = false; };
+  }, []);
+  const leadField = (k) => (e) => { const v = e && e.target ? e.target.value : ""; setLeadInfo((s) => ({ ...s, [k]: v })); };
   // Selected departure: live picks the chosen one, falling back to a real API
   // departure when the prototype default "d2" doesn't exist. Off ⇒ departures[1].
   const d = (live ? t.departures.find(x => x.id === depId) : null) || t.departures[1] || t.departures[0];
@@ -619,7 +673,9 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
     if (busy) return;
     setErr(null); setBusy(true); setPayState("processing");
     try {
-      const lead = { name: readVal("w-name"), email: readVal("w-email"), phone: readVal("w-phone"), idNumber: readVal("w-id") };
+      const lead = liveAuth
+        ? { name: leadInfo.name.trim(), email: leadInfo.email.trim(), phone: leadInfo.phone.trim(), idNumber: leadInfo.idNumber.trim() }
+        : { name: readVal("w-name"), email: readVal("w-email"), phone: readVal("w-phone"), idNumber: readVal("w-id") };
       const bk = await window.TK_BOOKING.create({
         // Backend (TRI-866, deployed) resolves the tour by SLUG; keep the uuid
         // too for tolerance. t0.id / TK_SEL.tourId is the slug; apiTourId the uuid.
@@ -670,10 +726,10 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
             <div className="tk-card"><div className="tk-card__body" style={{ gap: "var(--space-4)", padding: "var(--space-5)" }}>
               <span className="tk-overline">Lead traveller</span>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-4)" }}>
-                <FormField id="w-name" label="Full name" required><Input defaultValue="Ama Mensah" /></FormField>
-                <FormField id="w-email" label="Email address" required><Input defaultValue="ama@example.com" /></FormField>
-                <FormField id="w-phone" label="Phone number" required><Input defaultValue="024 555 0142" /></FormField>
-                <FormField id="w-id" label="ID number" optional><Input placeholder="Ghana Card or passport" /></FormField>
+                <FormField id="w-name" label="Full name" required>{liveAuth ? <Input value={leadInfo.name} onChange={leadField("name")} /> : <Input defaultValue="Ama Mensah" />}</FormField>
+                <FormField id="w-email" label="Email address" required>{liveAuth ? <Input value={leadInfo.email} onChange={leadField("email")} /> : <Input defaultValue="ama@example.com" />}</FormField>
+                <FormField id="w-phone" label="Phone number" required>{liveAuth ? <Input value={leadInfo.phone} onChange={leadField("phone")} /> : <Input defaultValue="024 555 0142" />}</FormField>
+                <FormField id="w-id" label="ID number" optional>{liveAuth ? <Input value={leadInfo.idNumber} onChange={leadField("idNumber")} placeholder="Ghana Card or passport" /> : <Input placeholder="Ghana Card or passport" />}</FormField>
               </div>
             </div></div>
             <div className="tk-card"><div className="tk-card__body" style={{ gap: "var(--space-4)", padding: "var(--space-5)" }}>
@@ -693,7 +749,7 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
               {t0.packages ? <div className="tk-summary__line"><span>Package</span><span>{t.packageName}</span></div> : null}
               <div className="tk-summary__line"><span>Departure</span><span>{d.date}, {d.time}</span></div>
               <div className="tk-summary__line"><span>Travellers</span><span>{pax}</span></div>
-              <div className="tk-summary__line"><span>Lead traveller</span><span>Ama Mensah · ama@example.com</span></div>
+              <div className="tk-summary__line"><span>Lead traveller</span><span>{liveAuth ? ((leadInfo.name || "—") + " · " + (leadInfo.email || "—")) : "Ama Mensah · ama@example.com"}</span></div>
             </div></div>
             <Checkbox id="w-agree" label="I agree to the booking terms and cancellation policy" />
           </>}
