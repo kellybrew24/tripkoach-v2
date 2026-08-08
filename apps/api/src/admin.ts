@@ -594,13 +594,31 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
   function bookingRow(r: any) {
     return {
       ref: r.ref, status: r.status, payment: r.payment_state,
-      customer: r.customer_name ?? null, customerId: r.customer_id ?? null,
+      customer: r.customer_name ?? null, customerEmail: r.customer_email ?? null,
+      customerId: r.customer_id ?? null,
       tour: r.tour_title, tourId: r.tour_slug, region: r.region_name,
       departureId: r.departure_id, date: r.date_label, travellers: Number(r.party_size),
       unit: fromMinor(r.unit_price_minor), total: fromMinor(r.total_minor), currency: r.currency,
       created: r.created_at,
     };
   }
+
+  // TRI-968: a booking's person can live in three places — the linked account (booking.user_id),
+  // a guest ops-contact (booking.customer_id, rarely set), or, universally, the lead traveller row
+  // (booking_traveller, always inserted at create time). The old list/detail queries read ONLY
+  // `customer c ON c.id=b.customer_id`, which the consumer/account booking path never populates, so
+  // every row showed a blank customer. Resolve across all three, mirroring TRI-952's account+guest union.
+  const BOOKING_PERSON_JOINS = `
+    LEFT JOIN customer c ON c.id = b.customer_id
+    LEFT JOIN user_account ua ON ua.id = b.user_id
+    LEFT JOIN LATERAL (
+      SELECT name, email, phone FROM booking_traveller
+       WHERE booking_id = b.id ORDER BY is_lead DESC, created_at LIMIT 1
+    ) lt ON true`;
+  const BOOKING_PERSON_COLS = `
+    COALESCE(ua.name, c.name, lt.name) AS customer_name,
+    COALESCE(ua.email, c.email, lt.email) AS customer_email,
+    COALESCE(ua.phone, c.phone, lt.phone) AS customer_phone`;
 
   async function listBookings(opts: { status?: string; q?: string; page?: number; pageSize?: number } = {}) {
     const where: string[] = [];
@@ -610,20 +628,22 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     }
     if (opts.q) {
       params.push(`%${opts.q}%`);
-      where.push(`(b.ref ILIKE $${params.length} OR c.name ILIKE $${params.length} OR t.title ILIKE $${params.length})`);
+      where.push(`(b.ref ILIKE $${params.length} OR t.title ILIKE $${params.length}
+                   OR COALESCE(ua.name, c.name, lt.name) ILIKE $${params.length}
+                   OR COALESCE(ua.email, c.email, lt.email) ILIKE $${params.length})`);
     }
     const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
     const page = Math.max(1, opts.page || 1);
     const pageSize = Math.min(100, Math.max(1, opts.pageSize || 25));
     const total = Number((await db.query(
-      `SELECT COUNT(*)::int AS n FROM booking b JOIN tour t ON t.id=b.tour_id LEFT JOIN customer c ON c.id=b.customer_id ${whereSql}`, params)).rows[0].n);
+      `SELECT COUNT(*)::int AS n FROM booking b JOIN tour t ON t.id=b.tour_id ${BOOKING_PERSON_JOINS} ${whereSql}`, params)).rows[0].n);
     params.push(pageSize); const lim = params.length;
     params.push((page - 1) * pageSize); const off = params.length;
     const { rows } = await db.query(
       `SELECT b.*, t.title AS tour_title, t.slug AS tour_slug, r.name AS region_name,
-              c.name AS customer_name, d.date_label
+              ${BOOKING_PERSON_COLS}, d.date_label
          FROM booking b JOIN tour t ON t.id=b.tour_id JOIN region r ON r.id=t.region_id
-         JOIN departure d ON d.id=b.departure_id LEFT JOIN customer c ON c.id=b.customer_id
+         JOIN departure d ON d.id=b.departure_id ${BOOKING_PERSON_JOINS}
         ${whereSql} ORDER BY b.created_at DESC LIMIT $${lim} OFFSET $${off}`, params);
     return { items: rows.map(bookingRow), page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
   }
@@ -631,9 +651,9 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
   async function getBooking(ref: string) {
     const { rows } = await db.query(
       `SELECT b.*, t.title AS tour_title, t.slug AS tour_slug, r.name AS region_name,
-              c.name AS customer_name, c.email AS customer_email, c.phone AS customer_phone, d.date_label
+              ${BOOKING_PERSON_COLS}, d.date_label
          FROM booking b JOIN tour t ON t.id=b.tour_id JOIN region r ON r.id=t.region_id
-         JOIN departure d ON d.id=b.departure_id LEFT JOIN customer c ON c.id=b.customer_id
+         JOIN departure d ON d.id=b.departure_id ${BOOKING_PERSON_JOINS}
         WHERE b.ref = $1`, [ref]);
     const b = rows[0];
     if (!b) throw notFound('booking');

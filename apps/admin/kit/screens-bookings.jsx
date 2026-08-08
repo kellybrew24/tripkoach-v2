@@ -7,6 +7,35 @@ function paymentBadge(p) {
   return <StatusBadge status={map[p] || "pending"} size="sm" label={label} />;
 }
 
+// TRI-968: CSV export of the bookings list. Client-side (all rows are already hydrated into TK_ADMIN),
+// RFC-4180-ish quoting so a customer name with a comma doesn't break the columns.
+function bookingsCsvCell(v) {
+  const s = v == null ? "" : String(v);
+  return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+function exportBookingsCsv(list) {
+  const cols = [
+    ["ref", "Reference"], ["customer", "Customer"], ["customerEmail", "Email"],
+    ["tour", "Tour"], ["date", "Departure"], ["travellers", "Pax"],
+    ["total", "Amount"], ["currency", "Currency"], ["status", "Status"],
+    ["payment", "Payment"], ["created", "Created"],
+  ];
+  const lines = [cols.map((c) => c[1]).join(",")];
+  list.forEach((r) => lines.push(cols.map((c) => bookingsCsvCell(r[c[0]])).join(",")));
+  const csv = lines.join("\r\n") + "\r\n";
+  try {
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = (window.URL || window.webkitURL).createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "bookings.csv";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => (window.URL || window.webkitURL).revokeObjectURL(url), 0);
+    window.tkToast(list.length + " bookings exported");
+  } catch (_) {
+    window.tkToast("Export failed");
+  }
+}
+
 function BookingsAdmin({ go, state, setState }) {
   const A = window.TK_ADMIN;
   const [tab, setTab] = React.useState("all");
@@ -36,12 +65,14 @@ function BookingsAdmin({ go, state, setState }) {
           applied={tab !== "all" ? [{ id: "s", label: "Status: " + tab, onRemove: () => setTab("all") }] : []}
           onClear={() => setTab("all")}>
           <div style={{ minWidth: 240 }}><SearchField value={q} onChange={(e) => setQ(e.target.value)} onClear={() => setQ("")} placeholder="Search reference, customer or tour" /></div>
+          <Button size="sm" variant="secondary" iconStart="download" disabled={rows.length === 0}
+            onClick={() => exportBookingsCsv(rows)}>Export</Button>
         </FilterBar>
 
         {sel.length > 0 && (
           <div className="tk-bulkbar">
             <span>{sel.length} selected</span>
-            <Button size="sm" variant="secondary" iconStart="download" onClick={() => window.tkToast(sel.length + " bookings exported")}>Export</Button>
+            <Button size="sm" variant="secondary" iconStart="download" onClick={() => exportBookingsCsv(A.bookings.filter(b => sel.includes(b.ref)))}>Export</Button>
             <Button size="sm" variant="secondary" iconStart="mail" onClick={() => window.tkToast("Confirmation resent to " + sel.length + " customers")}>Resend confirmation</Button>
             <button type="button" onClick={() => setSel([])} style={{ marginInlineStart: "auto", background: "none", border: 0, color: "var(--text-link)", fontWeight: 600, cursor: "pointer" }}>Clear</button>
           </div>
