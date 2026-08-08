@@ -26,6 +26,12 @@ export interface Config {
   adminCookieSameSite: 'lax' | 'strict' | 'none';
   /** Idle-timeout for admin sessions, minutes. The console signs staff out after inactivity (sliding). */
   adminSessionIdleMinutes: number;
+  /** Public origin of the admin console (used to build the invite accept-link in staff invite emails). */
+  adminBaseUrl: string;
+  /** How long a staff invite token stays valid, hours (TRI-895). */
+  staffInviteExpiryHours: number;
+  /** Issuer label shown in the authenticator app for admin TOTP factors (TRI-895). */
+  mfaIssuer: string;
   fx: FxConfig;
   email: EmailConfig;
 }
@@ -113,6 +119,11 @@ export function loadConfig(): Config {
     adminCookieSecure: process.env.COOKIE_SECURE ? process.env.COOKIE_SECURE === 'true' : true,
     adminCookieSameSite: (process.env.COOKIE_SAMESITE as 'lax' | 'strict' | 'none') || 'lax',
     adminSessionIdleMinutes: Number(process.env.ADMIN_SESSION_IDLE_MINUTES || 30),
+    // Where the admin console is served — the invite email links to `${adminBaseUrl}/accept-invite?token=…`.
+    // Default matches the dev console host (TRI-854); DevOps sets ADMIN_BASE_URL per environment.
+    adminBaseUrl: (process.env.ADMIN_BASE_URL || 'https://admin.dev.tripkoach.com').replace(/\/+$/, ''),
+    staffInviteExpiryHours: num(process.env.STAFF_INVITE_EXPIRY_HOURS) ?? 72,
+    mfaIssuer: process.env.MFA_ISSUER || 'TripKoach Admin',
     fx: {
       providerName: process.env.FX_PROVIDER_NAME || 'open.er-api.com',
       providerUrl: process.env.FX_PROVIDER_URL || 'https://open.er-api.com/v6/latest/USD',

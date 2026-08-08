@@ -133,6 +133,44 @@ View this booking: {{manageUrl}}
 
 TripKoach Ghana Ltd · Accra · Prices in US dollars (USD)`,
   },
+
+  // TRI-895 P3 · Staff invite. Sent when an admin invites a colleague; the {{acceptUrl}} carries the
+  // one-time opaque token to the accept screen where they set a password (and enable MFA).
+  staff_invite: {
+    subject: 'You have been invited to the TripKoach admin console',
+    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Your TripKoach console invite</title>
+<style>
+body{margin:0;padding:24px 0;background:#F1EDE6;font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#2B2724}
+table{border-collapse:collapse}.w{width:600px;max-width:100%}
+a.btn{display:block;background:#1E1C1A;color:#FFFFFF;text-decoration:none;font-weight:700;font-size:16px;padding:15px 20px;border-radius:10px;text-align:center}
+.mut{color:#6F675E;font-size:13px;line-height:1.5}
+@media (max-width:620px){.w{width:100%!important}.pad{padding-left:20px!important;padding-right:20px!important}}
+</style></head>
+<body>
+<table role="presentation" align="center" class="w" style="background:#FFFFFF;border-radius:14px;overflow:hidden">
+  <tr><td style="background:#1E1C1A;padding:20px 28px;color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Console invitation</td></tr>
+  <tr><td class="pad" style="padding:32px 28px 8px">
+    <h1 style="margin:0 0 8px;font-size:24px;line-height:1.2;letter-spacing:-.02em;color:#1E1C1A">You're invited, {{name}}</h1>
+    <p style="margin:0;font-size:16px;line-height:1.55">You have been added to the TripKoach admin console as <strong>{{role}}</strong>. Set your password to activate your account — you'll be prompted to turn on two-factor authentication.</p>
+  </td></tr>
+  <tr><td class="pad" style="padding:22px 28px 0"><a class="btn" href="{{acceptUrl}}">Set your password</a></td></tr>
+  <tr><td class="pad" style="padding:14px 28px 0"><p class="mut" style="margin:0">This invite link expires in {{expiryHours}} hours. If it has expired, ask an administrator to resend it. If you weren't expecting this, you can ignore this email.</p></td></tr>
+  <tr><td style="background:#1E1C1A;padding:20px 28px;margin-top:20px"><p style="margin:0;color:#A8A096;font-size:12px;line-height:1.6">TripKoach Ghana Ltd · Accra · Staff console — do not share this link.</p></td></tr>
+</table>
+</body></html>`,
+    text: `You're invited, {{name}}
+
+You have been added to the TripKoach admin console as {{role}}. Set your password to
+activate your account — you'll be prompted to turn on two-factor authentication.
+
+Set your password: {{acceptUrl}}
+
+This invite link expires in {{expiryHours}} hours. If it has expired, ask an administrator to
+resend it. If you weren't expecting this, you can ignore this email.
+
+TripKoach Ghana Ltd · Accra · Staff console — do not share this link.`,
+  },
 } satisfies Record<string, TemplateDef>;
 
 export type TemplateName = keyof typeof TEMPLATES;
