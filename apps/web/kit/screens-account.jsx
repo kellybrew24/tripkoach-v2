@@ -10,6 +10,24 @@ const LIVE_AUTH = () => !!(window.TK_CONFIG && window.TK_CONFIG.USE_LIVE_API && 
 const authVal = (id) => { const el = document.getElementById(id); return el && typeof el.value === "string" ? el.value.trim() : ""; };
 const authErrMsg = (e, fallback) => (e && e.message ? e.message : (fallback || "Something went wrong. Please try again."));
 
+// TRI-925 — returning-visitor detection for the login promo panel. We stamp a
+// durable, best-effort flag (localStorage first, cookie fallback) the first time a
+// visitor successfully authenticates AND whenever /me later resolves to a real
+// person (so people who signed in before this feature shipped still count). The
+// login panel then shows returning copy ("Welcome back") only to a browser that has
+// logged in before, and prospect copy to a genuinely new visitor — independent of
+// which auth tab they land on. Privacy modes that throw on storage read as "new".
+const TK_RETURNING_KEY = "tk_returning";
+function tkIsReturning() {
+  try { if (window.localStorage && window.localStorage.getItem(TK_RETURNING_KEY)) return true; } catch (e) {}
+  try { if (document.cookie && /(?:^|;\s*)tk_returning=1(?:;|$)/.test(document.cookie)) return true; } catch (e) {}
+  return false;
+}
+function tkMarkReturning() {
+  try { if (window.localStorage) window.localStorage.setItem(TK_RETURNING_KEY, "1"); } catch (e) {}
+  try { document.cookie = "tk_returning=1; path=/; max-age=31536000; SameSite=Lax"; } catch (e) {}
+}
+
 // TRI-923 — the left promo panel used to statically read "Welcome back", which is
 // wrong for first-time / prospective customers. It now (1) swaps copy on the auth
 // mode — returning ("sign in") vs new ("sign up") — and (2) rotates a small curated
@@ -31,11 +49,13 @@ const TK_PROMO_SCRIM = {
   evening:   "linear-gradient(165deg, rgba(120,52,12,.30) 0%, rgba(40,20,10,.62) 55%, rgba(18,12,8,.9) 100%)",
   night:     "linear-gradient(165deg, rgba(26,26,72,.42) 0%, rgba(12,14,35,.7) 55%, rgba(6,8,22,.92) 100%)",
 };
-// mode: "signin" (returning) | "signup" (prospect) | "reset" (forgot-password)
-function PromoPanel({ mode }) {
+// mode: "signin" | "signup" (prospect) | "reset" (forgot-password)
+// returning: TRI-925 — has this browser signed in before? A first-time visitor who
+// lands on the "sign in" tab still gets prospect copy (never a stale "Welcome back").
+function PromoPanel({ mode, returning }) {
   const bucket = TK_PROMO_BUCKET();
   const set = TK_PROMO_SET[bucket];
-  const isNew = mode === "signup";
+  const isNew = mode === "signup" || (mode === "signin" && !returning);
   const overline = isNew ? "New to TripKoach" : set.greet;
   const heading = isNew ? "Discover Ghana, your way." : "Your trips to Ghana, in one place.";
   const sub = mode === "reset"
@@ -72,7 +92,7 @@ function AccountShell({ current, go, title, children }) {
     if (!live) return;
     let alive = true;
     window.TK_AUTH.me().then(
-      (u) => { if (!alive) return; if (!u) { go("login"); return; } setMe(u); },
+      (u) => { if (!alive) return; if (!u) { go("login"); return; } setMe(u); tkMarkReturning(); },
       () => {}
     );
     return () => { alive = false; };
@@ -354,6 +374,9 @@ function LoginWeb({ go, startCreating }) {
   const [creating, setCreating] = React.useState(!!startCreating);
   const [pw, setPw] = React.useState("");
   const [wrong, setWrong] = React.useState(false);
+  // TRI-925 — snapshot returning-visitor status once at mount; the page navigates
+  // away on a successful login so it never needs to re-read after the flag is set.
+  const returning = React.useMemo(() => tkIsReturning(), []);
   // Live auth (TRI-882): submit logs in / signs up via /api/v1. Flag off → the
   // form just walks to the bookings screen exactly like the DS prototype.
   const live = LIVE_AUTH();
@@ -376,6 +399,7 @@ function LoginWeb({ go, startCreating }) {
         const password = el && typeof el.value === "string" ? el.value : "";
         await window.TK_AUTH.login(email, password);
       }
+      tkMarkReturning(); // TRI-925 — this browser has now signed in at least once
       go("bookings");
     } catch (err) {
       setBusy(false); setWrong(true);
@@ -386,12 +410,12 @@ function LoginWeb({ go, startCreating }) {
   }
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1.05fr 0.95fr", minHeight: "calc(100vh - var(--header-h))" }} className="tk-login">
-      <PromoPanel mode={creating ? "signup" : "signin"} />
+      <PromoPanel mode={creating ? "signup" : "signin"} returning={returning} />
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "40px" }}>
         <div style={{ width: "100%", maxWidth: 380 }}>
           <img src="../../assets/logo-badge.png" width="44" height="44" alt="TripKoach" style={{ marginBottom: "var(--space-5)" }} />
           <h1 className="tk-h2">{creating ? "Create your account" : "Log in"}</h1>
-          <p className="tk-body-sm tk-muted" style={{ marginTop: 4, marginBottom: "var(--space-6)" }}>{creating ? "Takes a minute — you only need it once." : "Welcome back. Enter your details to continue."}</p>
+          <p className="tk-body-sm tk-muted" style={{ marginTop: 4, marginBottom: "var(--space-6)" }}>{creating ? "Takes a minute — you only need it once." : (returning ? "Welcome back. Enter your details to continue." : "Welcome — sign in to pick up your Ghana trip planning.")}</p>
           {wrong && <Alert tone="error" title={creating ? "We couldn't create your account" : "We couldn't log you in"} style={{ marginBottom: "var(--space-4)" }}>{errMsg || "That email and password don't match. Try again, or reset your password."}</Alert>}
           <form className="tk-stack" style={{ gap: "var(--space-4)" }} onSubmit={submit}>
             {creating && <FormField id="lg-name" label="Full name"><Input placeholder="Ama Mensah" autoComplete="name" /></FormField>}

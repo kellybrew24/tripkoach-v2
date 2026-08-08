@@ -7,6 +7,20 @@ const { Button, Input, PasswordInput, FormField, Checkbox, Alert, Icon } = NS;
 // cdn.tripkoach.com (TRI-914/918 hard rule — no dev-hosted / base64 heroes); the
 // per-bucket scrim keeps the aside dark enough for white copy at any hour.
 const TK_ADMIN_PROMO_BUCKET = (d) => { const h = (d || new Date()).getHours(); return h < 5 ? "night" : h < 11 ? "morning" : h < 17 ? "afternoon" : h < 21 ? "evening" : "night"; };
+// TRI-925 — returning-operator detection. We stamp a durable, best-effort flag once
+// an operator completes sign-in on this device, so the console aside greets a
+// returning operator with "Welcome back" and a first-time device with the neutral
+// time-of-day greeting. Privacy modes that throw on storage simply read as "new".
+const TK_ADMIN_RETURNING_KEY = "tk_admin_returning";
+function tkAdminIsReturning() {
+  try { if (window.localStorage && window.localStorage.getItem(TK_ADMIN_RETURNING_KEY)) return true; } catch (e) {}
+  try { if (document.cookie && /(?:^|;\s*)tk_admin_returning=1(?:;|$)/.test(document.cookie)) return true; } catch (e) {}
+  return false;
+}
+function tkAdminMarkReturning() {
+  try { if (window.localStorage) window.localStorage.setItem(TK_ADMIN_RETURNING_KEY, "1"); } catch (e) {}
+  try { document.cookie = "tk_admin_returning=1; path=/; max-age=31536000; SameSite=Lax"; } catch (e) {}
+}
 const TK_ADMIN_PROMO = {
   morning:   { img: "https://cdn.tripkoach.com/img/posts/green-season-ghana-hero.jpg",                greet: "Good morning",   scrim: "linear-gradient(180deg, rgba(60,42,15,.30), rgba(12,12,14,.74))" },
   afternoon: { img: "https://cdn.tripkoach.com/img/posts/kakum-canopy-walk-cape-coast-day-trip-hero.jpg", greet: "Good afternoon", scrim: "linear-gradient(180deg, rgba(15,30,48,.30), rgba(12,12,14,.74))" },
@@ -16,6 +30,7 @@ const TK_ADMIN_PROMO = {
 
 function AuthFrame({ children, foot }) {
   const promo = TK_ADMIN_PROMO[TK_ADMIN_PROMO_BUCKET()];
+  const returning = tkAdminIsReturning(); // TRI-925 — new device vs returning operator
   return (
     <div style={{ minHeight: "100vh", display: "grid", gridTemplateColumns: "1fr 1fr", background: "var(--shell-content-bg)" }}>
       <div style={{ position: "relative", background: "var(--n-950)", color: "var(--n-0)", padding: "48px", display: "flex", flexDirection: "column", justifyContent: "space-between", overflow: "hidden" }} className="tk-admin-authaside">
@@ -26,9 +41,9 @@ function AuthFrame({ children, foot }) {
           <strong style={{ fontWeight: 800, fontSize: 18, letterSpacing: "-0.02em" }}>TripKoach <span style={{ color: "var(--gold-400)" }}>Ops</span></strong>
         </div>
         <div style={{ position: "relative" }}>
-          <span className="tk-overline" style={{ color: "var(--gold-400)" }}>{promo.greet}</span>
+          <span className="tk-overline" style={{ color: "var(--gold-400)" }}>{returning ? "Welcome back" : promo.greet}</span>
           <h1 style={{ fontFamily: "var(--font-display)", fontWeight: 800, letterSpacing: "-0.03em", lineHeight: 1.05, fontSize: 34, maxWidth: "14ch", marginTop: 8 }}>The back office for every booking in Ghana.</h1>
-          <p style={{ color: "rgba(255,255,255,.7)", marginTop: 12, maxWidth: "40ch", fontSize: 14.5 }}>Tours, departures, bookings and payments — one console for the whole operation.</p>
+          <p style={{ color: "rgba(255,255,255,.7)", marginTop: 12, maxWidth: "40ch", fontSize: 14.5 }}>{returning ? "Sign in to pick up where you left off — bookings, departures and payments." : "Tours, departures, bookings and payments — one console for the whole operation."}</p>
         </div>
         <p style={{ position: "relative", fontSize: 12, color: "rgba(255,255,255,.5)" }}>Staff access only · All actions are logged.</p>
       </div>
@@ -66,6 +81,7 @@ function AdminLogin({ go, state }) {
       // issued an enroll-gated half-auth session; route to the enroll gate to set one up before entering.
       if (res && (res.mfaEnrollmentRequired || res.mfa_enrollment_required)) { setBusy(false); go("mfa-enroll"); return; }
       // Logged in — record session + hydrate, then go to the dashboard.
+      tkAdminMarkReturning(); // TRI-925 — this device has now completed a staff sign-in
       Promise.resolve(window.TK_ADMIN_ENTER(res)).then(() => { setBusy(false); go("dashboard"); }, () => { setBusy(false); go("dashboard"); });
     }, (err) => {
       setBusy(false);
@@ -109,6 +125,7 @@ function MfaChallenge({ go, state }) {
     setBusy(true); setLiveErr(false);
     // POST /auth/mfa accepts a live TOTP OR a single-use recovery code (TRI-895).
     window.TK_ADMIN_API.verifyMfa(value).then((res) => {
+      tkAdminMarkReturning(); // TRI-925 — completed sign-in (TOTP / recovery)
       Promise.resolve(window.TK_ADMIN_ENTER(res)).then(() => { setBusy(false); go("dashboard"); }, () => { setBusy(false); go("dashboard"); });
     }, () => { setBusy(false); setLiveErr(true); });
   };
@@ -197,6 +214,7 @@ function MfaEnrollGate({ go }) {
   };
   const enter = () => {
     const res = enterRes.current || {};
+    tkAdminMarkReturning(); // TRI-925 — completed enrollment + sign-in on this device
     Promise.resolve(window.TK_ADMIN_ENTER(res)).then(() => go("dashboard"), () => go("dashboard"));
   };
   const secretPretty = data && data.secret ? data.secret.replace(/\s+/g, "").replace(/(.{4})/g, "$1 ").trim() : "";
