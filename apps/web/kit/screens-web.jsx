@@ -616,6 +616,53 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
 function BookingsWeb({ go, currency = "USD" }) {
   const [tab, setTab] = React.useState("all");
   const [reviewFor, setReviewFor] = React.useState(null);
+  // Live "my bookings" (TRI-882): GET /me/bookings for the signed-in account
+  // (guest bookings are auto-linked at signup/login). Flag off → the DS fixtures.
+  const live = LIVE_AUTH();
+  const [rows, setRows] = React.useState(null);
+  const [loaded, setLoaded] = React.useState(!live);
+  React.useEffect(() => {
+    if (!live) return;
+    let alive = true;
+    window.TK_AUTH.me().then((u) => {
+      if (!alive) return undefined;
+      if (!u) { go("login"); return undefined; }
+      return window.TK_AUTH.myBookings().then((bs) => { if (alive) { setRows(bs); setLoaded(true); } });
+    }).catch(() => { if (alive) { setRows([]); setLoaded(true); } });
+    return () => { alive = false; };
+  }, []);
+  const dsStatus = (s) => (s === "confirmed" || s === "completed") ? "confirmed" : (s === "cancelled" || s === "expired" ? "cancelled" : "pending");
+  const paxLabel = (n) => (Number(n) || 0) + " traveller" + (Number(n) === 1 ? "" : "s");
+  if (live) {
+    if (!loaded) return (
+      <AccountShell current="bookings" go={go} title="Your bookings">
+        <div className="tk-card"><div className="tk-card__body" style={{ padding: "var(--space-8)", alignItems: "center" }}><span className="tk-body-sm tk-muted">Loading your bookings…</span></div></div>
+      </AccountShell>
+    );
+    const bookings = (rows || []).map(b => ({ ...b, ds: dsStatus(b.status) }));
+    const count = (st) => bookings.filter(b => b.ds === st).length;
+    const pendingN = count("pending");
+    const shown = tab === "all" ? bookings : bookings.filter(b => b.ds === tab);
+    const tourFor = (b) => (window.TK_DATA.tours.find(t => t.title === b.tourTitle) || { id: b.tourSlug || b.ref, title: b.tourTitle });
+    const imgFor = (b) => { const t = window.TK_DATA.tours.find(t => t.slug === b.tourSlug || t.title === b.tourTitle); return t ? t.image : undefined; };
+    return (
+      <AccountShell current="bookings" go={go} title="Your bookings">
+        <Tabs value={tab} onChange={setTab} tabs={[{ id: "all", label: "All", count: bookings.length }, { id: "pending", label: "Pending", count: pendingN }, { id: "confirmed", label: "Confirmed", count: count("confirmed") }, { id: "cancelled", label: "Cancelled", count: count("cancelled") }]} />
+        {pendingN > 0 && <Alert tone="warning" title={pendingN === 1 ? "One booking is waiting for payment" : pendingN + " bookings are waiting for payment"} action={<Button variant="link" size="sm" onClick={() => window.tkToast("Pay by card or mobile money — instructions are in your confirmation email")}>See how to pay</Button>}>Pay before your departure to lock in your spots.</Alert>}
+        {bookings.length === 0
+          ? <div className="tk-card"><div className="tk-card__body" style={{ padding: "var(--space-8)", alignItems: "center", textAlign: "center", gap: 10 }}><span className="tk-body-sm tk-muted">No bookings yet. When you book a tour it'll show up here.</span><Button variant="secondary" size="sm" onClick={() => go("browse")}>Browse tours</Button></div></div>
+          : <div style={{ display: "grid", gap: 12 }}>
+            {shown.map(b => (
+              <div key={b.ref} style={{ display: "grid", gap: 8 }}>
+                <BookingRow reference={b.ref} title={b.tourTitle} date={b.departureLabel || b.date} travellers={paxLabel(b.partySize)} total={cvt(b.total, currency)} currency={currency} status={b.ds} image={imgFor(b)} onClick={() => go("bookings")} />
+                {b.ds === "confirmed" && <div style={{ display: "flex", justifyContent: "flex-end" }}><Button variant="secondary" size="sm" iconStart="pencil" onClick={() => setReviewFor(tourFor(b))}>Leave a review</Button></div>}
+              </div>
+            ))}
+          </div>}
+        {reviewFor && <ReviewModal tour={reviewFor} onClose={() => setReviewFor(null)} />}
+      </AccountShell>
+    );
+  }
   const all = window.TK_DATA.bookings;
   const tourFor = (b) => (window.TK_DATA.tours.find(t => t.title === b.tour) || { id: b.ref, title: b.tour });
   return (

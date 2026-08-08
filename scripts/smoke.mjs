@@ -34,7 +34,7 @@ async function runOne(name) {
     "config.js",
     ...(name === "web" ? ["data/data.js", "data/blog.js"] : ["data/data.js", "data/admin-data.js"]),
     "tk-api.js",
-    ...(name === "web" ? ["tk-booking.js"] : []),
+    ...(name === "web" ? ["tk-booking.js", "tk-auth.js"] : []),
     "tk-boot.js",
     "app.js",
   ];

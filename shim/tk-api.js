@@ -97,6 +97,9 @@
     post: function (path, body, opts) {
       return request("POST", path, Object.assign({ body: body }, opts || {}));
     },
+    put: function (path, body, opts) {
+      return request("PUT", path, Object.assign({ body: body }, opts || {}));
+    },
     patch: function (path, body, opts) {
       return request("PATCH", path, Object.assign({ body: body }, opts || {}));
     },

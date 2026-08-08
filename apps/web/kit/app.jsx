@@ -17,7 +17,7 @@ window.tkToast = (msg) => {
 const ROUTES = [
   ["home", "/"], ["browse", "/browse"], ["tour", "/tour"], ["checkout", "/checkout"],
   ["confirm", "/confirm"], ["bookings", "/bookings"], ["reviews", "/reviews"],
-  ["login", "/login"], ["forgot", "/forgot"], ["profile", "/profile"],
+  ["login", "/login"], ["signup", "/signup"], ["forgot", "/forgot"], ["profile", "/profile"],
   ["notifications", "/notifications"], ["account-settings", "/account/settings"],
   ["regions", "/regions"], ["marketplace", "/shop"], ["esim", "/esim"],
   ["pickup", "/pickup"], ["club", "/club"], ["about", "/about"],
@@ -38,6 +38,10 @@ function routeFromPath(pathname) {
   if (m) return { screen: "post", slug: decodeURIComponent(m[1]) };
   const t = path.match(/^\/tour\/(.+)$/);
   if (t) return { screen: "tour", slug: decodeURIComponent(t[1]) };
+  // The emailed password-reset link (Backend TRI-881: APP_BASE_URL/reset-password
+  // ?token=…) lands here — reuse the ForgotWeb screen, which reads the token off
+  // the URL and opens on its "set a new password" stage.
+  if (path === "/reset-password") return { screen: "forgot", slug: null };
   const hit = ROUTES.find(([, p]) => p === path);
   return { screen: hit ? hit[0] : "home", slug: null };
 }
@@ -131,6 +135,7 @@ function WebApp() {
     bookings: <BookingsWeb go={go} currency={currency} />,
     reviews: <ReviewsWeb go={go} />,
     login: <LoginWeb go={go} />,
+    signup: <LoginWeb go={go} startCreating />,
     forgot: <ForgotWeb go={go} />,
     profile: <ProfileWeb go={go} />,
     notifications: <NotificationsWeb go={go} />,
@@ -147,7 +152,7 @@ function WebApp() {
     review: <ReviewInvitePage go={go} />,
   }[screen] || <HomeWeb go={go} />;
 
-  const AUTH = screen === "login" || screen === "forgot";
+  const AUTH = screen === "login" || screen === "signup" || screen === "forgot";
   return AUTH ? body : <Shell currency={currency} setCurrency={setCurrency} go={go}>{body}</Shell>;
 }
 
