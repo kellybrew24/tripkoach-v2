@@ -60,7 +60,7 @@ function randomCode(n: number): string {
 }
 
 export interface BookingService {
-  create(input: CreateBookingInput): Promise<any>;
+  create(input: CreateBookingInput, opts?: { userId?: string | null }): Promise<any>;
   getByRef(ref: string): Promise<any | null>;
   initPayment(ref: string, opts?: { channel?: string }): Promise<any>;
   verifyPayment(ref: string, reference?: string): Promise<any>;
@@ -220,7 +220,7 @@ export function createBookingService(
   }
 
   // ── CREATE + RESERVE (single transaction) ──
-  async function create(input: CreateBookingInput): Promise<any> {
+  async function create(input: CreateBookingInput, opts?: { userId?: string | null }): Promise<any> {
     const partySize = Number(input.partySize);
     if (!Number.isInteger(partySize) || partySize < 1) {
       throw new BookingError('validation', 'partySize must be an integer >= 1', 422);
@@ -293,12 +293,12 @@ export function createBookingService(
           `INSERT INTO booking
              (ref, tour_id, departure_id, package_id, party_size, unit_price_minor, total_minor,
               currency, status, payment_state, reservation_expires_at, special_requests, agreed_terms_at,
-              promo_code_id, discount_minor)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'reserved','unpaid',$9,$10, now(),$11,$12)
+              promo_code_id, discount_minor, user_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'reserved','unpaid',$9,$10, now(),$11,$12,$13)
            RETURNING id, ref`,
           [ref, tour.id, dep.id, packageId, partySize, unit, total, currency,
            expires.toISOString(), input.specialRequests ?? null,
-           promo?.id ?? null, promo?.discountMinor ?? 0]);
+           promo?.id ?? null, promo?.discountMinor ?? 0, opts?.userId ?? null]);
         return r.rows[0];
       });
 
@@ -433,7 +433,12 @@ export function createBookingService(
         reference: pay.ref,
         currency: 'GHS',
         channels,
-        // No callbackUrl: FE uses Paystack inline + server-side verify/webhook, not a redirect.
+        // TRI-926: FE uses a full-page REDIRECT to Paystack's hosted checkout, so Paystack MUST know
+        // where to send the payer back. Derive the return URL server-side from the configured web base
+        // (never from client input) → no open-redirect surface. Paystack appends ?trxref=&reference= and
+        // the /confirm page reconciles (server-side verify + poll). The booking ref is recovered from the
+        // FE's sessionStorage (tk.lastBookingRef), so we intentionally send a query-less callback.
+        callbackUrl: `${cfg.notify.webBaseUrl}/confirm`,
         metadata: { bookingRef: b.ref, usdMinor, fxRate: rate },
       });
     } catch (e) {

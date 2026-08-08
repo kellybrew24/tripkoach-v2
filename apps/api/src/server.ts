@@ -11,6 +11,7 @@ import { createPaystackClient, type PaystackClient } from './paystack.ts';
 import { registerAdmin } from './admin-routes.ts';
 import { createNotificationService } from './notifications.ts';
 import { registerConsumer } from './consumer-routes.ts';
+import { resolveUserSession } from './consumer-auth.ts';
 import { createReviewsService, ReviewError } from './reviews.ts';
 import { listBlogPosts, getBlogPost } from './content.ts';
 import type { Storage } from './storage.ts';
@@ -133,7 +134,12 @@ export function buildServer(db: Db, cfg: Config, paystack?: PaystackClient, stor
     // ── Phase 2 write paths (TRI-866): booking + Paystack payments ──
     api.post('/bookings', async (req, reply) => {
       try {
-        const out = await bookings.create(req.body as CreateBookingInput);
+        // TRI-926: link the booking to the signed-in consumer when a valid session cookie is present, so it
+        // shows up under /me/bookings ("my purchases"). Guest checkout still works (no cookie → userId null);
+        // pre-existing guest bookings are linked at signup/login by email (linkGuestBookings).
+        const sid = req.cookies?.[cfg.consumer.cookieName];
+        const account = sid ? await resolveUserSession(db, cfg, sid).catch(() => null) : null;
+        const out = await bookings.create(req.body as CreateBookingInput, { userId: account?.id ?? null });
         return reply.code(201).send(out);
       } catch (e) { return sendBookingError(reply, e); }
     });
