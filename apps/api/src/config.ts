@@ -44,6 +44,35 @@ export interface Config {
   fx: FxConfig;
   email: EmailConfig;
   notify: NotifyConfig;
+  media: MediaConfig;
+}
+
+// Admin image upload → CDN publish (TRI-918). Backed by Cloudflare R2 (S3-compatible) behind
+// cdn.tripkoach.com. All credentials come from the environment (the board's R2 token file drops straight
+// into the systemd EnvironmentFile) — never code. When any credential is absent `enabled` is false and the
+// media routes answer 503 (same safe-when-unconfigured posture as the email transport).
+export interface MediaConfig {
+  /** All of endpoint+bucket+accessKeyId+secretAccessKey present. */
+  enabled: boolean;
+  /** R2 S3 endpoint, e.g. https://<account>.r2.cloudflarestorage.com (path-style addressing). */
+  endpoint: string | undefined;
+  bucket: string | undefined;
+  accessKeyId: string | undefined;
+  secretAccessKey: string | undefined;
+  /** SigV4 region. R2 accepts 'auto'. */
+  region: string;
+  /** Public base URL objects are served from (no trailing slash), e.g. https://cdn.tripkoach.com. */
+  publicBase: string;
+  /** Key prefix under the bucket for admin-uploaded media (keeps it distinct from the catalogue's img/). */
+  keyPrefix: string;
+  /** Max upload size in bytes. */
+  maxBytes: number;
+  /** Allowed (sniffed) MIME types. */
+  allowedTypes: readonly string[];
+  /** Cache-Control stamped on published objects. Content-addressed keys ⇒ immutable is safe. */
+  cacheControl: string;
+  /** Network timeout for the R2 PUT, ms. */
+  timeoutMs: number;
 }
 
 // Transactional notifications (TRI-889). Governs the booking-lifecycle emails + the departure-reminder
@@ -194,5 +223,35 @@ export function loadConfig(): Config {
       webBaseUrl: (process.env.WEB_BASE_URL || process.env.TRIPKOACH_WEB_BASE_URL || 'https://app.tripkoach.com').replace(/\/+$/, ''),
       reminderDaysBefore: num(process.env.REMINDER_DAYS_BEFORE) ?? 3,
     },
+    media: loadMediaConfig(),
+  };
+}
+
+// TRI-918. Reads the R2 token file's own key names (R2_ENDPOINT / R2_BUCKET / R2_ACCESS_KEY_ID /
+// R2_SECRET_ACCESS_KEY / R2_PUBLIC_URL / CUSTOM_DOMAIN / S3_API) so the board's env drops in verbatim,
+// while also honouring neutral MEDIA_* overrides. No secret is ever defaulted in code.
+function loadMediaConfig(): MediaConfig {
+  const endpoint = (process.env.R2_ENDPOINT || process.env.S3_API || process.env.MEDIA_S3_ENDPOINT)?.replace(/\/+$/, '');
+  const bucket = process.env.R2_BUCKET || process.env.MEDIA_BUCKET;
+  const accessKeyId = process.env.R2_ACCESS_KEY_ID || process.env.MEDIA_ACCESS_KEY_ID;
+  const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY || process.env.MEDIA_SECRET_ACCESS_KEY;
+  // Public serving host: prefer an explicit media base, else the R2 token's public URL / custom domain,
+  // else the RUNTIME.md CDN invariant. Never include a trailing slash.
+  const publicBase = (
+    process.env.MEDIA_PUBLIC_BASE || process.env.R2_PUBLIC_URL ||
+    (process.env.CUSTOM_DOMAIN ? `https://${process.env.CUSTOM_DOMAIN.replace(/^https?:\/\//, '')}` : '') ||
+    'https://cdn.tripkoach.com'
+  ).replace(/\/+$/, '');
+  return {
+    enabled: Boolean(endpoint && bucket && accessKeyId && secretAccessKey),
+    endpoint, bucket, accessKeyId, secretAccessKey,
+    region: process.env.R2_REGION || process.env.MEDIA_REGION || 'auto',
+    publicBase,
+    keyPrefix: (process.env.MEDIA_KEY_PREFIX || 'media').replace(/^\/+|\/+$/g, ''),
+    maxBytes: num(process.env.MEDIA_MAX_BYTES) ?? 10 * 1024 * 1024,
+    allowedTypes: (process.env.MEDIA_ALLOWED_TYPES || 'image/jpeg,image/png,image/webp,image/gif')
+      .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
+    cacheControl: process.env.MEDIA_CACHE_CONTROL || 'public, max-age=31536000, immutable',
+    timeoutMs: num(process.env.MEDIA_TIMEOUT_MS) ?? 20_000,
   };
 }

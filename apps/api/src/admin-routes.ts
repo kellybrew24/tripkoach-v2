@@ -17,6 +17,8 @@ import type { NotificationService } from './notifications.ts';
 import { createReviewsService, ReviewError, type ReviewsService } from './reviews.ts';
 import { createStaffService } from './staff.ts';
 import { createPaystackClient, type PaystackClient } from './paystack.ts';
+import { createMediaService, MediaError } from './media.ts';
+import { createStorage, type Storage } from './storage.ts';
 
 // RFC-4180-ish CSV cell: quote when the value contains a comma, quote, or newline; double embedded quotes.
 function csvCell(v: unknown): string {
@@ -40,10 +42,13 @@ function reconciliationCsv(report: {
   return lines.join('\r\n') + '\r\n';
 }
 
-export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifier?: NotificationService, reviews?: ReviewsService, paystack?: PaystackClient): void {
+export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifier?: NotificationService, reviews?: ReviewsService, paystack?: PaystackClient, storage?: Storage): void {
   const svc = createAdminService(db, cfg, paystack ?? createPaystackClient(cfg.paystack), notifier);
   const reviewSvc = reviews ?? createReviewsService(db, cfg);
   const staffSvc = createStaffService(db, cfg);
+  // TRI-918: admin image upload → validation → R2 (cdn.tripkoach.com) publish. Storage is 'enabled' only
+  // when the R2 credentials are present in the environment; unconfigured → the routes answer 503.
+  const mediaSvc = createMediaService(db, cfg, storage ?? createStorage(cfg.media));
   const auth = makeRequireAuth(db, cfg);
   const authEnroll = makeRequireAuthAllowingEnroll(db, cfg); // TRI-912: enroll-gated sessions may reach /auth/mfa enroll
   const perm = (p: Permission) => ({ preHandler: makeRequirePermission(db, cfg, p) });
@@ -64,6 +69,13 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
       }
       if (err instanceof ReviewError) {
         return reply.code(err.httpStatus).send({ error: { code: err.code, message: err.message, field: err.field } });
+      }
+      if (err instanceof MediaError) {
+        return reply.code(err.httpStatus).send({ error: { code: err.code, message: err.message, field: err.field } });
+      }
+      // Fastify raises FST_ERR_CTP_BODY_TOO_LARGE (413) when an upload exceeds the route bodyLimit.
+      if ((err as any).statusCode === 413 || (err as any).code === 'FST_ERR_CTP_BODY_TOO_LARGE') {
+        return reply.code(413).send({ error: { code: 'too_large', message: 'Image exceeds the upload size limit.' } });
       }
       if ((err as any).statusCode === 400) {
         return reply.code(400).send({ error: { code: 'bad_request', message: err.message } });
@@ -298,6 +310,39 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
     admin.post('/blog/:idOrSlug/publish', perm('content.manage'), async (req) => svc.setBlogPublished((req.params as any).idOrSlug, true, actorOf(req)));
     admin.post('/blog/:idOrSlug/unpublish', perm('content.manage'), async (req) => svc.setBlogPublished((req.params as any).idOrSlug, false, actorOf(req)));
     admin.delete('/blog/:idOrSlug', perm('content.manage'), async (req) => svc.deleteBlog((req.params as any).idOrSlug, actorOf(req)));
+
+    // ── Media library (TRI-918) — admin image upload → validation → CDN (R2) publish, guarded by
+    //    content.manage. The upload endpoint takes the RAW image bytes as the request body (the SPA sends
+    //    the File/Blob directly; curl uses --data-binary), so we buffer image/* + octet-stream here. This
+    //    parser is scoped to the admin realm — the consumer /api/v1 JSON paths are untouched. ──
+    const IMAGE_CTYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/octet-stream'];
+    admin.addContentTypeParser(IMAGE_CTYPES, { parseAs: 'buffer' }, (_req, body, done) => done(null, body));
+
+    admin.get('/media', perm('content.manage'), async (req) => {
+      const q = query(req);
+      return mediaSvc.list({ limit: qNum(q, 'limit'), offset: qNum(q, 'offset') });
+    });
+    admin.get('/media/:id', perm('content.manage'), async (req, reply) => {
+      const asset = await mediaSvc.getById((req.params as any).id);
+      return asset ?? reply.code(404).send({ error: { code: 'not_found', message: 'media asset not found' } });
+    });
+    admin.post('/media', {
+      ...perm('content.manage'),
+      // Allow the configured max image size (+slack) past Fastify's 1MB default, scoped to this route only.
+      bodyLimit: cfg.media.maxBytes + 1024,
+    }, async (req, reply) => {
+      const raw = req.body;
+      const bytes = Buffer.isBuffer(raw) ? raw : Buffer.isBuffer((raw as any)?.data) ? (raw as any).data : null;
+      if (!bytes) {
+        return reply.code(415).send({ error: { code: 'unsupported_type', message: 'Send the raw image bytes with an image/* Content-Type.' } });
+      }
+      const q = query(req);
+      const filename = qStr(q, 'filename') ?? (req.headers['x-filename'] as string | undefined) ?? null;
+      const altText = qStr(q, 'alt') ?? (req.headers['x-alt-text'] as string | undefined) ?? null;
+      const declaredType = (req.headers['content-type'] as string | undefined) ?? null;
+      const out = await mediaSvc.upload({ bytes, filename, altText, declaredType }, actorOf(req));
+      return reply.code(out.deduped ? 200 : 201).send({ asset: out.asset, deduped: out.deduped });
+    });
 
     // ── Settings (org config incl display rate; charge rate is read-only) ────────
     // TRI-898 · GET/PATCH the singleton settings row. settings.manage gates both. PATCH surfaces the

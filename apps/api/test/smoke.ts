@@ -70,7 +70,18 @@ const paystackStub: PaystackClient = {
   },
 };
 
-const app = buildServer(db, cfg, paystackStub);
+// TRI-918: stub R2 so the media-upload block exercises the full validate→address→publish→record path
+// without network/credentials. Records every PUT so we can assert the key/content-type/cache-control.
+const r2Puts: { key: string; contentType: string; cacheControl?: string; size: number }[] = [];
+const storageStub = {
+  enabled: true,
+  async put(key: string, body: Uint8Array, opts: { contentType: string; cacheControl?: string }) {
+    r2Puts.push({ key, contentType: opts.contentType, cacheControl: opts.cacheControl, size: body.length });
+    return { etag: '"stub-etag"' };
+  },
+};
+
+const app = buildServer(db, cfg, paystackStub, storageStub);
 await app.ready();
 
 const get = async (url: string) => {
@@ -751,6 +762,64 @@ console.log('\n[blog / CMS (TRI-917)]');
   // Delete → gone.
   ok('delete → 200', (await call('DELETE', `/api/admin/blog/${slug}`, { cookie: adminCookie })).status === 200);
   ok('deleted post → admin getBlog 404', (await call('GET', `/api/admin/blog/${slug}`, { cookie: adminCookie })).status === 404);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TRI-918 · Admin image upload → validation → R2 (cdn.tripkoach.com) publish pipeline.
+// Raw-bytes upload under /api/admin/media, guarded by content.manage. Storage is stubbed above.
+// ─────────────────────────────────────────────────────────────────────────────
+console.log('\n[admin media upload (TRI-918)]');
+{
+  // Smallest valid images (real magic bytes) so the sniffer accepts them.
+  const PNG_1x1 = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+  const GIF_1x1 = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
+  const putImg = async (bytes: Buffer, contentType: string, opts: { cookie?: string; query?: string } = {}) =>
+    app.inject({ method: 'POST', url: `/api/admin/media${opts.query ?? ''}`, payload: bytes,
+      headers: { 'content-type': contentType, ...(opts.cookie ? { cookie: `${COOKIE}=${opts.cookie}` } : {}) } });
+
+  // AuthZ: unauthenticated + viewer are rejected.
+  ok('media upload without session → 401', (await putImg(PNG_1x1, 'image/png')).statusCode === 401);
+  const vlogin = await call('POST', '/api/admin/auth/login', { payload: { email: 'viewer@tripkoach.com', password: 'Just-Look!' } });
+  const vcookie = vlogin.cookies.find((c) => c.name === COOKIE)?.value ?? '';
+  ok('viewer upload → 403 (no content.manage)', (await putImg(PNG_1x1, 'image/png', { cookie: vcookie })).statusCode === 403);
+
+  // Happy path: a valid PNG publishes and returns a canonical cdn.tripkoach.com URL.
+  const putsBefore = r2Puts.length;
+  const up = await putImg(PNG_1x1, 'image/png', { cookie: adminCookie, query: '?filename=hero.png&alt=A%20hero' });
+  ok('upload PNG → 201 created', up.statusCode === 201);
+  const asset = up.json().asset;
+  ok('asset URL is under cdn.tripkoach.com/media', /^https:\/\/cdn\.tripkoach\.com\/media\/[0-9a-f]{2}\/[0-9a-f]{64}\.png$/.test(asset.url), asset.url);
+  ok('asset sniffed content-type png', asset.contentType === 'image/png');
+  ok('asset parsed 1x1 dimensions', asset.width === 1 && asset.height === 1);
+  ok('asset carries filename + alt', asset.filename === 'hero.png' && asset.altText === 'A hero');
+  ok('one object PUT to R2', r2Puts.length === putsBefore + 1);
+  ok('R2 PUT used immutable cache-control', /immutable/.test(r2Puts[r2Puts.length - 1].cacheControl || ''));
+  ok('R2 key matches asset storageKey', r2Puts[r2Puts.length - 1].key === asset.storageKey);
+
+  // Dedupe: identical bytes re-uploaded → 200, same asset, NO second PUT.
+  const dupPuts = r2Puts.length;
+  const dup = await putImg(PNG_1x1, 'image/png', { cookie: adminCookie });
+  ok('re-upload identical bytes → 200 deduped', dup.statusCode === 200 && dup.json().deduped === true);
+  ok('dedupe returns same asset id', dup.json().asset.id === asset.id);
+  ok('dedupe made no new R2 PUT', r2Puts.length === dupPuts);
+
+  // A second distinct format publishes independently.
+  ok('upload GIF → 201', (await putImg(GIF_1x1, 'image/gif', { cookie: adminCookie })).statusCode === 201);
+
+  // Validation: a non-image body is rejected by the magic-byte sniff even with an image Content-Type.
+  const bogus = await putImg(Buffer.from('this is definitely not an image'), 'image/png', { cookie: adminCookie });
+  ok('non-image bytes → 415 unsupported_type', bogus.statusCode === 415 && bogus.json().error.code === 'unsupported_type');
+
+  // Library list returns the ready assets, newest-first.
+  const lib = await call('GET', '/api/admin/media', { cookie: adminCookie });
+  ok('media list → 200 with assets', lib.status === 200 && lib.body.total >= 2 && Array.isArray(lib.body.assets));
+  ok('list is ready-only', lib.body.assets.every((a: any) => a.status === 'ready'));
+
+  // The upload is audited.
+  const audited = (await call('GET', '/api/admin/audit-log', { cookie: adminCookie })).body;
+  const rows = Array.isArray(audited) ? audited : (audited.entries ?? audited.items ?? audited.rows ?? []);
+  ok('media.upload is audited', rows.some((r: any) => r.action === 'media.upload'));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

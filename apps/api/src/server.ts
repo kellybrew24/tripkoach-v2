@@ -13,6 +13,7 @@ import { createNotificationService } from './notifications.ts';
 import { registerConsumer } from './consumer-routes.ts';
 import { createReviewsService, ReviewError } from './reviews.ts';
 import { listBlogPosts, getBlogPost } from './content.ts';
+import type { Storage } from './storage.ts';
 
 /** Normalise a query value that may be absent, a single string ("a,b"), or an array into string[]. */
 function asArray(v: unknown): string[] | undefined {
@@ -38,7 +39,7 @@ function sendBookingError(reply: any, err: unknown): any {
   return reply.code(500).send({ error: { code: 'internal', message: 'Internal error' } });
 }
 
-export function buildServer(db: Db, cfg: Config, paystack?: PaystackClient): FastifyInstance {
+export function buildServer(db: Db, cfg: Config, paystack?: PaystackClient, storage?: Storage): FastifyInstance {
   const app = Fastify({ logger: cfg.env !== 'test' });
 
   // Keep the raw JSON body available for Paystack webhook HMAC verification, while still parsing JSON
@@ -178,7 +179,7 @@ export function buildServer(db: Db, cfg: Config, paystack?: PaystackClient): Fas
 
   // ── Phase 3 admin write/auth realm (TRI-869), mounted under cfg.adminPrefix (default /api/admin) ──
   // paystackClient is shared with the booking service so refund execution (TRI-897) is stubbable in tests.
-  registerAdmin(app, db, cfg, notifier, reviews, paystackClient);
+  registerAdmin(app, db, cfg, notifier, reviews, paystackClient, storage);
 
   // ── P1 consumer accounts & auth realm (TRI-881), mounted under cfg.apiPrefix (default /api/v1).
   // Encapsulated plugin: adds /auth/* + /me[...]; the Phase-1 read paths above are untouched. ──
