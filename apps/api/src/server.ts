@@ -9,6 +9,7 @@ import { listRegions, listTours, getTourBySlug, getAvailability, getReviews } fr
 import { createBookingService, BookingError, type CreateBookingInput } from './booking.ts';
 import { createPaystackClient, type PaystackClient } from './paystack.ts';
 import { registerAdmin } from './admin-routes.ts';
+import { registerConsumer } from './consumer-routes.ts';
 
 /** Normalise a query value that may be absent, a single string ("a,b"), or an array into string[]. */
 function asArray(v: unknown): string[] | undefined {
@@ -141,6 +142,10 @@ export function buildServer(db: Db, cfg: Config, paystack?: PaystackClient): Fas
 
   // ── Phase 3 admin write/auth realm (TRI-869), mounted under cfg.adminPrefix (default /api/admin) ──
   registerAdmin(app, db, cfg);
+
+  // ── P1 consumer accounts & auth realm (TRI-881), mounted under cfg.apiPrefix (default /api/v1).
+  // Encapsulated plugin: adds /auth/* + /me[...]; the Phase-1 read paths above are untouched. ──
+  registerConsumer(app, db, cfg);
 
   return app;
 }

@@ -133,6 +133,46 @@ View this booking: {{manageUrl}}
 
 TripKoach Ghana Ltd · Accra · Prices in US dollars (USD)`,
   },
+
+  // TRI-881 P1 · Consumer password reset (audit gap C10, web:ForgotWeb 4-stage flow). Sent by
+  // consumer.requestPasswordReset() with { firstName, resetUrl, ttlMinutes }. The link carries the
+  // single-use token; the FE reset page POSTs /auth/password-reset/consume with it.
+  password_reset: {
+    subject: 'Reset your TripKoach password',
+    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Reset your TripKoach password</title>
+<style>
+body{margin:0;padding:24px 0;background:#F1EDE6;font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#2B2724}
+table{border-collapse:collapse}.w{width:600px;max-width:100%}
+a.btn{display:block;background:#1E1C1A;color:#FFFFFF;text-decoration:none;font-weight:700;font-size:16px;padding:15px 20px;border-radius:10px;text-align:center}
+.mut{color:#6F675E;font-size:13px;line-height:1.5}
+@media (max-width:620px){.w{width:100%!important}.pad{padding-left:20px!important;padding-right:20px!important}}
+</style></head>
+<body>
+<table role="presentation" align="center" class="w" style="background:#FFFFFF;border-radius:14px;overflow:hidden">
+  <tr><td style="background:#1E1C1A;padding:20px 28px;color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Password reset</td></tr>
+  <tr><td class="pad" style="padding:32px 28px 8px">
+    <h1 style="margin:0 0 8px;font-size:24px;line-height:1.2;letter-spacing:-.02em;color:#1E1C1A">Reset your password, {{firstName}}</h1>
+    <p style="margin:0 0 4px;font-size:16px;line-height:1.55">We received a request to reset the password on your TripKoach account. Tap the button below to choose a new one.</p>
+  </td></tr>
+  <tr><td class="pad" style="padding:22px 28px 4px"><a class="btn" href="{{resetUrl}}">Choose a new password</a></td></tr>
+  <tr><td class="pad" style="padding:12px 28px 0"><p class="mut" style="margin:0">This link expires in {{ttlMinutes}} minutes and can be used once. If you didn't ask to reset your password, you can safely ignore this email — your password won't change.</p></td></tr>
+  <tr><td class="pad" style="padding:16px 28px 4px"><p class="mut" style="margin:0;word-break:break-all">Button not working? Paste this link into your browser:<br>{{resetUrl}}</p></td></tr>
+  <tr><td style="background:#1E1C1A;padding:20px 28px"><p style="margin:0;color:#A8A096;font-size:12px;line-height:1.6">TripKoach Ghana Ltd · Accra · automated message, no reply needed.</p></td></tr>
+</table>
+</body></html>`,
+    text: `Reset your password, {{firstName}}
+
+We received a request to reset the password on your TripKoach account.
+Open this link to choose a new one:
+
+{{resetUrl}}
+
+This link expires in {{ttlMinutes}} minutes and can be used once. If you didn't ask
+to reset your password, you can safely ignore this email — your password won't change.
+
+TripKoach Ghana Ltd · Accra · automated message, no reply needed.`,
+  },
 } satisfies Record<string, TemplateDef>;
 
 export type TemplateName = keyof typeof TEMPLATES;

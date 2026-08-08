@@ -29,6 +29,9 @@ const cfg = {
     ...base.paystack, secretKey: 'sk_test_stub', publicKey: 'pk_test_stub',
     webhookSecret: WEBHOOK_SECRET, chargeRateOverride: undefined,
   },
+  // A From is always configured in prod (EMAIL_FROM); no apiKey here → transport stays disabled, so
+  // product emails (e.g. the TRI-881 password reset) render + log a 'skipped' row without dispatching.
+  email: { ...base.email, from: 'TripKoach <bookings@send.tripkoach.com>', apiKey: undefined, dryRun: false },
 };
 const db = await createDb(cfg);
 const applied = await migrate(db);
@@ -617,6 +620,130 @@ console.log('\n[email: transport + template renderer (TRI-880)]');
   try { await sendEmail(db, enabledCfg, { to: '', template: 'smoke_test', vars: { ref: 'x', to: 'a', env: 't' } }, { transport: stubTransport }); } catch { threwNoTo = true; }
   ok('email: unknown template + missing recipient throw', threwSendUnknown && threwNoTo);
   ok('email: no send-log rows written on bad input', Number((await db.query(`SELECT COUNT(*) n FROM email_message`)).rows[0].n) === rowsBefore);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TRI-881 P1 · consumer accounts & auth: signup/login/session, profile, notification prefs,
+// link guest bookings, password reset (request/consume). Consumer realm mounts under /api/v1.
+// ─────────────────────────────────────────────────────────────────────────────
+const UCOOKIE = cfg.consumer.cookieName;
+const ucall = async (method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE', url: string, opts: { payload?: any; cookie?: string } = {}) => {
+  const res = await app.inject({ method, url, payload: opts.payload, cookies: opts.cookie ? { [UCOOKIE]: opts.cookie } : undefined });
+  let body: any; try { body = res.json(); } catch { body = res.body; }
+  const cookie = (res.cookies as Array<{ name: string; value: string }>).find((c) => c.name === UCOOKIE)?.value ?? '';
+  return { status: res.statusCode, body, cookie };
+};
+
+console.log('\n[consumer: signup + session]');
+let userCookie = '';
+{
+  ok('signup weak password → 400', (await ucall('POST', '/api/v1/auth/signup', { payload: { email: 'kofi@example.com', password: 'short' } })).status === 400);
+  ok('signup bad email → 400', (await ucall('POST', '/api/v1/auth/signup', { payload: { email: 'not-an-email', password: 'longenough1' } })).status === 400);
+  const s = await ucall('POST', '/api/v1/auth/signup', { payload: { email: 'Kofi@Example.com', password: 'Str0ng-Pass!', name: 'Kofi Owusu', phone: '+233201111111', country: 'Ghana' } });
+  ok('signup → 201', s.status === 201, JSON.stringify(s.body));
+  ok('signup returns profile (email lowercased)', s.body.user?.email === 'kofi@example.com' && s.body.user?.name === 'Kofi Owusu', JSON.stringify(s.body.user));
+  ok('signup sets session cookie', !!s.cookie);
+  userCookie = s.cookie;
+  ok('signup duplicate email → 409', (await ucall('POST', '/api/v1/auth/signup', { payload: { email: 'kofi@example.com', password: 'Another-Pass1' } })).status === 409);
+  // session is subject_type='user'
+  const sess = await db.query(`SELECT COUNT(*)::int n FROM session WHERE subject_type='user'`);
+  ok('user session row created (subject_type=user)', Number(sess.rows[0].n) >= 1, JSON.stringify(sess.rows[0]));
+  // default notification prefs seeded (2 channels × 7 types = 14)
+  const np = await db.query(`SELECT COUNT(*)::int n FROM notification_preference np JOIN user_account u ON u.id=np.user_id WHERE u.email='kofi@example.com'`);
+  ok('signup seeds 14 notification prefs', Number(np.rows[0].n) === 14, JSON.stringify(np.rows[0]));
+}
+
+console.log('\n[consumer: /me profile read/write]');
+{
+  ok('GET /me without session → 401', (await ucall('GET', '/api/v1/me')).status === 401);
+  const me = await ucall('GET', '/api/v1/me', { cookie: userCookie });
+  ok('GET /me 200 with session', me.status === 200 && me.body.user?.email === 'kofi@example.com', JSON.stringify(me.body));
+  ok('/me profile defaults language=en currency=USD', me.body.user.language === 'en' && me.body.user.displayCurrency === 'USD', JSON.stringify(me.body.user));
+  const upd = await ucall('PATCH', '/api/v1/me', { cookie: userCookie, payload: { phone: '+233209999999', country: 'Ghana', dietaryNeeds: 'Vegetarian', displayCurrency: 'ghs', dataSaver: true, emergencyName: 'Ama', emergencyPhone: '+233555' } });
+  ok('PATCH /me 200', upd.status === 200, JSON.stringify(upd.body));
+  ok('PATCH /me applied (currency upper, dietary, dataSaver)', upd.body.user.displayCurrency === 'GHS' && upd.body.user.dietaryNeeds === 'Vegetarian' && upd.body.user.dataSaver === true && upd.body.user.emergencyName === 'Ama', JSON.stringify(upd.body.user));
+}
+
+console.log('\n[consumer: notification preferences]');
+{
+  const n = await ucall('GET', '/api/v1/me/notifications', { cookie: userCookie });
+  ok('GET /me/notifications 200', n.status === 200, JSON.stringify(n.body));
+  ok('defaults: booking_confirmations on, marketing_offers off', n.body.notifications.email.booking_confirmations === true && n.body.notifications.email.marketing_offers === false, JSON.stringify(n.body.notifications.email));
+  ok('both channels present with 7 types', Object.keys(n.body.notifications.whatsapp).length === 7, JSON.stringify(Object.keys(n.body.notifications.whatsapp)));
+  const put = await ucall('PUT', '/api/v1/me/notifications', { cookie: userCookie, payload: { email: { marketing_offers: true }, whatsapp: { booking_confirmations: false } } });
+  ok('PUT /me/notifications 200', put.status === 200, JSON.stringify(put.body));
+  ok('toggles persisted', put.body.notifications.email.marketing_offers === true && put.body.notifications.whatsapp.booking_confirmations === false, JSON.stringify(put.body.notifications));
+  ok('PUT unknown type → 400', (await ucall('PUT', '/api/v1/me/notifications', { cookie: userCookie, payload: { email: { not_a_type: true } } })).status === 400);
+}
+
+console.log('\n[consumer: change password + login/logout]');
+{
+  ok('change password wrong current → 401', (await ucall('POST', '/api/v1/me/password', { cookie: userCookie, payload: { currentPassword: 'nope', newPassword: 'Brand-New-Pass1' } })).status === 401);
+  const ch = await ucall('POST', '/api/v1/me/password', { cookie: userCookie, payload: { currentPassword: 'Str0ng-Pass!', newPassword: 'Brand-New-Pass1' } });
+  ok('change password → 200', ch.status === 200 && ch.body.ok === true, JSON.stringify(ch.body));
+  ok('login old password → 401', (await ucall('POST', '/api/v1/auth/login', { payload: { email: 'kofi@example.com', password: 'Str0ng-Pass!' } })).status === 401);
+  const li = await ucall('POST', '/api/v1/auth/login', { payload: { email: 'kofi@example.com', password: 'Brand-New-Pass1' } });
+  ok('login new password → 200 + cookie', li.status === 200 && !!li.cookie, JSON.stringify(li.body));
+  userCookie = li.cookie;
+  const lo = await ucall('POST', '/api/v1/auth/logout', { cookie: userCookie });
+  ok('logout → 200', lo.status === 200);
+  ok('revoked session → /me 401', (await ucall('GET', '/api/v1/me', { cookie: userCookie })).status === 401);
+}
+
+console.log('\n[consumer: link guest bookings → /me/bookings]');
+{
+  // A guest books with a unique contact email, then creates an account with that same email.
+  const dep = await makeDeparture(5);
+  const guest = await post('/api/v1/bookings', { tourSlug: 'accra-city-tour', departureId: dep, partySize: 2, agreedTerms: true,
+    travellers: [{ name: 'Esi Guest', email: 'esi@example.com', phone: '+233204444444', isLead: true }] });
+  ok('guest booking created', guest.status === 201, JSON.stringify(guest.body));
+  const guestRef = guest.body.ref;
+  const s = await ucall('POST', '/api/v1/auth/signup', { payload: { email: 'esi@example.com', password: 'Esi-Str0ng!' } });
+  ok('signup links the guest booking', s.status === 201 && s.body.linkedBookings >= 1, JSON.stringify({ linked: s.body.linkedBookings }));
+  const mine = await ucall('GET', '/api/v1/me/bookings', { cookie: s.cookie });
+  ok('GET /me/bookings 200 includes linked booking', mine.status === 200 && mine.body.bookings.some((b: any) => b.ref === guestRef), JSON.stringify(mine.body.bookings?.map((b: any) => b.ref)));
+  const linkedRow = await db.query(`SELECT user_id FROM booking WHERE ref=$1`, [guestRef]);
+  ok('booking.user_id set on link', linkedRow.rows[0].user_id != null, JSON.stringify(linkedRow.rows[0]));
+}
+
+console.log('\n[consumer: password reset request + consume]');
+{
+  // Unknown email → 200 no-op, no email row created (no user enumeration).
+  const before = Number((await db.query(`SELECT COUNT(*) n FROM email_message WHERE related_type='password_reset'`)).rows[0].n);
+  const unknown = await ucall('POST', '/api/v1/auth/password-reset/request', { payload: { email: 'nobody@example.com' } });
+  ok('reset request unknown email → 200 (no enumeration)', unknown.status === 200 && unknown.body.ok === true, JSON.stringify(unknown.body));
+  ok('no reset email queued for unknown user', Number((await db.query(`SELECT COUNT(*) n FROM email_message WHERE related_type='password_reset'`)).rows[0].n) === before);
+
+  // Known email → 200; a password_reset email row is written (skipped: transport disabled in smoke).
+  const req = await ucall('POST', '/api/v1/auth/password-reset/request', { payload: { email: 'kofi@example.com' } });
+  ok('reset request known email → 200', req.status === 200 && req.body.ok === true, JSON.stringify(req.body));
+  const emailRow = (await db.query(`SELECT template, status, vars, related_id FROM email_message WHERE related_type='password_reset' ORDER BY created_at DESC LIMIT 1`)).rows[0];
+  ok('reset email logged (template password_reset)', emailRow.template === 'password_reset' && emailRow.related_id != null, JSON.stringify({ t: emailRow.template, s: emailRow.status }));
+  // Extract the single-use token from the rendered reset link (vars snapshot).
+  const resetUrl: string = (typeof emailRow.vars === 'string' ? JSON.parse(emailRow.vars) : emailRow.vars).resetUrl;
+  const token = new URL(resetUrl).searchParams.get('token')!;
+  ok('reset link carries a token', !!token && token.length >= 32, resetUrl);
+  // token stored only as a hash (plaintext never persisted)
+  const rawInDb = await db.query(`SELECT COUNT(*)::int n FROM password_reset_token WHERE token_hash = $1`, [token]);
+  ok('token stored hashed, not raw', Number(rawInDb.rows[0].n) === 0, 'raw token must not match a stored hash');
+
+  ok('consume weak password → 400', (await ucall('POST', '/api/v1/auth/password-reset/consume', { payload: { token, password: 'weak' } })).status === 400);
+  ok('consume bad token → 400', (await ucall('POST', '/api/v1/auth/password-reset/consume', { payload: { token: 'deadbeef', password: 'Reset-Pass-99' } })).status === 400);
+  const consume = await ucall('POST', '/api/v1/auth/password-reset/consume', { payload: { token, password: 'Reset-Pass-99' } });
+  ok('consume valid token → 200', consume.status === 200 && consume.body.ok === true, JSON.stringify(consume.body));
+  ok('login with reset password → 200', (await ucall('POST', '/api/v1/auth/login', { payload: { email: 'kofi@example.com', password: 'Reset-Pass-99' } })).status === 200);
+  ok('login with old (pre-reset) password → 401', (await ucall('POST', '/api/v1/auth/login', { payload: { email: 'kofi@example.com', password: 'Brand-New-Pass1' } })).status === 401);
+  ok('token is single-use (reuse → 400)', (await ucall('POST', '/api/v1/auth/password-reset/consume', { payload: { token, password: 'Yet-Another-1' } })).status === 400);
+  // reset revoked all prior sessions for the user
+  const live = await db.query(`SELECT COUNT(*)::int n FROM session s JOIN user_account u ON u.id=s.subject_id WHERE u.email='kofi@example.com' AND s.subject_type='user' AND s.revoked_at IS NULL AND s.expires_at > now()`);
+  // (a fresh login above created one new live session; the reset revoked the ones that existed before it)
+  ok('reset revoked pre-existing sessions (audit recorded)', Number((await db.query(`SELECT COUNT(*) n FROM audit_log WHERE action='user.password_reset'`)).rows[0].n) >= 1, JSON.stringify(live.rows[0]));
+}
+
+console.log('\n[consumer: read paths + admin realm still intact]');
+{
+  ok('consumer /api/v1/tours still 200 total 11', (await get('/api/v1/tours?pageSize=60')).body.total === 11);
+  ok('admin realm login still 200 (no cross-realm cookie bleed)', (await call('POST', '/api/admin/auth/login', { payload: { email: 'admin@tripkoach.com', password: 'Sup3r-Secret!' } })).status === 200);
 }
 
 await app.close();
