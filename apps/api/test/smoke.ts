@@ -829,6 +829,88 @@ console.log('\n[admin delete guide nulls departure assignment]');
   ok('departure guide_id nulled by FK on guide delete', row && row.guideId === null, JSON.stringify(row));
 }
 
+// TRI-898 Phase 3 · admin read/reporting cluster: settings (display vs charge rate), customers, audit-log, dashboard.
+console.log('\n[admin settings: display rate vs charge rate (TRI-898)]');
+{
+  const get1 = await call('GET', '/api/admin/settings', { cookie: adminCookie });
+  ok('GET /settings 200', get1.status === 200, JSON.stringify(get1.body));
+  ok('settings surfaces display rate (default 15.6)', get1.body.usdToGhsDisplayRate === 15.6, JSON.stringify(get1.body.usdToGhsDisplayRate));
+  ok('settings.fx labels display + charge rates distinctly',
+    get1.body.fx?.displayRate?.editable === true && get1.body.fx?.chargeRate?.editable === false,
+    JSON.stringify(get1.body.fx));
+  // Charge rate is whatever the settings row currently holds (cron-driven, read dynamically — the FX
+  // convergence section runs later in this smoke); the display-rate edit below must never move it.
+  const chargeBefore = Number((await db.query(`SELECT usd_to_ghs_charge_rate AS r FROM settings WHERE singleton=true`)).rows[0].r);
+  ok('charge rate exposed read-only from settings', get1.body.fx.chargeRate.value === chargeBefore, `${get1.body.fx.chargeRate.value} vs ${chargeBefore}`);
+
+  // PATCH the DISPLAY rate — must round-trip WITHOUT touching the charge rate.
+  const patch = await call('PATCH', '/api/admin/settings', { cookie: adminCookie, payload: { usdToGhsDisplayRate: 12.5, businessName: 'TripKoach Ltd', paymentDeadlineDays: 7 } });
+  ok('PATCH /settings 200', patch.status === 200, JSON.stringify(patch.body));
+  ok('display rate updated to 12.5', patch.body.usdToGhsDisplayRate === 12.5, JSON.stringify(patch.body.usdToGhsDisplayRate));
+  ok('businessName + paymentDeadlineDays saved', patch.body.businessName === 'TripKoach Ltd' && patch.body.paymentDeadlineDays === 7, JSON.stringify(patch.body));
+  const chargeAfter = Number((await db.query(`SELECT usd_to_ghs_charge_rate AS r FROM settings WHERE singleton=true`)).rows[0].r);
+  ok('charge rate UNCHANGED by display-rate edit', chargeAfter === chargeBefore, `before ${chargeBefore} after ${chargeAfter}`);
+
+  // Attempting to edit the charge rate is rejected (resolves the FX-doc discrepancy).
+  const bad = await call('PATCH', '/api/admin/settings', { cookie: adminCookie, payload: { usdToGhsChargeRate: 9.0 } });
+  ok('PATCH charge rate → 400 rejected', bad.status === 400 && bad.body.error?.field === 'usdToGhsChargeRate', JSON.stringify(bad.body));
+  const chargeStill = Number((await db.query(`SELECT usd_to_ghs_charge_rate AS r FROM settings WHERE singleton=true`)).rows[0].r);
+  ok('charge rate still untouched after rejected edit', chargeStill === chargeBefore, `${chargeStill}`);
+
+  // Validation + audit + RBAC.
+  ok('PATCH invalid paymentDeadlineDays → 400', (await call('PATCH', '/api/admin/settings', { cookie: adminCookie, payload: { paymentDeadlineDays: 4 } })).status === 400);
+  const settingsAudits = Number((await db.query(`SELECT COUNT(*)::int AS n FROM audit_log WHERE action='settings.update'`)).rows[0].n);
+  ok('audit_log row written for settings.update', settingsAudits >= 1, `got ${settingsAudits}`);
+  const vlogin = await call('POST', '/api/admin/auth/login', { payload: { email: 'viewer@tripkoach.com', password: 'Just-Look!' } });
+  const vcookie = vlogin.cookies.find((c) => c.name === COOKIE)?.value ?? '';
+  ok('viewer GET /settings → 403 (missing settings.manage)', (await call('GET', '/api/admin/settings', { cookie: vcookie })).status === 403);
+}
+
+console.log('\n[admin customers view (TRI-898)]');
+{
+  const list = await call('GET', '/api/admin/customers', { cookie: adminCookie });
+  ok('GET /customers 200 paginated', list.status === 200 && Array.isArray(list.body.items) && typeof list.body.total === 'number', JSON.stringify({ total: list.body.total }));
+  // The cancel-seat section created a "Cancel Tester" customer with one booking (TK-SMOKE1).
+  const cancelTester = list.body.items.find((c: any) => c.email === 'cancel@example.com');
+  ok('customers list includes Cancel Tester', !!cancelTester, JSON.stringify(list.body.items.map((c: any) => c.email)));
+  ok('customer row exposes name/email/bookings count', cancelTester && cancelTester.name === 'Cancel Tester' && cancelTester.bookings === 1, JSON.stringify(cancelTester));
+  const detail = await call('GET', `/api/admin/customers/${cancelTester.id}`, { cookie: adminCookie });
+  ok('GET /customers/:id 200 with bookings array', detail.status === 200 && Array.isArray(detail.body.bookings), JSON.stringify(detail.body.bookings?.length));
+  ok('customer detail booking references TK-SMOKE1', detail.body.bookings.some((b: any) => b.ref === 'TK-SMOKE1'), JSON.stringify(detail.body.bookings));
+  ok('GET /customers/:id unknown → 404', (await call('GET', '/api/admin/customers/00000000-0000-0000-0000-000000000000', { cookie: adminCookie })).status === 404);
+  const q = await call('GET', '/api/admin/customers?q=Cancel', { cookie: adminCookie });
+  ok('customers search q=Cancel matches', q.status === 200 && q.body.items.some((c: any) => c.email === 'cancel@example.com'), JSON.stringify(q.body.total));
+}
+
+console.log('\n[admin audit-log read (TRI-898)]');
+{
+  const log = await call('GET', '/api/admin/audit-log', { cookie: adminCookie });
+  ok('GET /audit-log 200 paginated', log.status === 200 && Array.isArray(log.body.items) && typeof log.body.total === 'number', JSON.stringify({ total: log.body.total }));
+  ok('audit-log entries carry action/actor/createdAt', log.body.items[0] && 'action' in log.body.items[0] && 'actor' in log.body.items[0] && 'createdAt' in log.body.items[0], JSON.stringify(log.body.items[0]));
+  ok('audit-log resolves staff actor name', log.body.items.some((e: any) => e.actor === 'Ada Admin'), JSON.stringify(log.body.items.map((e: any) => e.actor)));
+  const filtered = await call('GET', '/api/admin/audit-log?action=settings.update', { cookie: adminCookie });
+  ok('audit-log action filter works', filtered.status === 200 && filtered.body.items.length >= 1 && filtered.body.items.every((e: any) => e.action === 'settings.update'), JSON.stringify(filtered.body.total));
+  const vlogin = await call('POST', '/api/admin/auth/login', { payload: { email: 'viewer@tripkoach.com', password: 'Just-Look!' } });
+  const vcookie = vlogin.cookies.find((c) => c.name === COOKIE)?.value ?? '';
+  ok('viewer GET /audit-log → 403', (await call('GET', '/api/admin/audit-log', { cookie: vcookie })).status === 403);
+}
+
+console.log('\n[admin dashboard aggregates (TRI-898)]');
+{
+  const dash = await call('GET', '/api/admin/dashboard', { cookie: adminCookie });
+  ok('GET /dashboard 200', dash.status === 200, JSON.stringify(dash.body));
+  ok('dashboard has bookings/revenue/departures/occupancy sections',
+    dash.body.bookings && dash.body.revenue && dash.body.departures && dash.body.occupancy, JSON.stringify(Object.keys(dash.body)));
+  ok('dashboard revenue exposes USD + GHS', typeof dash.body.revenue.usd === 'number' && 'ghs' in dash.body.revenue, JSON.stringify(dash.body.revenue));
+  ok('dashboard occupancy has utilizationPct', typeof dash.body.occupancy.utilizationPct === 'number' && dash.body.occupancy.seatsTotal >= 0, JSON.stringify(dash.body.occupancy));
+  ok('dashboard upcoming departures counted', typeof dash.body.departures.upcoming === 'number' && Array.isArray(dash.body.departures.next), JSON.stringify(dash.body.departures.upcoming));
+  ok('dashboard default range 30d, honours ?range=all', dash.body.range === '30d' && (await call('GET', '/api/admin/dashboard?range=all', { cookie: adminCookie })).body.range === 'all');
+  // viewer has bookings.view → dashboard is visible to all console roles.
+  const vlogin = await call('POST', '/api/admin/auth/login', { payload: { email: 'viewer@tripkoach.com', password: 'Just-Look!' } });
+  const vcookie = vlogin.cookies.find((c) => c.name === COOKIE)?.value ?? '';
+  ok('viewer CAN read /dashboard (bookings.view)', (await call('GET', '/api/admin/dashboard', { cookie: vcookie })).status === 200);
+}
+
 console.log('\n[admin session revocation]');
 {
   const logout = await call('POST', '/api/admin/auth/logout', { cookie: adminCookie });
