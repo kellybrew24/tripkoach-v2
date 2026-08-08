@@ -79,13 +79,17 @@ function AdminLogin({ go, state }) {
 function MfaChallenge({ go, state }) {
   const LIVE = !!(window.TK_CONFIG && window.TK_CONFIG.USE_LIVE_API);
   const [code, setCode] = React.useState(["", "", "", "", "", ""]);
+  const [recovery, setRecovery] = React.useState("");
+  const [useRecovery, setUseRecovery] = React.useState(false); // LIVE only — see below
   const [busy, setBusy] = React.useState(false);
   const [liveErr, setLiveErr] = React.useState(false);
   const err = state.authView === "mfa-error" || liveErr;
   const verify = () => {
     if (!LIVE) { go("dashboard"); return; }
+    const value = useRecovery ? recovery.trim() : code.join("");
     setBusy(true); setLiveErr(false);
-    window.TK_ADMIN_API.verifyMfa(code.join("")).then((res) => {
+    // POST /auth/mfa accepts a live TOTP OR a single-use recovery code (TRI-895).
+    window.TK_ADMIN_API.verifyMfa(value).then((res) => {
       Promise.resolve(window.TK_ADMIN_ENTER(res)).then(() => { setBusy(false); go("dashboard"); }, () => { setBusy(false); go("dashboard"); });
     }, () => { setBusy(false); setLiveErr(true); });
   };
@@ -95,23 +99,39 @@ function MfaChallenge({ go, state }) {
     const next = [...code]; next[i] = v; setCode(next);
     if (v && i < 5) refs.current[i + 1] && refs.current[i + 1].focus();
   };
+  // The recovery-code path is a LIVE-only enhancement; with the flag off the
+  // "Use a backup code" link stays inert and the rendered DOM is byte-identical
+  // to the DS prototype (useRecovery can never flip true).
   return (
     <AuthFrame foot={<Button block variant="ghost" style={{ marginTop: "var(--space-4)" }} onClick={() => go("login")}>Back to sign-in</Button>}>
       <span style={{ width: 48, height: 48, borderRadius: "50%", background: "var(--brand-wash)", color: "var(--brand-gold-deep)", display: "grid", placeItems: "center", marginBottom: "var(--space-4)" }}><Icon name="shield-check" size={24} /></span>
       <h2 className="tk-h2">Two-factor verification</h2>
-      <p className="tk-body-sm tk-muted" style={{ marginTop: 4, marginBottom: "var(--space-6)" }}>Enter the 6-digit code from your authenticator app for <strong style={{ color: "var(--text-body)" }}>kwame@tripkoach.com</strong>.</p>
-      {err && <Alert tone="error" title="Incorrect code" style={{ marginBottom: "var(--space-4)" }}>That code didn't match or has expired. Codes refresh every 30 seconds.</Alert>}
-      <div style={{ display: "flex", gap: 8, justifyContent: "space-between" }}>
-        {code.map((d, i) => (
-          <input key={i} ref={(el) => refs.current[i] = el} value={d} onChange={(e) => setDigit(i, e.target.value)}
-            inputMode="numeric" maxLength={1} aria-label={"Digit " + (i + 1)}
-            style={{ width: 48, height: 56, textAlign: "center", fontSize: 22, fontWeight: 700, borderRadius: "var(--radius-md)", border: "1px solid " + (err ? "var(--danger-solid)" : "var(--border-input)"), background: "var(--surface-card)", color: "var(--text-strong)", fontVariantNumeric: "tabular-nums" }} />
-        ))}
-      </div>
+      {useRecovery
+        ? <p className="tk-body-sm tk-muted" style={{ marginTop: 4, marginBottom: "var(--space-6)" }}>Enter one of your one-time recovery codes. Each code works only once.</p>
+        : <p className="tk-body-sm tk-muted" style={{ marginTop: 4, marginBottom: "var(--space-6)" }}>Enter the 6-digit code from your authenticator app for <strong style={{ color: "var(--text-body)" }}>kwame@tripkoach.com</strong>.</p>}
+      {err && <Alert tone="error" title="Incorrect code" style={{ marginBottom: "var(--space-4)" }}>{useRecovery ? "That recovery code didn't match or has already been used." : "That code didn't match or has expired. Codes refresh every 30 seconds."}</Alert>}
+      {useRecovery ? (
+        <FormField id="mfa-recovery" label="Recovery code">
+          <Input id="mfa-recovery" value={recovery} onChange={(e) => setRecovery(e.target.value)} placeholder="XXXX-XXXX" autoComplete="one-time-code"
+            style={{ fontVariantNumeric: "tabular-nums", letterSpacing: "0.04em", textTransform: "uppercase" }} />
+        </FormField>
+      ) : (
+        <div style={{ display: "flex", gap: 8, justifyContent: "space-between" }}>
+          {code.map((d, i) => (
+            <input key={i} ref={(el) => refs.current[i] = el} value={d} onChange={(e) => setDigit(i, e.target.value)}
+              inputMode="numeric" maxLength={1} aria-label={"Digit " + (i + 1)}
+              style={{ width: 48, height: 56, textAlign: "center", fontSize: 22, fontWeight: 700, borderRadius: "var(--radius-md)", border: "1px solid " + (err ? "var(--danger-solid)" : "var(--border-input)"), background: "var(--surface-card)", color: "var(--text-strong)", fontVariantNumeric: "tabular-nums" }} />
+          ))}
+        </div>
+      )}
       <Button block size="lg" style={{ marginTop: "var(--space-5)" }} disabled={busy} onClick={verify}>{busy ? "Verifying…" : "Verify and sign in"}</Button>
       <div className="tk-row" style={{ justifyContent: "center", gap: 6, marginTop: "var(--space-4)" }}>
-        <span className="tk-caption">Didn't get a code?</span>
-        <Button variant="link" size="sm">Use a backup code</Button>
+        {useRecovery
+          ? <Button variant="link" size="sm" onClick={() => { setUseRecovery(false); setLiveErr(false); }}>Use an authenticator code instead</Button>
+          : <>
+              <span className="tk-caption">Didn't get a code?</span>
+              <Button variant="link" size="sm" onClick={() => { if (LIVE) { setUseRecovery(true); setLiveErr(false); } }}>Use a backup code</Button>
+            </>}
       </div>
     </AuthFrame>
   );

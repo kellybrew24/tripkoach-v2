@@ -251,9 +251,15 @@
     base: adminBase,
     // auth
     login: function (email, password, opts) { return req("POST", "/auth/login", Object.assign({ email: email, password: password }, opts || {})); },
-    verifyMfa: function (code) { return req("POST", "/auth/mfa", { code: code }); },
+    verifyMfa: function (code) { return req("POST", "/auth/mfa", { code: code }); }, // login challenge (TOTP or recovery code)
     logout: function () { return req("POST", "/auth/logout"); },
     me: function () { return req("GET", "/me"); },
+    // self-service MFA management (TRI-899 → TRI-895 /auth/mfa/*)
+    mfaStatus: function () { return req("GET", "/auth/mfa/status"); },
+    mfaEnroll: function () { return req("POST", "/auth/mfa/enroll"); },
+    mfaVerifyEnroll: function (code) { return req("POST", "/auth/mfa/verify", { code: code }); },
+    mfaDisable: function (code) { return req("POST", "/auth/mfa/disable", { code: code }); },
+    mfaRegenerateCodes: function () { return req("POST", "/auth/mfa/recovery-codes"); },
     // catalogue
     listTours: function () { return req("GET", "/tours"); },
     getTour: function (id) { return req("GET", "/tours/" + encodeURIComponent(id)); },
