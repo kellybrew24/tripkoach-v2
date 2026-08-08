@@ -553,21 +553,21 @@ function ReviewsAdmin({ go }) {
               {r.reply && <div style={{ padding: "10px 12px", background: "var(--bg-sunken)", borderRadius: "var(--radius-md)", borderInlineStart: "3px solid var(--brand)" }}><span style={{ fontWeight: 700, fontSize: 12.5, color: "var(--brand-ink)" }}>Your reply</span><p className="tk-body-sm" style={{ margin: "4px 0 0" }}>{r.reply}</p></div>}
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "flex-end", borderTop: "1px solid var(--border-subtle)", paddingTop: 10 }}>
                 {tab === "pending" && <>
-                  <Button variant="secondary" size="sm" iconStart="x" onClick={() => setToast("Review rejected — it stays hidden")}>Reject</Button>
-                  <Button size="sm" iconStart="check" onClick={() => setToast("Approved — now live on the tour page")}>Approve & publish</Button>
+                  <Button variant="secondary" size="sm" iconStart="x" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.rejectReview(r.id), () => setToast("Review rejected — it stays hidden"))}>Reject</Button>
+                  <Button size="sm" iconStart="check" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.approveReview(r.id), () => setToast("Approved — now live on the tour page"))}>Approve & publish</Button>
                 </>}
                 {tab === "approved" && <>
                   <Button variant="secondary" size="sm" iconStart="message-circle" onClick={() => setReply(r)}>{r.reply ? "Edit reply" : "Reply"}</Button>
-                  <Button variant="secondary" size="sm" iconStart="eye-off" onClick={() => setToast("Unpublished — hidden from the tour page")}>Unpublish</Button>
+                  <Button variant="secondary" size="sm" iconStart="eye-off" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.unpublishReview(r.id), () => setToast("Unpublished — hidden from the tour page"))}>Unpublish</Button>
                 </>}
-                {tab === "rejected" && <Button variant="secondary" size="sm" iconStart="rotate-ccw" onClick={() => setToast("Moved back to Pending")}>Restore to pending</Button>}
+                {tab === "rejected" && <Button variant="secondary" size="sm" iconStart="rotate-ccw" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.restoreReview(r.id), () => setToast("Moved back to Pending"))}>Restore to pending</Button>}
               </div>
             </div></div>
           ))}
         </div>
       )}
       <Drawer open={!!reply} title="Reply to review" subtitle={reply ? reply.author + " · " + reply.tour : ""} onClose={() => setReply(null)}
-        footer={<><Button variant="secondary" onClick={() => setReply(null)}>Cancel</Button><Button iconStart="check" style={{ marginInlineStart: "auto" }} onClick={() => { setReply(null); setToast("Reply saved — shown publicly under the review"); }}>Save reply</Button></>}>
+        footer={<><Button variant="secondary" onClick={() => setReply(null)}>Cancel</Button><Button iconStart="check" style={{ marginInlineStart: "auto" }} onClick={() => { const v = (document.getElementById("rv-reply") || {}).value || ""; const id = reply && reply.id; window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.replyReview(id, v), () => { setReply(null); setToast("Reply saved — shown publicly under the review"); }); }}>Save reply</Button></>}>
         {reply && <><div className="tk-card" style={{ boxShadow: "none", border: "1px solid var(--border-subtle)", marginBottom: "var(--space-4)" }}><div className="tk-card__body" style={{ padding: "var(--space-4)", gap: 4 }}><AdminStars value={reply.rating} /><p className="tk-body-sm" style={{ margin: 0 }}>{reply.text}</p></div></div>
         <FormField id="rv-reply" label="Your public reply" hint="Speak as TripKoach. Warm, brief and specific."><Textarea id="rv-reply" rows={4} defaultValue={reply.reply || ""} placeholder="Thank the traveller and add a personal touch." /></FormField></>}
       </Drawer>

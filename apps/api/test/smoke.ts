@@ -385,7 +385,8 @@ let adminCookie = '';
   const login = await call('POST', '/api/admin/auth/login', { payload: { email: 'admin@tripkoach.com', password: 'Sup3r-Secret!' } });
   ok('login 200', login.status === 200, JSON.stringify(login.body));
   ok('login returns role admin', login.body.staff?.role === 'admin', JSON.stringify(login.body.staff));
-  ok('admin has all 10 permissions', Array.isArray(login.body.permissions) && login.body.permissions.length === 10, JSON.stringify(login.body.permissions));
+  ok('admin has all 11 permissions', Array.isArray(login.body.permissions) && login.body.permissions.length === 11, JSON.stringify(login.body.permissions));
+  ok('admin permissions include reviews.moderate', login.body.permissions.includes('reviews.moderate'));
   adminCookie = login.cookies.find((c) => c.name === COOKIE)?.value ?? '';
   ok('login set session cookie', !!adminCookie);
   const me = await call('GET', '/api/admin/me', { cookie: adminCookie });
@@ -546,6 +547,66 @@ console.log('\n[reviews: invite issuance → redeem → submit (TRI-892)]');
   // audit trail recorded the issuance.
   const revAudits = Number((await db.query(`SELECT COUNT(*)::int n FROM audit_log WHERE action='departure.request_reviews'`)).rows[0].n);
   ok('audit_log row written for departure.request_reviews', revAudits >= 1, `got ${revAudits}`);
+}
+
+console.log('\n[admin reviews moderation → public visibility]');
+{
+  // Baseline: public accra reviews (approved only) — captured before we moderate.
+  const pubBefore = (await call('GET', '/api/v1/tours/accra-city-tour/reviews')).body.reviews.length;
+
+  const list = await call('GET', '/api/admin/reviews', { cookie: adminCookie });
+  ok('GET /admin/reviews 200', list.status === 200, JSON.stringify(list.body).slice(0, 200));
+  // 8 seeded + 1 pending review the TRI-892 write-test submits earlier in this consolidated suite (TRI-901).
+  ok('reviews list returns all statuses (8 seeded + 1 from TRI-892)', list.body.reviews.length === 9, `got ${list.body.reviews.length}`);
+  ok('counts stat present {pending:4,approved:4,rejected:1}',
+    list.body.counts?.pending === 4 && list.body.counts?.approved === 4 && list.body.counts?.rejected === 1, JSON.stringify(list.body.counts));
+  const rev = list.body.reviews[0];
+  ok('review DTO shape {id,author,tour,tourSlug,initials,rating,date,verified,status,title,text,reply}',
+    ['id','author','tour','tourSlug','initials','rating','date','verified','status','title','text','reply'].every((k) => k in rev), JSON.stringify(rev));
+
+  // status filter narrows the list without altering the counts.
+  const pendingOnly = await call('GET', '/api/admin/reviews?status=pending', { cookie: adminCookie });
+  ok('?status=pending → only pending rows', pendingOnly.body.reviews.length === 4 && pendingOnly.body.reviews.every((r: any) => r.status === 'pending'), `got ${pendingOnly.body.reviews.length}`);
+
+  // A pending accra review (Kojo Danso) to approve → must appear on the public tour page.
+  const pending = list.body.reviews.find((r: any) => r.author === 'Kojo Danso' && r.status === 'pending');
+  ok('found a pending accra review to moderate', !!pending, JSON.stringify(pending));
+
+  // wrong-permission: viewer lacks reviews.moderate → 403
+  const vlogin = await call('POST', '/api/admin/auth/login', { payload: { email: 'viewer@tripkoach.com', password: 'Just-Look!' } });
+  const vcookie = vlogin.cookies.find((c) => c.name === COOKIE)?.value ?? '';
+  ok('viewer moderate → 403 (missing reviews.moderate)', (await call('POST', `/api/admin/reviews/${pending.id}/approve`, { cookie: vcookie })).status === 403);
+
+  const approved = await call('POST', `/api/admin/reviews/${pending.id}/approve`, { cookie: adminCookie });
+  ok('approve → 200 status=approved', approved.status === 200 && approved.body.review.status === 'approved', JSON.stringify(approved.body));
+  const pubAfter = await call('GET', '/api/v1/tours/accra-city-tour/reviews');
+  ok('approved review now visible on public tour page (+1)', pubAfter.body.reviews.length === pubBefore + 1, `before ${pubBefore} after ${pubAfter.body.reviews.length}`);
+  ok('public reviewStats recomputed to include it', pubAfter.body.stats.count === pubBefore + 1, JSON.stringify(pubAfter.body.stats));
+
+  // unpublish (approved → pending) hides it again.
+  const unpub = await call('POST', `/api/admin/reviews/${pending.id}/unpublish`, { cookie: adminCookie });
+  ok('unpublish → 200 status=pending', unpub.status === 200 && unpub.body.review.status === 'pending', JSON.stringify(unpub.body.review?.status));
+  ok('unpublished review drops off the public tour page', (await call('GET', '/api/v1/tours/accra-city-tour/reviews')).body.reviews.length === pubBefore, `expected ${pubBefore}`);
+
+  // reject a pending spam review → stays hidden, status=rejected.
+  const spam = list.body.reviews.find((r: any) => r.author === 'anon' && r.status === 'pending');
+  const rejected = await call('POST', `/api/admin/reviews/${spam.id}/reject`, { cookie: adminCookie });
+  ok('reject spam → 200 status=rejected', rejected.status === 200 && rejected.body.review.status === 'rejected', JSON.stringify(rejected.body.review?.status));
+  ok('rejected review never appears publicly', !(await call('GET', '/api/v1/tours/accra-city-tour/reviews')).body.reviews.some((r: any) => /example-spam/.test(r.text)));
+
+  // reply on an approved review → shown publicly under the review.
+  const approvedAccra = list.body.reviews.find((r: any) => r.author === 'Marcus Bell' && r.status === 'approved');
+  const replied = await call('POST', `/api/admin/reviews/${approvedAccra.id}/reply`, { cookie: adminCookie, payload: { reply: 'Thanks Marcus — noted on the Du Bois timing!' } });
+  ok('reply → 200 sets reply text', replied.status === 200 && /Du Bois timing/.test(replied.body.review.reply), JSON.stringify(replied.body.review?.reply));
+  const pubReply = (await call('GET', '/api/v1/tours/accra-city-tour/reviews')).body.reviews.find((r: any) => r.author === 'Marcus Bell');
+  ok('reply visible on public tour page', /Du Bois timing/.test(pubReply?.reply || ''), JSON.stringify(pubReply?.reply));
+
+  // moderation is audited.
+  const modAudits = Number((await db.query(`SELECT COUNT(*)::int AS n FROM audit_log WHERE action LIKE 'review.%'`)).rows[0].n);
+  ok('audit_log rows written for review.* actions', modAudits >= 4, `got ${modAudits}`);
+
+  // unknown review id → 404
+  ok('moderate unknown review → 404', (await call('POST', '/api/admin/reviews/00000000-0000-0000-0000-000000000000/approve', { cookie: adminCookie })).status === 404);
 }
 
 console.log('\n[admin session revocation]');
