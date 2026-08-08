@@ -125,7 +125,11 @@ function AdminApp() {
         const name = s.name || "Staff";
         return { name, role: (role.charAt(0).toUpperCase() + role.slice(1)), initials: s.initials || name.split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase(), email: s.email || "", greet: (name.split(/\s+/)[0]) };
       })()
-    : (USERS[role] || USERS.admin);
+    // TRI-952: never show the seeded "Kwame" demo identity in a live console. When
+    // live-but-unauthenticated the app already forces the /login screen (no shell),
+    // so this neutral identity is only a belt-and-suspenders guard; the Kwame
+    // fixture is reserved for the flag-off DS prototype.
+    : (LIVE ? { name: "TripKoach staff", role: (role.charAt(0).toUpperCase() + role.slice(1)), initials: "TK", email: "", greet: "there" } : (USERS[role] || USERS.admin));
   const go = (s, payload) => {
     const nextEditId = (s === "tour-edit" || s === "departures") ? (payload || null) : editId;
     if (s === "tour-edit" || s === "departures") setEditId(payload || null);

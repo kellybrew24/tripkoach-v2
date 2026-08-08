@@ -74,6 +74,9 @@ function AdminLogin({ go, state }) {
     const pwEl = form.querySelector('input[type="password"]') || {};
     const password = pwEl.value || "";
     const trust = !!(form.querySelector("#a-trust") && form.querySelector("#a-trust").checked);
+    // TRI-952: remember the email being authenticated so the MFA screen names the
+    // real account (not a hardcoded seed) during the second factor.
+    window.TK_PENDING_STAFF_EMAIL = email;
     setBusy(true); setLiveErr(null);
     window.TK_ADMIN_API.login(email, password, { trust }).then((res) => {
       if (res && (res.mfaRequired || res.mfa_required || res.requiresMfa)) { setBusy(false); go("mfa"); return; }
@@ -99,7 +102,7 @@ function AdminLogin({ go, state }) {
       {liveErr && <Alert tone="error" title={liveErr.title} style={{ marginBottom: "var(--space-4)" }}>{liveErr.msg}</Alert>}
       {wrong && !liveErr && <Alert tone="error" title="Sign-in failed" style={{ marginBottom: "var(--space-4)" }}>That email and password don't match. You have 2 attempts left before the account locks.</Alert>}
       <form className="tk-stack" style={{ gap: "var(--space-4)" }} onSubmit={submit}>
-        <FormField id="a-email" label="Work email"><Input type="email" autoComplete="username" defaultValue="kwame@tripkoach.com" iconStart="mail" disabled={locked} /></FormField>
+        <FormField id="a-email" label="Work email"><Input type="email" autoComplete="username" placeholder="you@tripkoach.com" iconStart="mail" disabled={locked} /></FormField>
         <FormField id="a-pw" label="Password" error={wrong ? "Check your password" : undefined}><PasswordInput id="a-pw" disabled={locked} /></FormField>
         <div className="tk-row" style={{ justifyContent: "space-between" }}>
           <Checkbox id="a-trust" label="Trust this device for 30 days" />
@@ -118,6 +121,9 @@ function MfaChallenge({ go, state }) {
   const [useRecovery, setUseRecovery] = React.useState(false); // LIVE only — see below
   const [busy, setBusy] = React.useState(false);
   const [liveErr, setLiveErr] = React.useState(false);
+  // TRI-952: name the real account being verified (captured at the login step),
+  // not a hardcoded seed email. Neutral phrasing if we don't have it.
+  const pendingEmail = (LIVE && window.TK_PENDING_STAFF_EMAIL) || "";
   const err = state.authView === "mfa-error" || liveErr;
   const verify = () => {
     if (!LIVE) { go("dashboard"); return; }
@@ -144,7 +150,7 @@ function MfaChallenge({ go, state }) {
       <h2 className="tk-h2">Two-factor verification</h2>
       {useRecovery
         ? <p className="tk-body-sm tk-muted" style={{ marginTop: 4, marginBottom: "var(--space-6)" }}>Enter one of your one-time recovery codes. Each code works only once.</p>
-        : <p className="tk-body-sm tk-muted" style={{ marginTop: 4, marginBottom: "var(--space-6)" }}>Enter the 6-digit code from your authenticator app for <strong style={{ color: "var(--text-body)" }}>kwame@tripkoach.com</strong>.</p>}
+        : <p className="tk-body-sm tk-muted" style={{ marginTop: 4, marginBottom: "var(--space-6)" }}>Enter the 6-digit code from your authenticator app{pendingEmail ? <> for <strong style={{ color: "var(--text-body)" }}>{pendingEmail}</strong></> : null}.</p>}
       {err && <Alert tone="error" title="Incorrect code" style={{ marginBottom: "var(--space-4)" }}>{useRecovery ? "That recovery code didn't match or has already been used." : "That code didn't match or has expired. Codes refresh every 30 seconds."}</Alert>}
       {useRecovery ? (
         <FormField id="mfa-recovery" label="Recovery code">

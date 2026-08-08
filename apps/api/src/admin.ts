@@ -1372,45 +1372,73 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     };
   }
 
+  // TRI-952: "Customers" is the whole customer base — every registered account
+  // (user_account, incl. those who signed up but haven't booked yet) UNION the
+  // guest booking-contacts (customer rows with no linked account). Previously
+  // this read ONLY the `customer` table, so registered sign-ups were invisible
+  // until they booked (and on hosts seeded via the account/booking.user_id path,
+  // the customer table is empty → the admin list showed zero people despite live
+  // accounts + bookings). Bookings attach to a person via booking.user_id (the
+  // account) OR booking.customer_id (the guest contact); we aggregate on both.
+  // TRI-943 avatar moderation surface (avatar_status/avatar_url) is only meaningful
+  // for registered accounts; guest booking-contacts carry NULLs.
+  const PERSON_SQL = `
+    SELECT u.id AS id, u.name, u.email, u.phone, u.country,
+           u.id AS user_id, u.created_at AS joined_at, u.created_at AS created_at,
+           u.email_verified_at, u.avatar_status, am.url AS avatar_url,
+           (SELECT COUNT(*) FROM booking b
+              WHERE b.user_id = u.id
+                 OR b.customer_id IN (SELECT c2.id FROM customer c2 WHERE c2.user_id = u.id)) AS booking_count,
+           (SELECT COALESCE(SUM(b.total_minor),0) FROM booking b
+              WHERE (b.user_id = u.id
+                 OR b.customer_id IN (SELECT c2.id FROM customer c2 WHERE c2.user_id = u.id))
+                AND b.payment_state = 'paid') AS total_spend_minor
+      FROM user_account u LEFT JOIN media_asset am ON am.id = u.avatar_media_id
+    UNION ALL
+    SELECT c.id AS id, c.name, c.email, c.phone, c.country,
+           NULL::uuid AS user_id, c.joined_at AS joined_at, c.created_at AS created_at,
+           NULL::timestamptz AS email_verified_at, NULL::text AS avatar_status, NULL::text AS avatar_url,
+           (SELECT COUNT(*) FROM booking b WHERE b.customer_id = c.id) AS booking_count,
+           (SELECT COALESCE(SUM(b.total_minor),0) FROM booking b
+              WHERE b.customer_id = c.id AND b.payment_state = 'paid') AS total_spend_minor
+      FROM customer c WHERE c.user_id IS NULL`;
+
   async function listCustomers(opts: { q?: string; page?: number; pageSize?: number } = {}) {
-    const where: string[] = [];
     const params: unknown[] = [];
+    let filterSql = '';
     if (opts.q) {
       params.push(`%${opts.q}%`);
-      where.push(`(c.name ILIKE $${params.length} OR c.email ILIKE $${params.length} OR c.phone ILIKE $${params.length})`);
+      filterSql = `WHERE (p.name ILIKE $${params.length} OR p.email ILIKE $${params.length} OR p.phone ILIKE $${params.length})`;
     }
-    const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
     const page = Math.max(1, opts.page || 1);
     const pageSize = Math.min(100, Math.max(1, opts.pageSize || 25));
-    const total = Number((await db.query(`SELECT COUNT(*)::int AS n FROM customer c ${whereSql}`, params)).rows[0].n);
+    const total = Number((await db.query(
+      `SELECT COUNT(*)::int AS n FROM (${PERSON_SQL}) p ${filterSql}`, params)).rows[0].n);
     params.push(pageSize); const lim = params.length;
     params.push((page - 1) * pageSize); const off = params.length;
-    // Per-customer booking count + lifetime spend (paid bookings only) derived at read time.
     const { rows } = await db.query(
-      `SELECT c.*, u.email_verified_at, u.avatar_status, am.url AS avatar_url,
-              (SELECT COUNT(*) FROM booking b WHERE b.customer_id = c.id) AS booking_count,
-              (SELECT COALESCE(SUM(b.total_minor),0) FROM booking b
-                 WHERE b.customer_id = c.id AND b.payment_state = 'paid') AS total_spend_minor
-         FROM customer c LEFT JOIN user_account u ON u.id = c.user_id
-              LEFT JOIN media_asset am ON am.id = u.avatar_media_id ${whereSql}
-        ORDER BY c.created_at DESC LIMIT $${lim} OFFSET $${off}`, params);
+      `SELECT * FROM (${PERSON_SQL}) p ${filterSql}
+        ORDER BY p.created_at DESC LIMIT $${lim} OFFSET $${off}`, params);
     return { items: rows.map(customerRow), page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
   }
 
   async function getCustomer(id: string) {
-    const c = (await db.query(
-      `SELECT c.*, u.email_verified_at, u.avatar_status, am.url AS avatar_url,
-              (SELECT COUNT(*) FROM booking b WHERE b.customer_id = c.id) AS booking_count,
-              (SELECT COALESCE(SUM(b.total_minor),0) FROM booking b
-                 WHERE b.customer_id = c.id AND b.payment_state = 'paid') AS total_spend_minor
-         FROM customer c LEFT JOIN user_account u ON u.id = c.user_id
-              LEFT JOIN media_asset am ON am.id = u.avatar_media_id WHERE c.id::text = $1`, [id])).rows[0];
+    // A person id is either a user_account id (registered) or a guest customer id.
+    // Try the account first; fall back to a guest booking-contact.
+    let c = (await db.query(`SELECT * FROM (${PERSON_SQL}) p WHERE p.id::text = $1 AND p.user_id IS NOT NULL`, [id])).rows[0];
+    let bookingWhere: string;
+    if (c) {
+      bookingWhere = `(b.user_id = $1 OR b.customer_id IN (SELECT c2.id FROM customer c2 WHERE c2.user_id = $1))`;
+    } else {
+      c = (await db.query(`SELECT * FROM (${PERSON_SQL}) p WHERE p.id::text = $1 AND p.user_id IS NULL`, [id])).rows[0];
+      bookingWhere = `b.customer_id = $1`;
+    }
     if (!c) throw notFound('customer');
     const bookings = (await db.query(
       `SELECT b.ref, b.status, b.payment_state, b.party_size, b.total_minor, b.currency, b.created_at,
               t.title AS tour_title, t.slug AS tour_slug, d.date_label
          FROM booking b JOIN tour t ON t.id = b.tour_id JOIN departure d ON d.id = b.departure_id
-        WHERE b.customer_id = $1 ORDER BY b.created_at DESC`, [c.id])).rows;
+        WHERE ${bookingWhere} ORDER BY b.created_at DESC`, [c.id])).rows;
     return {
       ...customerRow(c),
       bookings: bookings.map((b) => ({
