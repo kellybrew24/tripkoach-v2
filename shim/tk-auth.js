@@ -231,8 +231,14 @@
         headers: { "Content-Type": file.type || "application/octet-stream", "X-Filename": filename },
         body: file,
       }).then(function (r) {
-        return r.json().then(function (body) {
-          if (!r.ok) { var e = new Error((body && body.message) || ("Upload failed: " + r.status)); e.status = r.status; throw e; }
+        return r.json().catch(function () { return {}; }).then(function (body) {
+          if (!r.ok) {
+            // Match the tk-api.js error shape: the friendly copy lives at body.error.message
+            // ({ error: { code, message, field } }); fall back to a bare message then a status line.
+            var apiErr = (body && body.error) || {};
+            var e = new Error(apiErr.message || (body && body.message) || ("Upload failed: " + r.status));
+            e.status = r.status; e.code = apiErr.code; throw e;
+          }
           // Refresh cached /me so the avatar shows everywhere.
           if (meCache) { meCache.avatarUrl = body.avatarUrl || null; meCache.avatarStatus = body.avatarStatus || null; }
           return { avatarUrl: body.avatarUrl || null, avatarStatus: body.avatarStatus || null };
