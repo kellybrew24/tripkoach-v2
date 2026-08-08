@@ -20,7 +20,7 @@ export function DeparturePicker({ departures = [], value, onChange, currency = "
                 <span className="tk-departure__sub">{d.time}{d.guide ? " · " + d.guide : ""}</span>
               </span>
               <span className="tk-departure__right">
-                <Price amount={d.price} currency={currency} size="sm" unit="pp" />
+                {d.price != null && <Price amount={d.price} currency={currency} size="sm" unit="pp" />}
                 <AvailabilityBadge spotsLeft={d.spotsLeft} />
               </span>
             </button>

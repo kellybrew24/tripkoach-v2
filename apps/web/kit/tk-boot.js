@@ -121,7 +121,11 @@
       id: d.id,
       date: fmtDate(d.date),
       time: d.time || "",
-      price: major(d.price, d.priceMinor != null ? d.priceMinor : d.price_minor),
+      // A tier-priced departure carries no fixed per-departure price (null from the
+      // API); preserve the null so the picker hides it instead of showing "$0". (TRI-932)
+      price: (d.price == null && d.priceMinor == null && d.price_minor == null)
+        ? null
+        : major(d.price, d.priceMinor != null ? d.priceMinor : d.price_minor),
       spotsLeft: d.spotsLeft != null ? d.spotsLeft : d.spots_left,
     };
   }

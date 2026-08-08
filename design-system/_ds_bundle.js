@@ -2073,7 +2073,7 @@ function DeparturePicker({
       className: "tk-departure__sub"
     }, d.time, d.guide ? " · " + d.guide : "")), /*#__PURE__*/React.createElement("span", {
       className: "tk-departure__right"
-    }, /*#__PURE__*/React.createElement(__ds_scope.Price, {
+    }, d.price != null && /*#__PURE__*/React.createElement(__ds_scope.Price, {
       amount: d.price,
       currency: currency,
       size: "sm",

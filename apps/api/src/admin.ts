@@ -416,7 +416,18 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
 
     const tiers = parseTiers(body);
     if (tiers?.length) set('base_price_minor', Math.min(...tiers.map((t) => t.priceMinor)));
-    else { const p = optMoney(body, 'price'); if (p != null) set('base_price_minor', toMinor(p)); }
+    else {
+      const p = optMoney(body, 'price');
+      if (p != null) {
+        // Don't let a tier-less save clobber the advertised "from" price of a tiered
+        // tour (TRI-932): its base MUST track the cheapest tier, not a stray `price`
+        // field. Only honour an explicit `price` for tours that have no tiers.
+        const { rows } = await db.query<{ m: string | null }>(
+          'SELECT MIN(price_minor) AS m FROM price_tier WHERE tour_id = $1', [cur.id]);
+        const minTier = rows[0]?.m != null ? Number(rows[0].m) : null;
+        set('base_price_minor', minTier != null ? minTier : toMinor(p));
+      }
+    }
 
     await db.tx(async (q) => {
       if (sets.length) { params.push(cur.id); await q.query(`UPDATE tour SET ${sets.join(', ')}, updated_at=now() WHERE id=$${params.length}`, params); }
