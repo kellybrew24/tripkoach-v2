@@ -119,5 +119,20 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config): void {
     });
     admin.get('/payments/:ref', perm('bookings.view'), async (req) => svc.getPayment((req.params as any).ref));
     admin.post('/payments/:ref/refund', perm('payments.refund'), async (req) => svc.flagRefund((req.params as any).ref, body(req), actorOf(req)));
+
+    // ── Guides (TRI-896 A12) — the roster a departure's guide_id points at. Gated on the tours domain
+    // (a guide is an operational resource assigned to departures). ──
+    admin.get('/guides', perm('tours.view'), async () => svc.listGuides());
+    admin.get('/guides/:id', perm('tours.view'), async (req) => svc.getGuide((req.params as any).id));
+    admin.post('/guides', perm('tours.edit'), async (req, reply) => reply.code(201).send(await svc.createGuide(body(req), actorOf(req))));
+    admin.patch('/guides/:id', perm('tours.edit'), async (req) => svc.updateGuide((req.params as any).id, body(req), actorOf(req)));
+    admin.delete('/guides/:id', perm('tours.edit'), async (req) => svc.deleteGuide((req.params as any).id, actorOf(req)));
+
+    // ── Promo codes (TRI-896 A13) — admin CRUD; consumer redemption lives in the booking path. ──
+    admin.get('/promos', perm('promos.manage'), async () => svc.listPromos());
+    admin.get('/promos/:id', perm('promos.manage'), async (req) => svc.getPromo((req.params as any).id));
+    admin.post('/promos', perm('promos.manage'), async (req, reply) => reply.code(201).send(await svc.createPromo(body(req), actorOf(req))));
+    admin.patch('/promos/:id', perm('promos.manage'), async (req) => svc.updatePromo((req.params as any).id, body(req), actorOf(req)));
+    admin.delete('/promos/:id', perm('promos.manage'), async (req) => svc.deactivatePromo((req.params as any).id, actorOf(req)));
   }, { prefix: cfg.adminPrefix });
 }
