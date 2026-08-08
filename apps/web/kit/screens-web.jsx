@@ -4,8 +4,12 @@ const { Header, Footer, Breadcrumbs, TourCard, SearchField, Chip, Button, Icon, 
   FormField, Input, Textarea, NumberStepper, PaymentForm, Checkbox, BookingRow, StatusBadge, Tabs, EmptyState, Skeleton, IconButton, Modal, Toast } = NS;
 
 /* Amounts in TK_DATA are the currency of record (USD). The header toggle converts
-   for display only; GHS rate is an assumption pending a live FX feed. */
-const TK_FX = { USD: 1, GHS: 15.6 };
+   for display only. The USD→GHS DISPLAY rate is settings-driven (TRI-939): tk-boot
+   fetches /config and sets window.TK_FX.GHS from settings.usd_to_ghs_display_rate,
+   so ops change it via admin settings without a rebuild. We reference the shared
+   window.TK_FX object (not a private literal) so that live override is visible here;
+   the 12 fallback matches the current board-set rate for the fixtures/flag-off path. */
+const TK_FX = (window.TK_FX = window.TK_FX || { USD: 1, GHS: 12 });
 const TK_SYM = { USD: "$", GHS: "GH₵" };
 function cvt(usd, cur) { return cur === "GHS" ? Math.round((usd || 0) * TK_FX.GHS) : (usd || 0); }
 function money(usd, cur) { return TK_SYM[cur] + cvt(usd, cur).toLocaleString(); }

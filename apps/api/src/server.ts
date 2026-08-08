@@ -71,6 +71,27 @@ export function buildServer(db: Db, cfg: Config, paystack?: PaystackClient, stor
   app.get('/api/health', health);
 
   app.register(async (api) => {
+    // ── TRI-939 · Public config for the consumer SPA. Surfaces the customer-facing USD→GHS
+    //    DISPLAY rate (settings.usd_to_ghs_display_rate) so the web app converts "from GH₵…"
+    //    figures from a single settings-driven source instead of a hardcoded constant that
+    //    drifts. Never exposes the charge rate. Falls back to 12 if settings are unreadable. ──
+    api.get('/config', async () => {
+      let displayRate = 12;
+      let currencyOfRecord = 'USD';
+      let secondaryDisplayCurrency = 'GHS';
+      try {
+        const { rows } = await db.query<{ display: string | null; cor: string | null; sdc: string | null }>(
+          `SELECT usd_to_ghs_display_rate AS display, currency_of_record AS cor,
+                  secondary_display_currency AS sdc FROM settings WHERE singleton = true`);
+        const r = rows[0];
+        const d = r?.display != null ? Number(r.display) : NaN;
+        if (Number.isFinite(d) && d > 0) displayRate = d;
+        if (r?.cor) currencyOfRecord = r.cor;
+        if (r?.sdc) secondaryDisplayCurrency = r.sdc;
+      } catch { /* settings unreadable → keep safe defaults */ }
+      return { usdToGhsDisplayRate: displayRate, currencyOfRecord, secondaryDisplayCurrency };
+    });
+
     api.get('/regions', async () => ({ regions: await listRegions(db) }));
 
     api.get('/tours', async (req) => {
