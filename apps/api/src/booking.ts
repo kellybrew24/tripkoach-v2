@@ -371,9 +371,27 @@ export function createBookingService(
         reference: pay.ref,
         status: pay.status,
         currency: pay.currency,
+        method: pay.method ?? null,
         usd: fromMinor(pay.usd_amount_minor != null ? Number(pay.usd_amount_minor) : Number(pay.amount_minor)),
         ghs: pay.ghs_amount_minor != null ? fromMinor(Number(pay.ghs_amount_minor)) : null,
+        // FX charge context for the receipt (TRI-938): the USD→GHS rate actually applied to this
+        // charge, and when the payment row was created. Null before a payment exists.
+        fxRate: pay.fx_rate_used != null ? Number(pay.fx_rate_used) : null,
+        at: pay.created_at ? new Date(pay.created_at).toISOString() : null,
       } : null,
+      // Booking creation timestamp — the receipt's "Booked on" date.
+      createdAt: b.created_at ? new Date(b.created_at).toISOString() : null,
+      // Company / legal footer block (TRI-938) so the downloadable receipt reads as a proper receipt
+      // without the FE hardcoding brand facts. Static brand identity; contact/website come from config.
+      company: {
+        name: 'TripKoach',
+        legalName: 'TripKoach',
+        // cfg.email.from may be a full "Name <addr>" header — the receipt only wants the address.
+        email: (cfg.email.from || 'hello@tripkoach.com').replace(/^.*<([^>]+)>.*$/, '$1').trim(),
+        website: cfg.notify.webBaseUrl,
+        location: 'Accra, Ghana',
+        note: 'Prices are quoted in USD (currency of record) and charged in GHS via Paystack at the FX rate shown on this receipt.',
+      },
     };
   }
 

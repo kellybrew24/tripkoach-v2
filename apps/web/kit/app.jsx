@@ -16,7 +16,7 @@ window.tkToast = (msg) => {
 // regardless of route depth. Blog posts are dynamic: /blog/:slug.
 const ROUTES = [
   ["home", "/"], ["browse", "/browse"], ["tour", "/tour"], ["checkout", "/checkout"],
-  ["confirm", "/confirm"], ["bookings", "/bookings"], ["reviews", "/reviews"],
+  ["confirm", "/confirm"], ["bookings", "/bookings"], ["booking", "/booking"], ["reviews", "/reviews"],
   ["login", "/login"], ["signup", "/signup"], ["forgot", "/forgot"], ["profile", "/profile"],
   ["notifications", "/notifications"], ["account-settings", "/account/settings"],
   ["regions", "/regions"], ["marketplace", "/shop"], ["esim", "/esim"],
@@ -30,6 +30,9 @@ function pathForScreen(screen, slug) {
   // page (TRI-888/C2). No slug ⇒ the bare /tour path (the fixture prototype and
   // the flag-off build never pass one, so behaviour there is unchanged).
   if (screen === "tour" && slug) return "/tour/" + encodeURIComponent(slug);
+  // Booking detail/confirmation is ref-addressable (TRI-938): /booking/:ref is a
+  // reopenable, shareable confirmed-booking view. No ref ⇒ the bare /booking path.
+  if (screen === "booking" && slug) return "/booking/" + encodeURIComponent(slug);
   return PATH_BY_SCREEN[screen] || "/";
 }
 function routeFromPath(pathname) {
@@ -38,6 +41,9 @@ function routeFromPath(pathname) {
   if (m) return { screen: "post", slug: decodeURIComponent(m[1]) };
   const t = path.match(/^\/tour\/(.+)$/);
   if (t) return { screen: "tour", slug: decodeURIComponent(t[1]) };
+  // Ref-routed booking detail/confirmation (TRI-938): /booking/:ref.
+  const bk = path.match(/^\/booking\/(.+)$/);
+  if (bk) return { screen: "booking", slug: decodeURIComponent(bk[1]) };
   // The emailed password-reset link (Backend TRI-881: APP_BASE_URL/reset-password
   // ?token=…) lands here — reuse the ForgotWeb screen, which reads the token off
   // the URL and opens on its "set a new password" stage.
@@ -110,9 +116,11 @@ function WebApp() {
     // Tour nav carries a slug only in live mode; flag off drops it, so the URL
     // stays /tour and TourWeb falls back to tours[0] (byte-identical prototype).
     const tourSlug = s === "tour" ? (LIVE_API() ? payload || null : null) : null;
-    const nextSlug = s === "post" ? payload : s === "tour" ? tourSlug : slug;
+    // Booking detail carries the booking ref as its slug (TRI-938).
+    const nextSlug = s === "post" ? payload : s === "tour" ? tourSlug : s === "booking" ? (payload || null) : slug;
     if (s === "post") setSlug(payload);
     else if (s === "tour") setSlug(tourSlug);
+    else if (s === "booking") setSlug(payload || null);
     setScreen(s === "post" ? "post" : s);
     const url = pathForScreen(s, nextSlug);
     if (url !== window.location.pathname) window.history.pushState({ screen: s, slug: nextSlug }, "", url);
@@ -169,6 +177,7 @@ function WebApp() {
     checkout: <CheckoutWeb go={go} step={step} setStep={setStep} currency={currency} />,
     confirm: <ConfirmWeb go={go} currency={currency} />,
     bookings: <BookingsWeb go={go} currency={currency} />,
+    booking: <BookingDetailWeb go={go} currency={currency} bref={slug} />,
     reviews: <ReviewsWeb go={go} />,
     login: <LoginWeb go={go} />,
     signup: <LoginWeb go={go} startCreating />,

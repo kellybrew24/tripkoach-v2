@@ -883,7 +883,7 @@ function BookingsWeb({ go, currency = "USD" }) {
           : <div style={{ display: "grid", gap: 12 }}>
             {shown.map(b => (
               <div key={b.ref} style={{ display: "grid", gap: 8 }}>
-                <BookingRow reference={b.ref} title={b.tourTitle} date={b.departureLabel || b.date} travellers={paxLabel(b.partySize)} total={cvt(b.total, currency)} currency={currency} status={b.ds} image={imgFor(b)} onClick={() => go("bookings")} />
+                <BookingRow reference={b.ref} title={b.tourTitle} date={b.departureLabel || b.date} travellers={paxLabel(b.partySize)} total={cvt(b.total, currency)} currency={currency} status={b.ds} image={imgFor(b)} onClick={() => go("booking", b.ref)} />
                 {b.ds === "confirmed" && <div style={{ display: "flex", justifyContent: "flex-end" }}><Button variant="secondary" size="sm" iconStart="pencil" onClick={() => setReviewFor(tourFor(b))}>Leave a review</Button></div>}
               </div>
             ))}
@@ -950,7 +950,9 @@ function ConfirmWebLive({ go, currency = "USD" }) {
           {failed
             ? <Button size="lg" onClick={() => go("checkout")}>Try paying again</Button>
             : <Button size="lg" onClick={() => go("bookings")}>View in my bookings</Button>}
-          <Button variant="secondary" iconStart="download" onClick={() => window.tkToast("Preparing your booking PDF…")}>Download details</Button>
+          {ref
+            ? <Button variant="secondary" iconStart="download" onClick={() => go("booking", ref)}>View &amp; download receipt</Button>
+            : <Button variant="secondary" iconStart="download" onClick={() => window.tkToast("Preparing your booking PDF…")}>Download details</Button>}
         </>}>
         <div className="tk-card" style={{ width: "100%", textAlign: "start" }}><div className="tk-card__body" style={{ padding: "var(--space-5)" }}>
           <div className="tk-summary__line"><span>Tour</span><span>{tourTitle || "—"}</span></div>
@@ -993,4 +995,234 @@ function ConfirmWeb({ go, currency = "USD" }) {
     </div>
   );
 }
-Object.assign(window, { Shell, BrowseWeb, TourWeb, CheckoutWeb, BookingsWeb, ConfirmWeb, FilterPanel });
+// ── Booking detail / confirmation view + downloadable receipt (TRI-938) ───────
+// A reopenable, ref-addressable view of a single booking (/booking/:ref), reached
+// from /me/bookings (row click) and from the post-payment /confirm page. Renders
+// the full confirmed-booking detail and a "Download receipt" action that opens a
+// self-contained, print-to-PDF HTML receipt — no third-party libraries. Live only
+// (needs TK_BOOKING); the fixture prototype never links here.
+
+// Money formatters for the standalone receipt document (which can't reach the DS).
+function tkFmtUsd(n) { return "$" + (Number(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function tkFmtGhs(n) { return "GH₵" + (Number(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function tkFmtDate(iso) {
+  if (!iso) return "—";
+  try { return new Date(iso).toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }); }
+  catch (_) { return String(iso); }
+}
+function tkEsc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+    return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c];
+  });
+}
+
+// Build a self-contained receipt HTML document from the server booking DTO (the
+// full `.raw` payload from GET /bookings/:ref). All figures come straight from the
+// API so the printed receipt matches API/DB (amount charged == Paystack GHS).
+function tkReceiptHtml(d) {
+  d = d || {};
+  var q = d.quote || {};
+  var pay = d.payment || {};
+  var co = d.company || {};
+  var dep = d.departure || {};
+  var tour = d.tour || {};
+  var travellers = Array.isArray(d.travellers) ? d.travellers : [];
+  var lead = travellers.find(function (t) { return t.isLead; }) || travellers[0] || {};
+  var paid = pay && (pay.status === "paid" || d.status === "confirmed" || d.status === "completed");
+  var depLabel = dep.date ? (dep.date + (dep.time ? ", " + dep.time : "")) : "—";
+  var rows = [];
+  rows.push(["Booking reference", d.ref || "—"]);
+  rows.push(["Status", (d.status || "—").toUpperCase()]);
+  rows.push(["Booked on", tkFmtDate(d.createdAt)]);
+  rows.push(["Tour", tour.title || "—"]);
+  rows.push(["Departure", depLabel]);
+  rows.push(["Travellers", String(q.partySize || travellers.length || "—")]);
+  rows.push(["Lead traveller", lead.name || "—"]);
+  rows.push(["Contact email", lead.email || "—"]);
+
+  var lineRows = "";
+  lineRows += "<tr><td>" + tkEsc(tour.title || "Tour") + " × " + tkEsc(q.partySize || 1) +
+    " @ " + tkEsc(tkFmtUsd(q.unitPrice)) + "</td><td class=\"amt\">" + tkEsc(tkFmtUsd(q.subtotal)) + "</td></tr>";
+  if (q.discount) {
+    var promoLbl = q.promo && q.promo.code ? "Promo " + q.promo.code : "Discount";
+    lineRows += "<tr><td>" + tkEsc(promoLbl) + "</td><td class=\"amt\">−" + tkEsc(tkFmtUsd(q.discount)) + "</td></tr>";
+  }
+
+  var infoRows = rows.map(function (r) {
+    return "<tr><td class=\"k\">" + tkEsc(r[0]) + "</td><td class=\"v\">" + tkEsc(r[1]) + "</td></tr>";
+  }).join("");
+
+  var fxLine = (pay.ghs != null && pay.fxRate)
+    ? "Charged in GHS at 1 USD = " + tkFmtGhs(pay.fxRate) + " via Paystack."
+    : "Charged in GHS via Paystack.";
+  var payBlock = pay && pay.reference ? (
+    "<table class=\"info\">" +
+    "<tr><td class=\"k\">Payment reference</td><td class=\"v\">" + tkEsc(pay.reference) + "</td></tr>" +
+    "<tr><td class=\"k\">Payment status</td><td class=\"v\">" + tkEsc((pay.status || "—").toUpperCase()) + "</td></tr>" +
+    (pay.method ? "<tr><td class=\"k\">Method</td><td class=\"v\">" + tkEsc(pay.method) + "</td></tr>" : "") +
+    "<tr><td class=\"k\">Payment date</td><td class=\"v\">" + tkEsc(tkFmtDate(pay.at)) + "</td></tr>" +
+    (pay.ghs != null ? "<tr><td class=\"k\">Amount charged</td><td class=\"v\"><strong>" + tkEsc(tkFmtGhs(pay.ghs)) + "</strong></td></tr>" : "") +
+    "</table>" + "<p class=\"fx\">" + tkEsc(fxLine) + "</p>"
+  ) : "<p class=\"fx\">No payment has been recorded for this booking yet.</p>";
+
+  return "<!doctype html><html><head><meta charset=\"utf-8\"><title>Receipt " + tkEsc(d.ref || "") + "</title>" +
+    "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">" +
+    "<style>" +
+    "*{box-sizing:border-box}" +
+    "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1E1C1A;margin:0;background:#F5F3F0;padding:24px}" +
+    ".sheet{max-width:640px;margin:0 auto;background:#fff;border:1px solid #E7E2DB;border-radius:16px;overflow:hidden}" +
+    ".head{display:flex;justify-content:space-between;align-items:flex-start;padding:28px 32px;border-bottom:2px solid #1E1C1A}" +
+    ".brand{font-size:22px;font-weight:800;letter-spacing:-.02em}" +
+    ".brand small{display:block;font-size:12px;font-weight:600;color:#8A8378;letter-spacing:0;margin-top:4px}" +
+    ".doc{text-align:right}.doc .t{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#8A8378}" +
+    ".doc .r{font-size:16px;font-weight:800;margin-top:4px}" +
+    ".body{padding:24px 32px}" +
+    "h2{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#8A8378;margin:24px 0 10px}" +
+    "table{width:100%;border-collapse:collapse}" +
+    "table.info td{padding:6px 0;font-size:14px;vertical-align:top}" +
+    "table.info td.k{color:#8A8378;width:42%}table.info td.v{text-align:right;font-weight:600}" +
+    "table.lines td{padding:9px 0;font-size:14px;border-bottom:1px solid #F0ECE6}" +
+    "table.lines td.amt{text-align:right;font-weight:600;white-space:nowrap}" +
+    ".total{display:flex;justify-content:space-between;align-items:center;margin-top:14px;padding-top:14px;border-top:2px solid #1E1C1A}" +
+    ".total .l{font-size:15px;font-weight:700}.total .a{font-size:22px;font-weight:800}" +
+    ".fx{font-size:12px;color:#8A8378;margin:10px 0 0}" +
+    ".foot{padding:20px 32px 28px;border-top:1px solid #E7E2DB;font-size:12px;color:#8A8378;line-height:1.6}" +
+    ".foot strong{color:#1E1C1A}" +
+    "@media print{body{background:#fff;padding:0}.sheet{border:none;border-radius:0;max-width:none}.noprint{display:none}}" +
+    "</style></head><body>" +
+    "<div class=\"sheet\">" +
+    "<div class=\"head\"><div class=\"brand\">" + tkEsc(co.name || "TripKoach") + "<small>" + tkEsc(co.location || "") + "</small></div>" +
+    "<div class=\"doc\"><div class=\"t\">Receipt</div><div class=\"r\">" + tkEsc(d.ref || "") + "</div></div></div>" +
+    "<div class=\"body\">" +
+    "<h2>Booking details</h2><table class=\"info\">" + infoRows + "</table>" +
+    "<h2>Charges</h2><table class=\"lines\">" + lineRows + "</table>" +
+    "<div class=\"total\"><span class=\"l\">" + (paid ? "Total paid" : "Total due") + "</span><span class=\"a\">" + tkEsc(tkFmtUsd(q.total)) + "</span></div>" +
+    "<h2>Payment</h2>" + payBlock +
+    "</div>" +
+    "<div class=\"foot\"><strong>" + tkEsc(co.legalName || co.name || "TripKoach") + "</strong> · " + tkEsc(co.location || "") +
+    (co.email ? " · " + tkEsc(co.email) : "") + (co.website ? " · " + tkEsc(co.website) : "") +
+    "<br>" + tkEsc(co.note || "") +
+    "<br>Receipt generated " + tkEsc(tkFmtDate(new Date().toISOString())) + ". Thank you for travelling with " + tkEsc(co.name || "TripKoach") + "." +
+    "</div>" +
+    "</div>" +
+    "<div class=\"noprint\" style=\"max-width:640px;margin:16px auto 0;text-align:center\">" +
+    "<button onclick=\"window.print()\" style=\"font:600 14px/1 inherit;background:#1E1C1A;color:#fff;border:0;border-radius:10px;padding:12px 20px;cursor:pointer\">Print / Save as PDF</button></div>" +
+    "</body></html>";
+}
+
+// Open the receipt in a new window/tab and offer print → save-as-PDF. Returns
+// false if a popup blocker prevented it (caller falls back to a toast).
+function tkOpenReceipt(d) {
+  var w = window.open("", "_blank");
+  if (!w) return false;
+  w.document.open();
+  w.document.write(tkReceiptHtml(d));
+  w.document.close();
+  return true;
+}
+
+function BookingDetailWeb({ go, currency = "USD", bref }) {
+  const ref = bref || (new URLSearchParams(window.location.search || "").get("ref")) || (window.TK_BOOKING && window.TK_BOOKING.lastRef && window.TK_BOOKING.lastRef()) || "";
+  const [dto, setDto] = React.useState(null);
+  const [phase, setPhase] = React.useState(ref ? "loading" : "empty");
+  React.useEffect(() => {
+    if (!ref || !window.TK_BOOKING) return;
+    let alive = true;
+    window.TK_BOOKING.get(ref).then(
+      (bk) => { if (!alive) return; const raw = (bk && bk.raw) || null; setDto(raw); setPhase(raw ? "ready" : "missing"); },
+      () => { if (alive) setPhase("missing"); }
+    );
+    return () => { alive = false; };
+  }, [ref]);
+
+  const download = () => {
+    if (!dto) return;
+    if (!tkOpenReceipt(dto)) window.tkToast("Please allow pop-ups to open your receipt");
+  };
+
+  // Standalone page (NOT the auth-gated AccountShell): GET /bookings/:ref is
+  // public, and this view is reachable from the post-payment /confirm page where
+  // a guest-checkout customer isn't signed in — bouncing them to login would
+  // strand them from their own receipt.
+  const Wrap = ({ children }) => (
+    <div className="tk-container" style={{ paddingBlock: "var(--space-8) var(--space-12)", maxWidth: 720 }}>
+      <div className="tk-stack" style={{ gap: "var(--space-5)" }}>
+        <h1 className="tk-h2">Your booking</h1>
+        {children}
+      </div>
+    </div>
+  );
+  if (phase === "loading") return (
+    <Wrap>
+      <div className="tk-card"><div className="tk-card__body" style={{ padding: "var(--space-8)", alignItems: "center" }}><span className="tk-body-sm tk-muted">Loading your booking…</span></div></div>
+    </Wrap>
+  );
+  if (phase !== "ready" || !dto) return (
+    <Wrap>
+      <EmptyState title="Booking not found" description={ref ? ("We couldn't find booking " + ref + ".") : "No booking reference was provided."}
+        action={<Button variant="secondary" onClick={() => go("bookings")}>Back to my bookings</Button>} />
+    </Wrap>
+  );
+
+  const q = dto.quote || {};
+  const dep = dto.departure || {};
+  const pay = dto.payment || {};
+  const travellers = Array.isArray(dto.travellers) ? dto.travellers : [];
+  const lead = travellers.find((t) => t.isLead) || travellers[0] || {};
+  const paid = pay && (pay.status === "paid" || dto.status === "confirmed" || dto.status === "completed");
+  const depLabel = dep.date ? (dep.date + (dep.time ? ", " + dep.time : "")) : "—";
+  const line = (label, value, opts) => (
+    <div className="tk-summary__line" style={opts && opts.strong ? { fontWeight: 700 } : undefined}><span>{label}</span><span>{value}</span></div>
+  );
+
+  return (
+    <Wrap>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <Button variant="ghost" size="sm" iconStart="arrow-left" onClick={() => go("bookings")}>My bookings</Button>
+          <StatusBadge status={paid ? "confirmed" : (dto.status === "cancelled" || dto.status === "expired" ? "cancelled" : "pending")} />
+        </div>
+        <Button variant="secondary" size="sm" iconStart="download" onClick={download}>Download receipt</Button>
+      </div>
+
+      {paid
+        ? <Alert tone="success" title="Booking confirmed">Payment received — your spots are locked in. Download your receipt for your records.</Alert>
+        : (dto.status === "cancelled" || dto.status === "expired")
+        ? <Alert tone="warning" title="This booking is no longer active">Reference {dto.ref} is {dto.status}.</Alert>
+        : <Alert tone="warning" title="Payment pending">Your spots are held under {dto.ref}. Complete payment to confirm.</Alert>}
+
+      <div className="tk-card" style={{ textAlign: "start" }}><div className="tk-card__body" style={{ padding: "var(--space-5)" }}>
+        <h3 className="tk-h6" style={{ margin: "0 0 10px" }}>{dto.tour && dto.tour.title}</h3>
+        {line("Booking reference", dto.ref)}
+        {line("Booked on", tkFmtDate(dto.createdAt))}
+        {line("Departure", depLabel)}
+        {line("Travellers", String(q.partySize || travellers.length || "—"))}
+        {line("Lead traveller", lead.name || "—")}
+        {line("Contact email", lead.email || "—")}
+      </div></div>
+
+      <div className="tk-card" style={{ textAlign: "start" }}><div className="tk-card__body" style={{ padding: "var(--space-5)" }}>
+        <h3 className="tk-h6" style={{ margin: "0 0 10px" }}>Price breakdown</h3>
+        {line((dto.tour && dto.tour.title ? dto.tour.title : "Tour") + " × " + (q.partySize || 1) + " @ " + money(q.unitPrice, currency), money(q.subtotal, currency))}
+        {q.discount ? line(q.promo && q.promo.code ? ("Promo " + q.promo.code) : "Discount", "−" + money(q.discount, currency)) : null}
+        <div className="tk-summary__total"><span>{paid ? "Total paid" : "Total due"}</span><span className="tk-num" style={{ fontWeight: 800 }}>{money(q.total, currency)}</span></div>
+      </div></div>
+
+      {pay && pay.reference && (
+        <div className="tk-card" style={{ textAlign: "start" }}><div className="tk-card__body" style={{ padding: "var(--space-5)" }}>
+          <h3 className="tk-h6" style={{ margin: "0 0 10px" }}>Payment</h3>
+          {line("Payment reference", pay.reference)}
+          {line("Payment status", (pay.status || "—").toUpperCase())}
+          {pay.method ? line("Method", pay.method) : null}
+          {line("Payment date", tkFmtDate(pay.at))}
+          {pay.ghs != null ? line("Amount charged", tkFmtGhs(pay.ghs), { strong: true }) : null}
+          {pay.ghs != null && pay.fxRate
+            ? <p className="tk-help" style={{ marginTop: 8 }}>Charged in GHS at 1 USD = {tkFmtGhs(pay.fxRate)} via Paystack.</p>
+            : null}
+        </div></div>
+      )}
+    </Wrap>
+  );
+}
+
+Object.assign(window, { Shell, BrowseWeb, TourWeb, CheckoutWeb, BookingsWeb, ConfirmWeb, BookingDetailWeb, FilterPanel });
