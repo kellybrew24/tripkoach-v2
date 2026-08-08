@@ -414,7 +414,7 @@ inclusive `YYYY-MM-DD` (UTC).
   last, createdAt }] }` (status ∈ `invited|active|disabled`).
 - `POST /staff` `{ email, name?, role?='operator', jobTitle? }` → `201 { staff, invite: { id, expiresAt,
   emailStatus, acceptUrl?, token? } }`. Creates an **invited** `staff_user` + a hashed opaque token
-  (`staff_invite`, mig **013**) and **emails the accept-link** via the shared `sendEmail()` lib (Resend;
+  (`staff_invite`, mig **015**) and **emails the accept-link** via the shared `sendEmail()` lib (Resend;
   `skipped` when the transport is unconfigured). The `acceptUrl`/`token` are returned **only when the email
   was not dispatched** (dev/unconfigured), so the flow is still completable; withheld once genuinely sent.
   Re-inviting a still-**invited** address refreshes role/name and re-issues; inviting an **active** or
@@ -547,34 +547,30 @@ Phase 2 (TRI-866) owns `008_write_path_payments_fx.sql`; this phase adds **`009_
 defensively, so this branch migrates and passes `npm run smoke` **standalone** (008 absent) and needs no
 edit once 008 lands. Keep the sequence monotonic on merge to the shared `tripkoach_dev` DB.
 
-**TRI-896 (P3)** adds **`014_promo_guide_admin.sql`** off `main` — two columns on `booking`
-(`promo_code_id` FK → `promo_code`, `discount_minor`) so a redeemed promo is linked to its booking and can
-be released on cancel/expiry. `guide` (004) and `promo_code` (003) already existed, so no other schema
-change was needed. 014 is the next free number after the consolidated `main` (…010); the runner's lexical
-sort applies it last.
-**TRI-897** adds **`013_refund_execution.sql`** (`payment.refund_of`, `payment.refund_provider_id` + a
-partial-unique index for refund idempotency). 011/012 are claimed by email transport / reviews-write on
-sibling branches; 013 is the next free number here. On consolidation, keep migration numbers monotonic and
-re-number only if a lower number was taken by a branch that lands first.
+**TRI-901 consolidation** merged the P0/P1/P2/P3 logic branches into `main` and **renumbered the migration
+collisions** (three branches had claimed `013`, two had `012`) into a single monotonic `011..017` sequence
+(see the linearized set below). Renamed files kept their idempotent DDL; a fresh-DB re-run proves 0-drift.
 
 ---
 
 ## Production migration + seed strategy (Phase 4 — TRI-873)
 
-**Linearized migration set** (applies cleanly on an empty DB in this order — verified by `npm run smoke`
-migrating a fresh PGlite DB → `migrations applied: 12`; no renumbering, no collisions):
+**Linearized migration set** (post-TRI-901; applies cleanly on an empty DB in this order — verified by
+`npm run smoke` and a fresh-DB migrate → `migrations applied: 17`, re-run applies 0; monotonic, no collisions):
 
 ```
 001_catalogue → 002_inventory → 003_booking_payments → 004_people → 005_reviews →
 006_staff_rbac_auth → 007_content_leads_config → 008_write_path_payments_fx →
-009_admin_rbac_seed → 010_fx_rate_automation → 011_email_transport → 012_consumer_auth
+009_admin_rbac_seed → 010_fx_rate_automation → 011_email_transport → 012_consumer_auth →
+013_review_invites_write → 014_reviews_moderation_perm → 015_staff_invites_mfa →
+016_promo_guide_admin → 017_refund_execution
 ```
-(012 = reviews-write, TRI-892, on a sibling branch; **013_staff_invites_mfa** (TRI-895) adds the
-`staff_invite` table + `mfa_factor.confirmed_at` + `session.mfa_pending`. Reconcile 012↔013 numbering on
-the epic merge — they touch disjoint tables, so order between them is immaterial.)
-008 (Phase 2 FX cols) and 009 (Phase 3 admin) are already integrated on this branch; 010 (FX automation:
-`fx_rate_history` + `payment.fx_source/fx_rate_at`) stacks on top, then 011 (P0 email transport:
-`email_message` send-log, TRI-880) and 012 (P1 consumer auth: `password_reset_token` + indexes, TRI-881).
+011 = P0 email transport (`email_message` send-log, TRI-880); 012 = P1 consumer auth (`password_reset_token`,
+TRI-881); 013 = P2 reviews-write invites (TRI-892); 014 = P2 review-moderation permission (TRI-893);
+015 = P3 staff invites + admin MFA (`staff_invite` + `mfa_factor.confirmed_at` + `session.mfa_pending`, TRI-895);
+016 = P3 guides + promos (`booking.promo_code_id`/`discount_minor`, TRI-896); 017 = P3 refund execution
+(`payment.refund_of`/`refund_provider_id` + idempotency index, TRI-897). These touch disjoint tables, so the
+`011..017` order (assigned by TRI-901 merge order) is deterministic but not semantically constrained.
 The runner tracks applied files in `schema_migrations` and is idempotent, so re-running is safe.
 
 **Apply migrations (prod):**
