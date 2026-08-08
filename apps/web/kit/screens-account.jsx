@@ -88,6 +88,10 @@ function AccountShell({ current, go, title, children }) {
   // login if the session is gone (401). Inert + placeholder person when flag off.
   const live = LIVE_AUTH();
   const [me, setMe] = React.useState(live ? window.TK_AUTH.cachedMe() || null : null);
+  // TRI-941 — dismissible email-verification nudge (session-scoped) + resend.
+  const [nudge, setNudge] = React.useState(true);
+  const [nudgeSent, setNudgeSent] = React.useState(false);
+  const [nudgeBusy, setNudgeBusy] = React.useState(false);
   React.useEffect(() => {
     if (!live) return;
     let alive = true;
@@ -97,6 +101,13 @@ function AccountShell({ current, go, title, children }) {
     );
     return () => { alive = false; };
   }, []);
+  async function resendVerify() {
+    if (nudgeBusy) return;
+    setNudgeBusy(true);
+    try { await window.TK_AUTH.resendVerification(); } catch (_) {}
+    setNudgeBusy(false); setNudgeSent(true);
+  }
+  const unverified = live && me && me.emailVerified === false;
   const acctName = live && me ? (me.name || "Traveller") : "Ama Mensah";
   const acctEmail = live && me ? me.email : "ama@example.com";
   const acctInits = live && me ? window.TK_AUTH.initials(me.name, me.email) : "AM";
@@ -108,6 +119,13 @@ function AccountShell({ current, go, title, children }) {
           <span style={{ display: "flex", flexDirection: "column", lineHeight: 1.2, minWidth: 0 }}>
             <strong style={{ fontSize: 14 }}>{acctName}</strong>
             <span className="tk-caption" style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{acctEmail}</span>
+            {live && me && (
+              <span style={{ marginTop: 4 }}>
+                {me.emailVerified
+                  ? <Badge tone="confirmed"><Icon name="circle-check-big" size={12} style={{ marginInlineEnd: 4 }} />Verified</Badge>
+                  : <Badge tone="pending">Unverified</Badge>}
+              </span>
+            )}
           </span>
         </div>
         {ACCOUNT_NAV.map(n => (
@@ -124,6 +142,16 @@ function AccountShell({ current, go, title, children }) {
       </nav>
       <div className="tk-stack" style={{ gap: "var(--space-5)" }}>
         {title && <h1 className="tk-h2">{title}</h1>}
+        {unverified && nudge && (
+          <Alert tone={nudgeSent ? "success" : "warning"}
+            title={nudgeSent ? "Verification email sent" : "Verify your email address"}
+            onDismiss={() => setNudge(false)}
+            action={nudgeSent ? undefined : <Button size="sm" variant="secondary" disabled={nudgeBusy} onClick={resendVerify}>{nudgeBusy ? "Sending…" : "Resend email"}</Button>}>
+            {nudgeSent
+              ? <>Check your inbox (and spam) for the link to <strong>{acctEmail}</strong>. It expires in 24 hours.</>
+              : <>We sent a verification link to <strong>{acctEmail}</strong>. Confirm your address to secure your account — you can keep using TripKoach either way.</>}
+          </Alert>
+        )}
         {children}
       </div>
       <Modal open={signout} title="Sign out of TripKoach?" description="You'll need to log in again to see your bookings and manage your trips."
@@ -382,6 +410,10 @@ function LoginWeb({ go, startCreating }) {
   const live = LIVE_AUTH();
   const [busy, setBusy] = React.useState(false);
   const [errMsg, setErrMsg] = React.useState(null);
+  // TRI-941 — after a live signup the account is created + signed in but unverified; show a
+  // "check your inbox" panel (with a resend path) instead of dropping straight into bookings.
+  const [signedUp, setSignedUp] = React.useState(false);
+  const [signupEmail, setSignupEmail] = React.useState("");
   async function submit(e) {
     e.preventDefault();
     if (!live) { go("bookings"); return; }
@@ -394,11 +426,12 @@ function LoginWeb({ go, startCreating }) {
         const name = authVal("lg-name");
         const terms = !!(document.getElementById("lg-terms") && document.getElementById("lg-terms").checked);
         await window.TK_AUTH.signup({ email: email, password: pw, name: name || undefined, agreedTerms: terms });
-      } else {
-        const el = document.getElementById("lg-pw");
-        const password = el && typeof el.value === "string" ? el.value : "";
-        await window.TK_AUTH.login(email, password);
+        tkMarkReturning(); // TRI-925 — this browser has now signed in at least once
+        setBusy(false); setSignupEmail(email); setSignedUp(true); return; // TRI-941 check-inbox
       }
+      const el = document.getElementById("lg-pw");
+      const password = el && typeof el.value === "string" ? el.value : "";
+      await window.TK_AUTH.login(email, password);
       tkMarkReturning(); // TRI-925 — this browser has now signed in at least once
       go("bookings");
     } catch (err) {
@@ -408,6 +441,7 @@ function LoginWeb({ go, startCreating }) {
       else setErrMsg(authErrMsg(err, creating ? "We couldn't create your account. Please check your details." : "That email and password don't match."));
     }
   }
+  if (signedUp) return <CheckInboxPanel email={signupEmail} go={go} />;
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1.05fr 0.95fr", minHeight: "calc(100vh - var(--header-h))" }} className="tk-login">
       <PromoPanel mode={creating ? "signup" : "signin"} returning={returning} />
@@ -540,7 +574,101 @@ function ForgotWeb({ go }) {
     </AuthShell>
   );
 }
-Object.assign(window, { AccountShell, ProfileWeb, NotificationsWeb, AccountSettingsWeb, LoginWeb, ForgotWeb, ReviewsWeb });
+// TRI-941 — post-signup "check your inbox" panel. The account is already created + signed in (session
+// cookie set), but unverified; this confirms where the verify email went and offers a rate-limited resend
+// plus a way to continue into the account without verifying (SOFT enforcement — nothing is gated).
+function CheckInboxPanel({ email, go }) {
+  const live = LIVE_AUTH();
+  const [sent, setSent] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+  async function resend() {
+    if (busy) return;
+    setBusy(true);
+    if (live) { try { await window.TK_AUTH.resendVerification(); } catch (_) {} }
+    setBusy(false); setSent(true);
+  }
+  return (
+    <AuthShell>
+      <img src="../../assets/logo-badge.png" width="44" height="44" alt="TripKoach" style={{ marginBottom: "var(--space-5)" }} />
+      <div style={{ width: 52, height: 52, borderRadius: "50%", background: "var(--success-bg)", color: "var(--success-fg)", display: "grid", placeItems: "center", marginBottom: "var(--space-4)" }}><Icon name="mail" size={26} /></div>
+      <h1 className="tk-h2">Check your inbox</h1>
+      <p className="tk-body-sm tk-muted" style={{ marginTop: 4, marginBottom: "var(--space-5)" }}>Your account is ready. We've sent a verification link to <strong style={{ color: "var(--text-strong)" }}>{email || "your email"}</strong> — open it to confirm your address. You can start planning right away; verifying just secures your account.</p>
+      {sent
+        ? <Alert tone="success" title="Verification email sent" style={{ marginBottom: "var(--space-5)" }}>Check your inbox (and spam). Links can take a minute to arrive.</Alert>
+        : <Alert tone="info" title="Didn't get it?" style={{ marginBottom: "var(--space-5)" }}>Check spam, or resend the link below. The link expires in 24 hours.</Alert>}
+      <div className="tk-stack" style={{ gap: "var(--space-3)" }}>
+        <Button block size="lg" onClick={() => go("bookings")}>Continue to my account</Button>
+        <Button block variant="secondary" disabled={busy || sent} onClick={resend}>{busy ? "Sending…" : sent ? "Link sent" : "Resend verification email"}</Button>
+      </div>
+    </AuthShell>
+  );
+}
+
+// TRI-941 — /verify-email?token=… landing page. Consumes the emailed token on mount and resolves to one
+// of: verified (just now), already-verified, or invalid/expired (with a resend path). Flag off → inert
+// demo success (no API), matching the DS prototype posture of the other auth pages.
+function VerifyEmailPage({ go }) {
+  const live = LIVE_AUTH();
+  const token = React.useMemo(() => {
+    try { return new URLSearchParams(window.location.search || "").get("token") || ""; } catch (_) { return ""; }
+  }, []);
+  // Stages: verifying · verified · already · expired · sent (resend confirmation)
+  const [stage, setStage] = React.useState(live ? "verifying" : "verified");
+  const [busy, setBusy] = React.useState(false);
+  React.useEffect(() => {
+    if (!live) return;
+    if (!token) { setStage("expired"); return; }
+    let alive = true;
+    window.TK_AUTH.verifyEmail(token).then(
+      (res) => { if (alive) setStage(res && res.status === "already_verified" ? "already" : "verified"); },
+      () => { if (alive) setStage("expired"); }
+    );
+  }, []);
+  async function resend() {
+    if (busy) return;
+    setBusy(true);
+    // Resend needs a session (the token is spent). If signed in, ask the server to re-send; otherwise
+    // route to login so the person can sign in and resend from the account nudge.
+    try {
+      const me = live ? await window.TK_AUTH.me() : null;
+      if (me) { await window.TK_AUTH.resendVerification(); setBusy(false); setStage("sent"); return; }
+    } catch (_) {}
+    setBusy(false); go("login");
+  }
+  const Success = ({ title, body }) => (<>
+    <div style={{ width: 52, height: 52, borderRadius: "50%", background: "var(--success-bg)", color: "var(--success-fg)", display: "grid", placeItems: "center", marginBottom: "var(--space-4)" }}><Icon name="circle-check-big" size={26} /></div>
+    <h1 className="tk-h2">{title}</h1>
+    <p className="tk-body-sm tk-muted" style={{ marginTop: 4, marginBottom: "var(--space-6)" }}>{body}</p>
+    <Button block size="lg" onClick={() => go("bookings")}>Go to my account</Button>
+    <p className="tk-caption" style={{ textAlign: "center", marginTop: "var(--space-5)" }}><a href="#" onClick={(e) => { e.preventDefault(); go("home"); }}>← Back to TripKoach</a></p>
+  </>);
+  return (
+    <AuthShell>
+      <img src="../../assets/logo-badge.png" width="44" height="44" alt="TripKoach" style={{ marginBottom: "var(--space-5)" }} />
+      {stage === "verifying" && (<>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: "var(--space-4)" }}>
+          <span className="tk-spin" style={{ width: 28, height: 28, borderRadius: "50%", border: "3px solid var(--border-subtle)", borderTopColor: "var(--brand)", display: "inline-block" }} />
+          <h1 className="tk-h2" style={{ margin: 0 }}>Verifying your email…</h1>
+        </div>
+        <p className="tk-body-sm tk-muted">This only takes a moment.</p>
+      </>)}
+      {stage === "verified" && <Success title="Email verified" body="Thanks — your email address is confirmed and your account is secured. You're all set." />}
+      {stage === "already" && <Success title="Already verified" body="This email address was already confirmed. Nothing more to do — you're all set." />}
+      {stage === "sent" && <Success title="New link sent" body="We've sent a fresh verification link to your inbox. Open it to confirm your address (it expires in 24 hours)." />}
+      {stage === "expired" && (<>
+        <div style={{ width: 52, height: 52, borderRadius: "50%", background: "var(--warning-bg, var(--bg-sunken))", color: "var(--warning-fg, var(--text-strong))", display: "grid", placeItems: "center", marginBottom: "var(--space-4)" }}><Icon name="triangle-alert" size={26} /></div>
+        <h1 className="tk-h2">Link expired</h1>
+        <p className="tk-body-sm tk-muted" style={{ marginTop: 4, marginBottom: "var(--space-6)" }}>This verification link is invalid or has expired. Verification links can be used once and last 24 hours — request a fresh one below.</p>
+        <div className="tk-stack" style={{ gap: "var(--space-3)" }}>
+          <Button block size="lg" disabled={busy} onClick={resend}>{busy ? "Sending…" : "Send me a new link"}</Button>
+          <Button block variant="secondary" onClick={() => go("login")}>Back to log in</Button>
+        </div>
+      </>)}
+    </AuthShell>
+  );
+}
+
+Object.assign(window, { AccountShell, ProfileWeb, NotificationsWeb, AccountSettingsWeb, LoginWeb, ForgotWeb, ReviewsWeb, VerifyEmailPage, CheckInboxPanel });
 
 function ReviewsWeb({ go }) {
   const Stars = NS.Stars;

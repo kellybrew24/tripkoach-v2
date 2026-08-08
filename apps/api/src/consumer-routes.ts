@@ -11,7 +11,7 @@ import type { Db } from './db.ts';
 import type { Config } from './config.ts';
 import { createConsumerService, ConsumerError } from './consumer.ts';
 import {
-  createUserSession, revokeUserSession, setUserCookie, clearUserCookie, makeRequireUser,
+  createUserSession, revokeUserSession, setUserCookie, clearUserCookie, makeRequireUser, resolveUserSession,
 } from './consumer-auth.ts';
 
 export function registerConsumer(app: FastifyInstance, db: Db, cfg: Config): void {
@@ -63,6 +63,20 @@ export function registerConsumer(app: FastifyInstance, db: Db, cfg: Config): voi
     // ── Password reset (public; request is always 200 to avoid user enumeration) ──
     api.post('/auth/password-reset/request', async (req: FastifyRequest) => svc.requestPasswordReset(body(req), ipOf(req)));
     api.post('/auth/password-reset/consume', async (req: FastifyRequest) => svc.consumePasswordReset(body(req), ipOf(req)));
+
+    // ── Email verification (TRI-941) ──
+    // Consume is public — the emailed link carries the single-use token; the FE /verify-email page POSTs it.
+    api.post('/auth/verify-email', async (req: FastifyRequest) => svc.verifyEmail(body(req), ipOf(req)));
+    // Resend is public but session-aware: an authed caller resends to their own account; otherwise the
+    // caller passes { email } and always gets { ok: true } (no enumeration). Rate-limited in the service.
+    api.post('/auth/resend-verification', async (req: FastifyRequest) => {
+      const sid = req.cookies?.[cfg.consumer.cookieName];
+      const account = sid ? await resolveUserSession(db, cfg, sid) : null;
+      const b = (body(req) ?? {}) as { email?: unknown };
+      return account
+        ? svc.resendVerification({ userId: account.id }, ipOf(req))
+        : svc.resendVerification({ email: b.email }, ipOf(req));
+    });
 
     // ── Profile + preferences (authed) ──
     api.get('/me', authed, async (req: FastifyRequest) => ({ user: await svc.getProfile(req.account!.id) }));

@@ -95,6 +95,10 @@ export interface ConsumerConfig {
   sessionIdleMinutes: number;
   /** Password-reset token lifetime, minutes. Default 60. */
   resetTokenTtlMinutes: number;
+  /** Email-verification token lifetime, minutes (TRI-941). Default 1440 (24h). */
+  verifyTokenTtlMinutes: number;
+  /** Min seconds between verification-email issuances per account (TRI-941 resend rate-limit). Default 60. */
+  verifyResendMinSeconds: number;
   /** Public app origin used to build the password-reset link in the email (no trailing slash). */
   appBaseUrl: string;
 }
@@ -189,6 +193,8 @@ export function loadConfig(): Config {
       cookieName: process.env.USER_COOKIE_NAME || 'tk_user_session',
       sessionIdleMinutes: num(process.env.USER_SESSION_IDLE_MINUTES) ?? 20_160, // 14 days
       resetTokenTtlMinutes: num(process.env.PASSWORD_RESET_TTL_MINUTES) ?? 60,
+      verifyTokenTtlMinutes: num(process.env.EMAIL_VERIFY_TTL_MINUTES) ?? 1_440, // 24h
+      verifyResendMinSeconds: num(process.env.EMAIL_VERIFY_RESEND_MIN_SECONDS) ?? 60,
       appBaseUrl: (process.env.APP_BASE_URL || 'https://app.tripkoach.com').replace(/\/+$/, ''),
     },
     // Where the admin console is served — the invite email links to `${adminBaseUrl}/accept-invite?token=…`.

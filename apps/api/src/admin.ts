@@ -1362,6 +1362,10 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
       joined: r.joined_at, createdAt: r.created_at,
       bookings: Number(r.booking_count ?? 0),
       totalSpend: fromMinor(Number(r.total_spend_minor ?? 0)),
+      // TRI-941: account state derived from the linked user_account (guests have no account → both null).
+      hasAccount: !!r.user_id,
+      emailVerified: r.user_id ? !!r.email_verified_at : null,
+      emailVerifiedAt: r.email_verified_at ?? null,
     };
   }
 
@@ -1380,22 +1384,22 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     params.push((page - 1) * pageSize); const off = params.length;
     // Per-customer booking count + lifetime spend (paid bookings only) derived at read time.
     const { rows } = await db.query(
-      `SELECT c.*,
+      `SELECT c.*, u.email_verified_at,
               (SELECT COUNT(*) FROM booking b WHERE b.customer_id = c.id) AS booking_count,
               (SELECT COALESCE(SUM(b.total_minor),0) FROM booking b
                  WHERE b.customer_id = c.id AND b.payment_state = 'paid') AS total_spend_minor
-         FROM customer c ${whereSql}
+         FROM customer c LEFT JOIN user_account u ON u.id = c.user_id ${whereSql}
         ORDER BY c.created_at DESC LIMIT $${lim} OFFSET $${off}`, params);
     return { items: rows.map(customerRow), page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
   }
 
   async function getCustomer(id: string) {
     const c = (await db.query(
-      `SELECT c.*,
+      `SELECT c.*, u.email_verified_at,
               (SELECT COUNT(*) FROM booking b WHERE b.customer_id = c.id) AS booking_count,
               (SELECT COALESCE(SUM(b.total_minor),0) FROM booking b
                  WHERE b.customer_id = c.id AND b.payment_state = 'paid') AS total_spend_minor
-         FROM customer c WHERE c.id::text = $1`, [id])).rows[0];
+         FROM customer c LEFT JOIN user_account u ON u.id = c.user_id WHERE c.id::text = $1`, [id])).rows[0];
     if (!c) throw notFound('customer');
     const bookings = (await db.query(
       `SELECT b.ref, b.status, b.payment_state, b.party_size, b.total_minor, b.currency, b.created_at,

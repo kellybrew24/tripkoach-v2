@@ -395,6 +395,46 @@ to reset your password, you can safely ignore this email — your password won't
 TripKoach Ghana Ltd · Accra · automated message, no reply needed.`,
   },
 
+  // TRI-941 · Email verification. Sent by consumer.issueVerificationEmail() on signup + resend with
+  // { firstName, verifyUrl, ttlHours }. The link carries the single-use token; the FE /verify-email page
+  // POSTs /auth/verify-email with it. Enforcement is SOFT — this only confirms the address for a badge.
+  verify_email: {
+    subject: 'Verify your TripKoach email',
+    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Verify your TripKoach email</title>
+<style>
+body{margin:0;padding:24px 0;background:#F1EDE6;font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#2B2724}
+table{border-collapse:collapse}.w{width:600px;max-width:100%}
+a.btn{display:block;background:#1E1C1A;color:#FFFFFF;text-decoration:none;font-weight:700;font-size:16px;padding:15px 20px;border-radius:10px;text-align:center}
+.mut{color:#6F675E;font-size:13px;line-height:1.5}
+@media (max-width:620px){.w{width:100%!important}.pad{padding-left:20px!important;padding-right:20px!important}}
+</style></head>
+<body>
+<table role="presentation" align="center" class="w" style="background:#FFFFFF;border-radius:14px;overflow:hidden">
+  <tr><td style="background:#1E1C1A;padding:20px 28px;color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Verify your email</td></tr>
+  <tr><td class="pad" style="padding:32px 28px 8px">
+    <h1 style="margin:0 0 8px;font-size:24px;line-height:1.2;letter-spacing:-.02em;color:#1E1C1A">Welcome to TripKoach, {{firstName}}</h1>
+    <p style="margin:0 0 4px;font-size:16px;line-height:1.55">Confirm this is your email address so we can send you booking updates and secure your account. Tap the button below to verify.</p>
+  </td></tr>
+  <tr><td class="pad" style="padding:22px 28px 4px"><a class="btn" href="{{verifyUrl}}">Verify my email</a></td></tr>
+  <tr><td class="pad" style="padding:12px 28px 0"><p class="mut" style="margin:0">This link expires in {{ttlHours}} hours and can be used once. You can keep browsing and booking without verifying — this just confirms your address.</p></td></tr>
+  <tr><td class="pad" style="padding:16px 28px 4px"><p class="mut" style="margin:0;word-break:break-all">Button not working? Paste this link into your browser:<br>{{verifyUrl}}</p></td></tr>
+  <tr><td style="background:#1E1C1A;padding:20px 28px"><p style="margin:0;color:#A8A096;font-size:12px;line-height:1.6">TripKoach Ghana Ltd · Accra · automated message, no reply needed.</p></td></tr>
+</table>
+</body></html>`,
+    text: `Welcome to TripKoach, {{firstName}}
+
+Confirm this is your email address so we can send you booking updates and secure your account.
+Open this link to verify:
+
+{{verifyUrl}}
+
+This link expires in {{ttlHours}} hours and can be used once. You can keep browsing and
+booking without verifying — this just confirms your address.
+
+TripKoach Ghana Ltd · Accra · automated message, no reply needed.`,
+  },
+
   // TRI-892 P2 · Review-invite email. Sent by the admin "end departure & request reviews" action to each
   // traveller with a one-time {{reviewUrl}} carrying their invite token. The token gates a verified review
   // (status=pending until an admin moderates it). Vars: firstName, tourTitle, departureLabel, reviewUrl.

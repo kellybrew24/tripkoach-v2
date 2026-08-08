@@ -56,7 +56,11 @@ function CustomersAdmin({ go, state, setState }) {
             { key: "name", header: "Customer", strong: true, sortable: true, render: r => (
               <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <span style={{ flex: "none", width: 34, height: 34, borderRadius: "50%", background: "var(--brand-wash)", color: "var(--brand-gold-deep)", display: "grid", placeItems: "center", fontWeight: 800, fontSize: 12.5 }}>{r.initials}</span>
-                <span style={{ minWidth: 0 }}><div style={{ fontWeight: 600, color: "var(--text-strong)" }}>{r.name}</div><div className="tk-caption" style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{r.email}</div></span></span>) },
+                <span style={{ minWidth: 0 }}><div style={{ fontWeight: 600, color: "var(--text-strong)", display: "flex", alignItems: "center", gap: 6 }}>{r.name}
+                  {/* TRI-941: email-verification chip — only in live mode (fixtures leave emailVerified undefined). */}
+                  {r.emailVerified === true && <span className="tk-badge tk-badge--confirmed" title="Email verified"><Icon name="circle-check-big" size={11} /></span>}
+                  {r.emailVerified === false && <span className="tk-badge tk-badge--pending" title="Email not verified">Unverified</span>}
+                </div><div className="tk-caption" style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{r.email}</div></span></span>) },
             { key: "country", header: "Country" },
             { key: "bookings", header: "Trips", align: "end" },
             { key: "ltv", header: "Lifetime value", align: "end", render: r => <Price amount={spend(r.id)} currency="USD" size="sm" /> },
@@ -75,6 +79,9 @@ function CustomersAdmin({ go, state, setState }) {
             <div style={{ minWidth: 0 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <strong className="tk-h5">{open.name}</strong>
+                {/* TRI-941: account verification state (live only — undefined for fixtures). */}
+                {open.emailVerified === true && <span className="tk-badge tk-badge--confirmed">Email verified</span>}
+                {open.emailVerified === false && <span className="tk-badge tk-badge--pending">Email unverified</span>}
                 {custBookings(open.id).some(b => b.status === "pending") && <span className="tk-badge tk-badge--pending">Has pending</span>}
                 {spend(open.id) >= 1000 && <Badge tone="solid">VIP</Badge>}
               </div>

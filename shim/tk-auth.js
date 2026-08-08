@@ -61,6 +61,8 @@
       displayCurrency: pick(u.displayCurrency, u.display_currency) || "USD",
       dataSaver: pick(u.dataSaver, u.data_saver) !== false,
       twoFactorEnabled: !!pick(u.twoFactorEnabled, u.two_factor_enabled),
+      // TRI-941: soft email-verification signal (never gates checkout). Drives the badge + nudge.
+      emailVerified: !!pick(u.emailVerified, u.email_verified),
       createdAt: pick(u.createdAt, u.created_at) || null,
       raw: u,
     };
@@ -166,6 +168,26 @@
 
     consumeReset: function (token, password) {
       return api.post("/auth/password-reset/consume", { token: token, password: password });
+    },
+
+    // ── Email verification (TRI-941) ──
+    // Consume the emailed token on the /verify-email landing page. Resolves { ok, status } on success
+    // ('verified' | 'already_verified'); rejects with err.status===400 for an invalid/expired/used link.
+    verifyEmail: function (token) {
+      return api.post("/auth/verify-email", { token: token }).then(function (body) {
+        // On success the account is now verified — refresh the cached /me so badges update immediately.
+        if (meCache) meCache.emailVerified = true;
+        return body || { ok: true };
+      });
+    },
+
+    // Resend the verification email. Authed callers omit email (server uses the session); logged-out
+    // callers pass their email. Always resolves (server returns 200 for any input — no enumeration).
+    resendVerification: function (email) {
+      return api.post("/auth/resend-verification", email ? { email: email } : {}).then(
+        function (body) { return body || { ok: true }; },
+        function () { return { ok: true }; }
+      );
     },
 
     updateProfile: function (patch) {

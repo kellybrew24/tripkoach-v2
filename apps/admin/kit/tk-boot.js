@@ -212,6 +212,9 @@
       country: c.country || "", joined: fmtDate(pick(c.joined, c.createdAt, c.created_at)),
       bookings: pick(c.bookings, c.bookingCount, 0), initials: c.initials || initials(c.name),
       emergencyName: c.emergencyName || "", emergencyPhone: c.emergencyPhone || "", diet: c.diet || "—",
+      // TRI-941: account/verification state (guests have no account → hasAccount=false, emailVerified=null).
+      hasAccount: pick(c.hasAccount, c.userId != null, c.user_id != null) === true,
+      emailVerified: c.emailVerified === undefined ? null : c.emailVerified,
     };
   }
   function mapGuide(g) {

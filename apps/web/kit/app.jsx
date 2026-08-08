@@ -48,6 +48,10 @@ function routeFromPath(pathname, search) {
   // ?token=…) lands here — reuse the ForgotWeb screen, which reads the token off
   // the URL and opens on its "set a new password" stage.
   if (path === "/reset-password") return { screen: "forgot", slug: null };
+  // The emailed email-verification link (Backend TRI-941: APP_BASE_URL/verify-email
+  // ?token=…) lands here — the VerifyEmailPage reads the token off the URL and
+  // POSTs /auth/verify-email, showing a success / expired / already-verified state.
+  if (path === "/verify-email") return { screen: "verify", slug: null };
   // Tokenized review-invite deep link (TRI-894): the address Backend emails
   // travellers, `{webUrl}/reviews/redeem/:token`. Matched before the exact
   // `/reviews` account route so the sub-path resolves to the invite landing.
@@ -197,6 +201,7 @@ function WebApp() {
     login: <LoginWeb go={go} />,
     signup: <LoginWeb go={go} startCreating />,
     forgot: <ForgotWeb go={go} />,
+    verify: <VerifyEmailPage go={go} />,
     profile: <ProfileWeb go={go} />,
     notifications: <NotificationsWeb go={go} />,
     "account-settings": <AccountSettingsWeb go={go} />,
@@ -212,7 +217,7 @@ function WebApp() {
     review: <ReviewInvitePage go={go} token={reviewToken} />,
   }[screen] || <HomeWeb go={go} />;
 
-  const AUTH = screen === "login" || screen === "signup" || screen === "forgot";
+  const AUTH = screen === "login" || screen === "signup" || screen === "forgot" || screen === "verify";
   return AUTH ? body : <Shell currency={currency} setCurrency={setCurrency} go={go} screen={screen}>{body}</Shell>;
 }
 

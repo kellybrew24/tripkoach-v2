@@ -90,6 +90,8 @@ export function createConsumerService(db: Db, cfg: Config) {
       displayCurrency: u.display_currency,
       dataSaver: u.data_saver,
       twoFactorEnabled: u.two_factor_enabled,
+      emailVerified: !!u.email_verified_at,       // TRI-941: soft email-verification signal (never a gate)
+      emailVerifiedAt: u.email_verified_at ?? null,
       createdAt: u.created_at,
     };
   }
@@ -134,6 +136,58 @@ export function createConsumerService(db: Db, cfg: Config) {
     return r.rowCount ?? 0;
   }
 
+  // ── Email verification — issue a token + send the "verify your email" email (TRI-941) ──────────────
+  // Mirrors the password-reset issuance: opaque token, store ONLY its sha256, email an absolute link.
+  // Reused by signup (enforceRateLimit=false) and resend (enforceRateLimit=true). Never throws for a
+  // transport failure — the token is persisted and the failure is visible in the send-log. Returns a
+  // small status so the resend endpoint can report throttling without leaking account state.
+  async function issueVerificationEmail(
+    user: { id: string; email: string; name: string | null },
+    meta: { ip?: string | null } = {},
+    opts: { enforceRateLimit?: boolean } = {},
+    sendOpts?: SendOptions,
+  ): Promise<{ sent: boolean; throttled: boolean; alreadyVerified: boolean }> {
+    // Already verified → nothing to do (idempotent no-op).
+    const fresh = (await db.query(`SELECT email_verified_at FROM user_account WHERE id = $1`, [user.id])).rows[0];
+    if (fresh?.email_verified_at) return { sent: false, throttled: false, alreadyVerified: true };
+
+    // Resend rate-limit: if a token was issued for this account within the window, don't issue another.
+    if (opts.enforceRateLimit) {
+      const recent = await db.query(
+        `SELECT 1 FROM email_verification_token
+          WHERE user_id = $1 AND created_at > now() - ($2 * interval '1 second') LIMIT 1`,
+        [user.id, cfg.consumer.verifyResendMinSeconds]);
+      if (recent.rows.length) return { sent: false, throttled: true, alreadyVerified: false };
+    }
+
+    const token = randomBytes(32).toString('hex');
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+    const { rows } = await db.query(
+      `INSERT INTO email_verification_token (user_id, token_hash, expires_at, requested_ip)
+       VALUES ($1, $2, now() + ($3 * interval '1 minute'), $4) RETURNING id`,
+      [user.id, tokenHash, cfg.consumer.verifyTokenTtlMinutes, meta.ip ?? null]);
+    const tokenId = rows[0].id;
+
+    const verifyUrl = `${cfg.consumer.appBaseUrl}/verify-email?token=${token}`;
+    try {
+      await sendEmail(db, cfg, {
+        to: user.email,
+        template: 'verify_email',
+        vars: {
+          firstName: firstNameOf(user.name, user.email),
+          verifyUrl,
+          ttlHours: Math.round(cfg.consumer.verifyTokenTtlMinutes / 60),
+        },
+        relatedType: 'email_verification',
+        relatedId: tokenId,
+      }, sendOpts);
+    } catch (e) {
+      console.error(`[consumer] verification email dispatch error for token ${tokenId}: ${(e as Error).message}`);
+    }
+    await audit(db, { actorType: 'user', actorId: user.id, action: 'user.verification_email_sent', targetType: 'user_account', targetId: user.id, after: { tokenId }, ip: meta.ip ?? null });
+    return { sent: true, throttled: false, alreadyVerified: false };
+  }
+
   // ── Signup ─────────────────────────────────────────────────────────────────
   async function signup(rawBody: unknown, meta: { ip?: string | null } = {}) {
     if (!isPlainObject(rawBody)) throw validation('body must be an object');
@@ -161,6 +215,9 @@ export function createConsumerService(db: Db, cfg: Config) {
       return { u, linked };
     });
     await audit(db, { actorType: 'user', actorId: result.u.id, action: 'user.signup', targetType: 'user_account', targetId: result.u.id, after: { email, linkedBookings: result.linked }, ip: meta.ip ?? null });
+    // TRI-941: fire the "verify your email" email after the account is committed. Best-effort — a send
+    // failure never fails signup (issueVerificationEmail swallows transport errors).
+    await issueVerificationEmail({ id: result.u.id, email: result.u.email, name: result.u.name ?? null }, meta);
     return { user: profileDTO(result.u), linkedBookings: result.linked };
   }
 
@@ -380,10 +437,64 @@ export function createConsumerService(db: Db, cfg: Config) {
     return { ok: true };
   }
 
+  // ── Email verification — consume (stamp email_verified_at, single-use burn) (TRI-941) ──────────────
+  // Returns a status the FE landing page renders: 'verified' (just now) or 'already_verified'. An
+  // invalid/expired/used token throws invalid_token (400) → FE shows the "expired, resend" state.
+  async function verifyEmail(rawBody: unknown, meta: { ip?: string | null } = {}) {
+    if (!isPlainObject(rawBody)) throw validation('body must be an object');
+    const token = typeof rawBody.token === 'string' ? rawBody.token.trim() : '';
+    if (!token) throw validation('verification token is required', 'token');
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+
+    const row = (await db.query(
+      `SELECT id, user_id, expires_at, consumed_at FROM email_verification_token WHERE token_hash = $1`,
+      [tokenHash])).rows[0];
+    if (!row || row.consumed_at || new Date(row.expires_at).getTime() <= Date.now()) {
+      throw new ConsumerError('invalid_token', 'This verification link is invalid or has expired.', 400, 'token');
+    }
+
+    let alreadyVerified = false;
+    await db.tx(async (q) => {
+      // Consume atomically — a double-submit is a no-op (WHERE consumed_at IS NULL).
+      const consumed = await q.query(
+        `UPDATE email_verification_token SET consumed_at = now() WHERE id = $1 AND consumed_at IS NULL RETURNING id`,
+        [row.id]);
+      if (consumed.rowCount === 0) throw new ConsumerError('invalid_token', 'This verification link has already been used.', 400, 'token');
+      // Stamp verification only if not already verified (keep the original timestamp sticky).
+      const stamp = await q.query(
+        `UPDATE user_account SET email_verified_at = now(), updated_at = now()
+          WHERE id = $1 AND email_verified_at IS NULL RETURNING id`, [row.user_id]);
+      alreadyVerified = stamp.rowCount === 0;
+      // Void any other outstanding verification tokens for this user.
+      await q.query(`UPDATE email_verification_token SET consumed_at = now() WHERE user_id = $1 AND consumed_at IS NULL`, [row.user_id]);
+    });
+    await audit(db, { actorType: 'user', actorId: row.user_id, action: 'user.email_verified', targetType: 'user_account', targetId: row.user_id, after: { alreadyVerified }, ip: meta.ip ?? null });
+    return { ok: true, status: alreadyVerified ? 'already_verified' : 'verified' };
+  }
+
+  // ── Email verification — resend (authed by userId, or public by email; always ok, rate-limited) ────
+  // Public callers pass { email } and always get { ok: true } (no user enumeration). Authed callers pass
+  // the resolved userId. Rate-limited inside issueVerificationEmail (verifyResendMinSeconds).
+  async function resendVerification(target: { userId?: string; email?: unknown }, meta: { ip?: string | null } = {}) {
+    let user: { id: string; email: string; name: string | null } | undefined;
+    if (target.userId) {
+      const u = (await db.query(`SELECT id, email, name FROM user_account WHERE id = $1`, [target.userId])).rows[0];
+      if (u) user = { id: u.id, email: u.email, name: u.name ?? null };
+    } else {
+      const email = normEmail(target.email);
+      const u = (await db.query(`SELECT id, email, name FROM user_account WHERE lower(email) = $1`, [email])).rows[0];
+      if (u) user = { id: u.id, email: u.email, name: u.name ?? null };
+    }
+    if (!user) return { ok: true }; // unknown email → silent no-op (no enumeration)
+    const res = await issueVerificationEmail(user, meta, { enforceRateLimit: true });
+    return { ok: true, ...(res.alreadyVerified ? { alreadyVerified: true } : {}), ...(res.throttled ? { throttled: true } : {}) };
+  }
+
   return {
     signup, verifyLogin, getProfile, updateProfile, changePassword,
     getNotificationPrefs, updateNotificationPrefs, listMyBookings,
     requestPasswordReset, consumePasswordReset,
+    verifyEmail, resendVerification, issueVerificationEmail,
     // exposed for tests / route-layer session minting after signup
     linkGuestBookings,
   };

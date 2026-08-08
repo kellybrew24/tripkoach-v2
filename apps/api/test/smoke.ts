@@ -1400,6 +1400,87 @@ console.log('\n[consumer: password reset request + consume]');
   ok('reset revoked pre-existing sessions (audit recorded)', Number((await db.query(`SELECT COUNT(*) n FROM audit_log WHERE action='user.password_reset'`)).rows[0].n) >= 1, JSON.stringify(live.rows[0]));
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TRI-941 · Customer email verification (email-first). Signup issues a single-use verify token + email;
+// /auth/verify-email consumes it and stamps email_verified_at (SOFT — never gates checkout). Resend is
+// rate-limited + non-enumerating. /me + admin customers expose the verified flag.
+// ─────────────────────────────────────────────────────────────────────────────
+console.log('\n[consumer: email verification (TRI-941)]');
+{
+  const verifyTokenFor = async (email: string): Promise<string> => {
+    const row = (await db.query(
+      `SELECT vars FROM email_message WHERE template='verify_email' AND to_email=$1 ORDER BY created_at DESC LIMIT 1`, [email])).rows[0];
+    const vars = typeof row.vars === 'string' ? JSON.parse(row.vars) : row.vars;
+    return new URL(vars.verifyUrl).searchParams.get('token')!;
+  };
+
+  // Signup issues a verify email; the account starts UNVERIFIED.
+  const s = await ucall('POST', '/api/v1/auth/signup', { payload: { email: 'vera@example.com', password: 'Ver1-Str0ng!', name: 'Vera Mensah' } });
+  ok('signup → 201', s.status === 201, JSON.stringify(s.body));
+  ok('new account starts emailVerified=false', s.body.user?.emailVerified === false, JSON.stringify(s.body.user));
+  const veraCookie = s.cookie;
+  const veRow = (await db.query(`SELECT template, status, related_type, related_id FROM email_message WHERE template='verify_email' AND to_email='vera@example.com' ORDER BY created_at DESC LIMIT 1`)).rows[0];
+  ok('signup queues a verify_email (related_type=email_verification)', veRow.template === 'verify_email' && veRow.related_type === 'email_verification' && veRow.related_id != null, JSON.stringify({ t: veRow.template, s: veRow.status }));
+  const token = await verifyTokenFor('vera@example.com');
+  ok('verify link carries a token', !!token && token.length >= 32);
+  ok('verify token stored hashed, not raw', Number((await db.query(`SELECT COUNT(*)::int n FROM email_verification_token WHERE token_hash=$1`, [token])).rows[0].n) === 0);
+
+  ok('GET /me shows emailVerified=false pre-verify', (await ucall('GET', '/api/v1/me', { cookie: veraCookie })).body.user.emailVerified === false);
+  ok('verify bad token → 400', (await ucall('POST', '/api/v1/auth/verify-email', { payload: { token: 'deadbeef' } })).status === 400);
+  ok('verify missing token → 400', (await ucall('POST', '/api/v1/auth/verify-email', { payload: {} })).status === 400);
+
+  const v = await ucall('POST', '/api/v1/auth/verify-email', { payload: { token } });
+  ok('verify valid token → 200 status=verified', v.status === 200 && v.body.ok === true && v.body.status === 'verified', JSON.stringify(v.body));
+  ok('GET /me now shows emailVerified=true', (await ucall('GET', '/api/v1/me', { cookie: veraCookie })).body.user.emailVerified === true);
+  ok('email_verified_at stamped in DB', (await db.query(`SELECT email_verified_at FROM user_account WHERE email='vera@example.com'`)).rows[0].email_verified_at != null);
+  ok('verify token is single-use (reuse → 400)', (await ucall('POST', '/api/v1/auth/verify-email', { payload: { token } })).status === 400);
+  ok('email_verified audit recorded', Number((await db.query(`SELECT COUNT(*) n FROM audit_log WHERE action='user.email_verified'`)).rows[0].n) >= 1);
+
+  // Resend to an already-verified account → ok + alreadyVerified, no new token issued.
+  const rv = await ucall('POST', '/api/v1/auth/resend-verification', { cookie: veraCookie, payload: {} });
+  ok('resend for verified account → 200 alreadyVerified', rv.status === 200 && rv.body.ok === true && rv.body.alreadyVerified === true, JSON.stringify(rv.body));
+
+  // Rate-limit: a fresh signup just issued a token, so an immediate resend is throttled (no 2nd token).
+  const s2 = await ucall('POST', '/api/v1/auth/signup', { payload: { email: 'nana@example.com', password: 'Nana-Str0ng!' } });
+  const before = Number((await db.query(`SELECT COUNT(*)::int n FROM email_verification_token t JOIN user_account u ON u.id=t.user_id WHERE u.email='nana@example.com'`)).rows[0].n);
+  const throttled = await ucall('POST', '/api/v1/auth/resend-verification', { cookie: s2.cookie, payload: {} });
+  ok('resend within window → throttled (no 2nd token)', throttled.body.throttled === true && Number((await db.query(`SELECT COUNT(*)::int n FROM email_verification_token t JOIN user_account u ON u.id=t.user_id WHERE u.email='nana@example.com'`)).rows[0].n) === before, JSON.stringify(throttled.body));
+
+  // Public resend by email is non-enumerating: unknown email → 200 ok, no email row written.
+  const unBefore = Number((await db.query(`SELECT COUNT(*) n FROM email_message WHERE template='verify_email'`)).rows[0].n);
+  const unknown = await ucall('POST', '/api/v1/auth/resend-verification', { payload: { email: 'ghost@example.com' } });
+  ok('resend unknown email → 200 (no enumeration, no email)', unknown.status === 200 && unknown.body.ok === true && Number((await db.query(`SELECT COUNT(*) n FROM email_message WHERE template='verify_email'`)).rows[0].n) === unBefore, JSON.stringify(unknown.body));
+
+  // Expired token → 400. Age nana's token past its TTL, then verify.
+  await db.query(`UPDATE email_verification_token SET expires_at = now() - interval '1 minute' WHERE user_id = (SELECT id FROM user_account WHERE email='nana@example.com')`);
+  const nanaTok = await verifyTokenFor('nana@example.com');
+  ok('expired verify token → 400', (await ucall('POST', '/api/v1/auth/verify-email', { payload: { token: nanaTok } })).status === 400);
+}
+
+console.log('\n[admin: customers surface email verification (TRI-941)]');
+{
+  // The customer (ops) table is populated independently of guest bookings; seed a customer linked to the
+  // verified account (vera) + an unlinked guest customer, then assert the admin customers view joins the
+  // account's email_verified state through (verified / unverified / no-account → true / false / null).
+  const veraId = (await db.query(`SELECT id FROM user_account WHERE email='vera@example.com'`)).rows[0].id;
+  const nanaId = (await db.query(`SELECT id FROM user_account WHERE email='nana@example.com'`)).rows[0].id;
+  await db.query(`INSERT INTO customer (user_id, name, email) VALUES ($1,'Vera Mensah','vera@example.com')`, [veraId]);
+  await db.query(`INSERT INTO customer (user_id, name, email) VALUES ($1,'Nana Addo','nana@example.com')`, [nanaId]);
+  await db.query(`INSERT INTO customer (name, email) VALUES ('Guest Walkin','walkin@example.com')`);
+
+  const adminLogin = await call('POST', '/api/admin/auth/login', { payload: { email: 'admin@tripkoach.com', password: 'Sup3r-Secret!' } });
+  const adminC = adminLogin.cookies.find((c) => c.name === COOKIE)?.value ?? '';
+  const list = await call('GET', '/api/admin/customers?pageSize=100', { cookie: adminC });
+  ok('admin customers list 200', list.status === 200 && Array.isArray(list.body.items), JSON.stringify(list.body).slice(0, 80));
+  const byEmail = (e: string) => list.body.items.find((c: any) => c.email === e);
+  ok('verified account customer → hasAccount + emailVerified=true', byEmail('vera@example.com')?.hasAccount === true && byEmail('vera@example.com')?.emailVerified === true, JSON.stringify(byEmail('vera@example.com')));
+  ok('unverified account customer → emailVerified=false', byEmail('nana@example.com')?.hasAccount === true && byEmail('nana@example.com')?.emailVerified === false, JSON.stringify(byEmail('nana@example.com')));
+  ok('guest customer (no account) → hasAccount=false, emailVerified=null', byEmail('walkin@example.com')?.hasAccount === false && byEmail('walkin@example.com')?.emailVerified === null, JSON.stringify(byEmail('walkin@example.com')));
+  // Detail endpoint carries the same flags.
+  const vDetail = await call('GET', `/api/admin/customers/${byEmail('vera@example.com').id}`, { cookie: adminC });
+  ok('admin customer detail exposes emailVerified=true', vDetail.status === 200 && vDetail.body.emailVerified === true, JSON.stringify({ v: vDetail.body.emailVerified }));
+}
+
 console.log('\n[consumer: read paths + admin realm still intact]');
 {
   ok('consumer /api/v1/tours still 200 total 11', (await get('/api/v1/tours?pageSize=60')).body.total === 11);
