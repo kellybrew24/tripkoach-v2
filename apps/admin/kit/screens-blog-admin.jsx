@@ -22,6 +22,53 @@ function blogStatusBadge(p) {
     : <Badge tone="neutral">Draft</Badge>;
 }
 
+// TRI-953 · Hero image field: upload a file → POST /api/admin/media (TRI-918/928)
+// → cdn.tripkoach.com URL, mirroring the tour gallery upload. The CDN URL is the
+// canonical value (controlled via onChange); pasting a URL directly still works.
+// Flag off / offline (LIVE=false) → a local object-URL preview, nothing persisted.
+function BlogHeroField({ post, live, onChange, onError }) {
+  const [uploading, setUploading] = React.useState(false);
+  const [progress, setProgress] = React.useState(0);
+  const fileRef = React.useRef(null);
+  const hero = post.hero || "";
+  const pick = () => { if (fileRef.current) fileRef.current.click(); };
+  const onFile = (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = ""; // let the same file be re-picked after an error
+    if (!file) return;
+    if (!live) {
+      let preview = ""; try { preview = (window.URL || window.webkitURL).createObjectURL(file); } catch (_) {}
+      onChange(preview);
+      return;
+    }
+    setUploading(true); setProgress(0);
+    window.TK_ADMIN_API.uploadMedia(file, (pct) => setProgress(pct))
+      .then((url) => { setUploading(false); setProgress(100); onChange(url); })
+      .catch((err) => { setUploading(false); onError && onError((err && err.message) || "Upload failed"); });
+  };
+  return (
+    <div className="tk-field">
+      <label className="tk-label" htmlFor="blog-hero">Hero image</label>
+      <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+        <span style={{ flex: "none", width: 96, height: 64, borderRadius: 8, overflow: "hidden", background: "var(--brand-wash)", border: "1px solid var(--border)", display: "grid", placeItems: "center" }}>
+          {hero ? <img src={hero} alt="" style={{ objectFit: "cover", width: "100%", height: "100%" }} /> : <Icon name="image" size={18} />}
+        </span>
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <Button type="button" size="sm" variant="secondary" iconStart="upload" onClick={pick} disabled={uploading}>
+              {uploading ? "Uploading… " + progress + "%" : (hero ? "Replace image" : "Upload image")}
+            </Button>
+            {hero && !uploading ? <IconButton icon="trash-2" label="Remove hero image" variant="ghost" size="sm" onClick={() => onChange("")} /> : null}
+          </div>
+          <Input id="blog-hero" value={hero} onChange={(e) => onChange(e.target.value)} placeholder="…or paste https://cdn.tripkoach.com/img/posts/…-hero.jpg" iconStart="link" aria-label="Hero image URL" />
+        </div>
+      </div>
+      <p className="tk-help">Upload a JPG, PNG, WebP, or GIF — it’s stored on the CDN. You can also paste an image URL.</p>
+      <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" style={{ display: "none" }} onChange={onFile} />
+    </div>
+  );
+}
+
 function BlogAdmin({ go }) {
   const LIVE = !!(window.TK_CONFIG && window.TK_CONFIG.USE_LIVE_API);
   const API = window.TK_ADMIN_API;
@@ -62,7 +109,7 @@ function BlogAdmin({ go }) {
       title: val("blog-title"),
       tag: post.tag || val("blog-tag") || null,
       excerpt: val("blog-excerpt"),
-      hero: val("blog-hero"),
+      hero: post.hero || "",   // controlled by BlogHeroField (upload → CDN URL, or pasted URL)
       heroAlt: val("blog-heroalt"),
       author: val("blog-author"),
       readTime: rt === "" ? null : +rt,
@@ -130,7 +177,7 @@ function BlogAdmin({ go }) {
           <FormField id="blog-slug" label="Slug" help={edit.mode === "edit" ? "Changing the slug changes the story's URL." : "Leave blank to generate from the title."}><Input defaultValue={post.slug || ""} placeholder="kakum-canopy-walk" /></FormField>
           <FormField id="blog-excerpt" label="Excerpt" help="The summary shown on cards and at the top of the story."><Textarea defaultValue={post.excerpt} rows={3} placeholder="A one-paragraph teaser…" /></FormField>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-            <FormField id="blog-hero" label="Hero image URL"><Input defaultValue={post.hero || ""} placeholder="https://cdn.tripkoach.com/img/posts/…-hero.jpg" iconStart="image" /></FormField>
+            <BlogHeroField post={post} live={LIVE} onChange={(url) => setEdit({ ...edit, post: { ...post, hero: url } })} onError={(m) => setToast(m)} />
             <FormField id="blog-author" label="Author"><Input defaultValue={post.author || "TripKoach"} placeholder="TripKoach" /></FormField>
           </div>
           <FormField id="blog-heroalt" label="Hero alt text" help="Describe the image for screen readers."><Input defaultValue={post.heroAlt || ""} placeholder="A rope suspension bridge high in the forest canopy…" /></FormField>
