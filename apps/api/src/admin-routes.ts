@@ -11,9 +11,10 @@ import {
   makeRequireAuth, makeRequirePermission, audit, type Permission,
 } from './auth.ts';
 import { createAdminService, AdminError, ValidationError } from './admin.ts';
+import type { NotificationService } from './notifications.ts';
 
-export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config): void {
-  const svc = createAdminService(db, cfg);
+export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifier?: NotificationService): void {
+  const svc = createAdminService(db, cfg, notifier);
   const auth = makeRequireAuth(db, cfg);
   const perm = (p: Permission) => ({ preHandler: makeRequirePermission(db, cfg, p) });
   const actorOf = (req: FastifyRequest) => ({ id: req.staff!.id, ip: req.ip ?? null });

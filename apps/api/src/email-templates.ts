@@ -6,10 +6,13 @@
 // markup) and leaving the text/subject raw. A referenced token with no matching var throws — a bug in
 // the caller or template surfaces loudly at render time, never as a half-filled email.
 //
-// Scope (TRI-880): transport only. We register ONE neutral `smoke_test` template (used by the send
-// smoke path) plus `booking_pending`, a parametrised version of the DS `ui_kits/email/confirmation-
-// email.html`, to prove the renderer handles a real transactional template. NEITHER is wired into any
-// product flow yet — the booking/departure/reset/invite emails (P1/P2/P3/P5) register their own
+// Templates registered here:
+//   • smoke_test / booking_pending (TRI-880) — the transport-slice pair; `booking_pending` is a
+//     parametrised version of the DS `ui_kits/email/confirmation-email.html`.
+//   • booking_confirmed / booking_cancelled / payment_failed / departure_reminder (TRI-889 P5.2) —
+//     the booking-lifecycle variants, wired to their flows by src/notifications.ts. Each reuses the
+//     booking_pending layout with a distinct eyebrow/status colour/copy for its lifecycle moment.
+// Other notify features (P1 password reset, P2 review invites, P3 staff invites) register their own
 // templates here and call sendEmail() when those slices are built.
 
 export interface RenderedEmail {
@@ -132,6 +135,224 @@ Total due: {{totalDisplay}} (charged in US dollars — final quote confirmed by 
 View this booking: {{manageUrl}}
 
 TripKoach Ghana Ltd · Accra · Prices in US dollars (USD)`,
+  },
+
+  // ── TRI-889 P5.2 booking-lifecycle variants ──────────────────────────────────────────────────
+  // All four share the booking_pending layout (parametrised from ui_kits/email/confirmation-email.html):
+  // dark header eyebrow + hero line + a details card + a CTA + dark footer. Each carries a distinct
+  // eyebrow / status colour / copy for its lifecycle moment. Wired to flows by src/notifications.ts.
+
+  // booking-confirmed — payment succeeded (webhook verify → paid). The receipt/"you're going" moment.
+  booking_confirmed: {
+    subject: 'Booking {{ref}} confirmed — you’re going to {{tourTitle}}',
+    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Booking {{ref}} confirmed</title>
+<style>
+body{margin:0;padding:24px 0;background:#F1EDE6;font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#2B2724}
+table{border-collapse:collapse}.w{width:600px;max-width:100%}
+a.btn{display:block;background:#1E1C1A;color:#FFFFFF;text-decoration:none;font-weight:700;font-size:16px;padding:15px 20px;border-radius:10px;text-align:center}
+.mut{color:#6F675E;font-size:13px;line-height:1.5}
+@media (max-width:620px){.w{width:100%!important}.pad{padding-left:20px!important;padding-right:20px!important}}
+</style></head>
+<body>
+<table role="presentation" align="center" class="w" style="background:#FFFFFF;border-radius:14px;overflow:hidden">
+  <tr><td style="background:#1E1C1A;padding:20px 28px;color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Booking confirmed</td></tr>
+  <tr><td class="pad" style="padding:32px 28px 8px">
+    <h1 style="margin:0 0 8px;font-size:26px;line-height:1.2;letter-spacing:-.02em;color:#1E1C1A">You’re going, {{firstName}} — it’s confirmed</h1>
+    <p style="margin:0;font-size:16px;line-height:1.55">Payment received. Your {{travellers}} spot(s) on the {{tourTitle}} for {{departureLabel}} are locked in.</p>
+  </td></tr>
+  <tr><td class="pad" style="padding:20px 28px 0">
+    <table role="presentation" width="100%" style="background:#EEF6EE;border:1px solid #BEE0BE;border-radius:10px">
+      <tr><td style="padding:14px 16px">
+        <span style="display:inline-block;background:#EEF6EE;border:1px solid #BEE0BE;color:#1E6B33;font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px">● Confirmed &amp; paid</span>
+        <p style="margin:8px 0 0;font-size:14px;line-height:1.5;color:#1E6B33">We’ve emailed this as your receipt. Your guide will call the day before with pickup details.</p>
+      </td></tr>
+    </table>
+  </td></tr>
+  <tr><td class="pad" style="padding:20px 28px 0">
+    <table role="presentation" width="100%" style="border:1px solid #E4DFD6;border-radius:10px">
+      <tr><td style="padding:14px 16px;border-bottom:1px solid #F1EDE6">
+        <div style="font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:#6F675E;font-weight:700">Booking reference</div>
+        <div style="font-size:20px;font-weight:800;letter-spacing:.06em;color:#1E1C1A;margin-top:2px">{{ref}}</div>
+      </td></tr>
+      <tr><td style="padding:11px 16px;border-bottom:1px solid #F1EDE6;font-size:14px"><span style="color:#6F675E">Tour</span><span style="float:right;font-weight:600;color:#1E1C1A;text-align:right">{{tourTitle}}</span></td></tr>
+      <tr><td style="padding:11px 16px;border-bottom:1px solid #F1EDE6;font-size:14px"><span style="color:#6F675E">Departure</span><span style="float:right;font-weight:600;color:#1E1C1A;text-align:right">{{departureLabel}}</span></td></tr>
+      <tr><td style="padding:11px 16px;border-bottom:1px solid #F1EDE6;font-size:14px"><span style="color:#6F675E">Travellers</span><span style="float:right;font-weight:600;color:#1E1C1A;text-align:right">{{travellers}}</span></td></tr>
+      <tr><td style="padding:13px 16px;background:#F8F5F0;font-size:16px"><strong>Total paid</strong><span style="float:right;font-weight:800;font-size:18px">{{totalDisplay}}</span><div style="clear:both"></div></td></tr>
+    </table>
+  </td></tr>
+  <tr><td class="pad" style="padding:22px 28px 0"><a class="btn" href="{{manageUrl}}">View this booking</a></td></tr>
+  <tr><td style="background:#1E1C1A;padding:20px 28px"><p style="margin:0;color:#A8A096;font-size:12px;line-height:1.6">TripKoach Ghana Ltd · Accra · Prices in US dollars (USD)</p></td></tr>
+</table>
+</body></html>`,
+    text: `You're going, {{firstName}} — booking {{ref}} is confirmed.
+
+Payment received. Your {{travellers}} spot(s) on the {{tourTitle}} for {{departureLabel}} are locked in.
+
+Booking reference: {{ref}}
+Tour: {{tourTitle}}
+Departure: {{departureLabel}}
+Travellers: {{travellers}}
+Total paid: {{totalDisplay}}
+
+Your guide will call the day before with pickup details.
+View this booking: {{manageUrl}}
+
+TripKoach Ghana Ltd · Accra · Prices in US dollars (USD)`,
+  },
+
+  // booking-cancelled — admin/booking cancel. {{reason}} is always supplied (caller passes a phrase or '').
+  booking_cancelled: {
+    subject: 'Your TripKoach booking {{ref}} has been cancelled',
+    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Booking {{ref}} cancelled</title>
+<style>
+body{margin:0;padding:24px 0;background:#F1EDE6;font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#2B2724}
+table{border-collapse:collapse}.w{width:600px;max-width:100%}
+a.btn{display:block;background:#1E1C1A;color:#FFFFFF;text-decoration:none;font-weight:700;font-size:16px;padding:15px 20px;border-radius:10px;text-align:center}
+.mut{color:#6F675E;font-size:13px;line-height:1.5}
+@media (max-width:620px){.w{width:100%!important}.pad{padding-left:20px!important;padding-right:20px!important}}
+</style></head>
+<body>
+<table role="presentation" align="center" class="w" style="background:#FFFFFF;border-radius:14px;overflow:hidden">
+  <tr><td style="background:#1E1C1A;padding:20px 28px;color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Booking cancelled</td></tr>
+  <tr><td class="pad" style="padding:32px 28px 8px">
+    <h1 style="margin:0 0 8px;font-size:26px;line-height:1.2;letter-spacing:-.02em;color:#1E1C1A">Your booking has been cancelled, {{firstName}}</h1>
+    <p style="margin:0;font-size:16px;line-height:1.55">Booking {{ref}} for the {{tourTitle}} ({{departureLabel}}) is now cancelled and any held spots have been released.{{reason}}</p>
+  </td></tr>
+  <tr><td class="pad" style="padding:20px 28px 0">
+    <table role="presentation" width="100%" style="border:1px solid #E4DFD6;border-radius:10px">
+      <tr><td style="padding:14px 16px;border-bottom:1px solid #F1EDE6">
+        <div style="font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:#6F675E;font-weight:700">Booking reference</div>
+        <div style="font-size:20px;font-weight:800;letter-spacing:.06em;color:#1E1C1A;margin-top:2px">{{ref}}</div>
+      </td></tr>
+      <tr><td style="padding:11px 16px;border-bottom:1px solid #F1EDE6;font-size:14px"><span style="color:#6F675E">Tour</span><span style="float:right;font-weight:600;color:#1E1C1A;text-align:right">{{tourTitle}}</span></td></tr>
+      <tr><td style="padding:11px 16px;font-size:14px"><span style="color:#6F675E">Departure</span><span style="float:right;font-weight:600;color:#1E1C1A;text-align:right">{{departureLabel}}</span></td></tr>
+    </table>
+  </td></tr>
+  <tr><td class="pad" style="padding:22px 28px 0"><a class="btn" href="{{manageUrl}}">Book another date</a></td></tr>
+  <tr><td class="pad" style="padding:18px 28px 0"><p class="mut" style="margin:0">If you were charged, any refund is handled separately by our team. Reply to this email or call 024 555 0100 (Mon–Sat, 8am–6pm GMT) with any questions.</p></td></tr>
+  <tr><td style="background:#1E1C1A;padding:20px 28px"><p style="margin:0;color:#A8A096;font-size:12px;line-height:1.6">TripKoach Ghana Ltd · Accra</p></td></tr>
+</table>
+</body></html>`,
+    text: `Your booking has been cancelled, {{firstName}}.
+
+Booking {{ref}} for the {{tourTitle}} ({{departureLabel}}) is now cancelled and any held spots have been released.{{reason}}
+
+Booking reference: {{ref}}
+Tour: {{tourTitle}}
+Departure: {{departureLabel}}
+
+If you were charged, any refund is handled separately by our team.
+Book another date: {{manageUrl}}
+
+TripKoach Ghana Ltd · Accra`,
+  },
+
+  // payment-failed — a Paystack charge failed/abandoned. Nudge to retry; the seat hold may still be live.
+  payment_failed: {
+    subject: 'Payment didn’t go through for booking {{ref}}',
+    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Payment issue — booking {{ref}}</title>
+<style>
+body{margin:0;padding:24px 0;background:#F1EDE6;font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#2B2724}
+table{border-collapse:collapse}.w{width:600px;max-width:100%}
+a.btn{display:block;background:#1E1C1A;color:#FFFFFF;text-decoration:none;font-weight:700;font-size:16px;padding:15px 20px;border-radius:10px;text-align:center}
+.mut{color:#6F675E;font-size:13px;line-height:1.5}
+@media (max-width:620px){.w{width:100%!important}.pad{padding-left:20px!important;padding-right:20px!important}}
+</style></head>
+<body>
+<table role="presentation" align="center" class="w" style="background:#FFFFFF;border-radius:14px;overflow:hidden">
+  <tr><td style="background:#1E1C1A;padding:20px 28px;color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Payment not completed</td></tr>
+  <tr><td class="pad" style="padding:32px 28px 8px">
+    <h1 style="margin:0 0 8px;font-size:26px;line-height:1.2;letter-spacing:-.02em;color:#1E1C1A">We couldn’t process your payment, {{firstName}}</h1>
+    <p style="margin:0;font-size:16px;line-height:1.55">Your payment for the {{tourTitle}} ({{departureLabel}}) didn’t go through. Your spots aren’t confirmed yet — you can try again below.</p>
+  </td></tr>
+  <tr><td class="pad" style="padding:20px 28px 0">
+    <table role="presentation" width="100%" style="background:#FDECEC;border:1px solid #F2C4C4;border-radius:10px">
+      <tr><td style="padding:14px 16px">
+        <span style="display:inline-block;background:#FDECEC;border:1px solid #F2C4C4;color:#A32222;font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px">● Payment failed</span>
+        <p style="margin:8px 0 0;font-size:14px;line-height:1.5;color:#A32222">No charge was taken. Amount outstanding: <strong>{{totalDisplay}}</strong>.</p>
+      </td></tr>
+    </table>
+  </td></tr>
+  <tr><td class="pad" style="padding:20px 28px 0">
+    <table role="presentation" width="100%" style="border:1px solid #E4DFD6;border-radius:10px">
+      <tr><td style="padding:14px 16px;border-bottom:1px solid #F1EDE6">
+        <div style="font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:#6F675E;font-weight:700">Booking reference</div>
+        <div style="font-size:20px;font-weight:800;letter-spacing:.06em;color:#1E1C1A;margin-top:2px">{{ref}}</div>
+      </td></tr>
+      <tr><td style="padding:11px 16px;border-bottom:1px solid #F1EDE6;font-size:14px"><span style="color:#6F675E">Tour</span><span style="float:right;font-weight:600;color:#1E1C1A;text-align:right">{{tourTitle}}</span></td></tr>
+      <tr><td style="padding:11px 16px;font-size:14px"><span style="color:#6F675E">Departure</span><span style="float:right;font-weight:600;color:#1E1C1A;text-align:right">{{departureLabel}}</span></td></tr>
+    </table>
+  </td></tr>
+  <tr><td class="pad" style="padding:22px 28px 0"><a class="btn" href="{{manageUrl}}">Try payment again</a></td></tr>
+  <tr><td style="background:#1E1C1A;padding:20px 28px"><p style="margin:0;color:#A8A096;font-size:12px;line-height:1.6">TripKoach Ghana Ltd · Accra · Prices in US dollars (USD)</p></td></tr>
+</table>
+</body></html>`,
+    text: `We couldn't process your payment, {{firstName}}.
+
+Your payment for the {{tourTitle}} ({{departureLabel}}) didn't go through, so your spots aren't confirmed yet. No charge was taken.
+
+Booking reference: {{ref}}
+Tour: {{tourTitle}}
+Departure: {{departureLabel}}
+Amount outstanding: {{totalDisplay}}
+
+Try payment again: {{manageUrl}}
+
+TripKoach Ghana Ltd · Accra · Prices in US dollars (USD)`,
+  },
+
+  // departure-reminder — cron, N days before a paid booking's departure. {{daysLabel}} e.g. "in 3 days".
+  departure_reminder: {
+    subject: 'Your {{tourTitle}} departs {{departureLabel}} — see you soon',
+    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Reminder — {{tourTitle}} {{departureLabel}}</title>
+<style>
+body{margin:0;padding:24px 0;background:#F1EDE6;font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#2B2724}
+table{border-collapse:collapse}.w{width:600px;max-width:100%}
+a.btn{display:block;background:#1E1C1A;color:#FFFFFF;text-decoration:none;font-weight:700;font-size:16px;padding:15px 20px;border-radius:10px;text-align:center}
+.mut{color:#6F675E;font-size:13px;line-height:1.5}
+@media (max-width:620px){.w{width:100%!important}.pad{padding-left:20px!important;padding-right:20px!important}}
+</style></head>
+<body>
+<table role="presentation" align="center" class="w" style="background:#FFFFFF;border-radius:14px;overflow:hidden">
+  <tr><td style="background:#1E1C1A;padding:20px 28px;color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Departure reminder</td></tr>
+  <tr><td class="pad" style="padding:32px 28px 8px">
+    <h1 style="margin:0 0 8px;font-size:26px;line-height:1.2;letter-spacing:-.02em;color:#1E1C1A">Your trip departs {{daysLabel}}, {{firstName}}</h1>
+    <p style="margin:0;font-size:16px;line-height:1.55">Your {{tourTitle}} sets off {{departureLabel}}. Here’s a quick reminder so you’re ready.</p>
+  </td></tr>
+  <tr><td class="pad" style="padding:20px 28px 0">
+    <table role="presentation" width="100%" style="border:1px solid #E4DFD6;border-radius:10px">
+      <tr><td style="padding:14px 16px;border-bottom:1px solid #F1EDE6">
+        <div style="font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:#6F675E;font-weight:700">Booking reference</div>
+        <div style="font-size:20px;font-weight:800;letter-spacing:.06em;color:#1E1C1A;margin-top:2px">{{ref}}</div>
+      </td></tr>
+      <tr><td style="padding:11px 16px;border-bottom:1px solid #F1EDE6;font-size:14px"><span style="color:#6F675E">Tour</span><span style="float:right;font-weight:600;color:#1E1C1A;text-align:right">{{tourTitle}}</span></td></tr>
+      <tr><td style="padding:11px 16px;border-bottom:1px solid #F1EDE6;font-size:14px"><span style="color:#6F675E">Departure</span><span style="float:right;font-weight:600;color:#1E1C1A;text-align:right">{{departureLabel}}</span></td></tr>
+      <tr><td style="padding:11px 16px;font-size:14px"><span style="color:#6F675E">Travellers</span><span style="float:right;font-weight:600;color:#1E1C1A;text-align:right">{{travellers}}</span></td></tr>
+    </table>
+  </td></tr>
+  <tr><td class="pad" style="padding:20px 28px 0"><p class="mut" style="margin:0">Bring a valid ID, comfortable shoes, water and sun protection. Your guide will call the day before with exact pickup details.</p></td></tr>
+  <tr><td class="pad" style="padding:18px 28px 0"><a class="btn" href="{{manageUrl}}">View your booking</a></td></tr>
+  <tr><td style="background:#1E1C1A;padding:20px 28px"><p style="margin:0;color:#A8A096;font-size:12px;line-height:1.6">TripKoach Ghana Ltd · Accra</p></td></tr>
+</table>
+</body></html>`,
+    text: `Your trip departs {{daysLabel}}, {{firstName}}.
+
+Your {{tourTitle}} sets off {{departureLabel}}. A quick reminder so you're ready.
+
+Booking reference: {{ref}}
+Tour: {{tourTitle}}
+Departure: {{departureLabel}}
+Travellers: {{travellers}}
+
+Bring a valid ID, comfortable shoes, water and sun protection. Your guide will call the day before with exact pickup details.
+
+View your booking: {{manageUrl}}
+
+TripKoach Ghana Ltd · Accra`,
   },
 } satisfies Record<string, TemplateDef>;
 

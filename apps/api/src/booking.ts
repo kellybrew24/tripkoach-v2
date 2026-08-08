@@ -6,6 +6,7 @@ import { randomBytes, createHmac, timingSafeEqual } from 'node:crypto';
 import type { Db } from './db.ts';
 import type { Config } from './config.ts';
 import type { PaystackClient } from './paystack.ts';
+import type { NotificationService } from './notifications.ts';
 import { fromMinor } from './util.ts';
 
 // ── Typed errors (mapped to the {error:{code,message}} envelope + HTTP status by the route layer) ──
@@ -71,7 +72,9 @@ export interface ChargeRate {
   at: Date;
 }
 
-export function createBookingService(db: Db, cfg: Config, paystack: PaystackClient): BookingService {
+export function createBookingService(
+  db: Db, cfg: Config, paystack: PaystackClient, notifier?: NotificationService,
+): BookingService {
   // ── unique-ref insert helper: retries a few times on the UNIQUE collision ──
   async function insertUniqueRef<T>(
     prefix: string, len: number, run: (ref: string) => Promise<T>,
@@ -367,7 +370,7 @@ export function createBookingService(db: Db, cfg: Config, paystack: PaystackClie
 
   // ── Confirm a booking from a paid transaction (idempotent; shared by verify + webhook) ──
   async function markPaid(reference: string, providerRef: string, raw: unknown): Promise<any | null> {
-    return db.tx(async (q) => {
+    const result = await db.tx(async (q) => {
       const payRes = await q.query(
         `SELECT p.*, b.ref AS booking_ref, b.status AS booking_status, b.payment_state
          FROM payment p JOIN booking b ON b.id = p.booking_id
@@ -376,7 +379,8 @@ export function createBookingService(db: Db, cfg: Config, paystack: PaystackClie
       if (!pay) return null; // unknown reference (e.g. webhook for a foreign txn) — caller no-ops
 
       if (pay.status === 'paid' && pay.payment_state === 'paid') {
-        return { ref: pay.booking_ref, status: pay.booking_status, paymentState: pay.payment_state };
+        // Already confirmed — idempotent no-op; don't re-send the confirmation email.
+        return { ref: pay.booking_ref, status: pay.booking_status, paymentState: pay.payment_state, justConfirmed: false };
       }
       await q.query(
         `UPDATE payment SET status = 'paid', provider_ref = $2, raw = $3 WHERE id = $1`,
@@ -384,7 +388,31 @@ export function createBookingService(db: Db, cfg: Config, paystack: PaystackClie
       await q.query(
         `UPDATE booking SET status = 'confirmed', payment_state = 'paid', updated_at = now()
          WHERE id = $1`, [pay.booking_id]);
-      return { ref: pay.booking_ref, status: 'confirmed', paymentState: 'paid' };
+      return { ref: pay.booking_ref, status: 'confirmed', paymentState: 'paid', justConfirmed: true };
+    });
+    // Fire the booking-confirmed email AFTER the tx commits, and only on the fresh transition (never on
+    // an idempotent replay). notifier calls never throw — a confirmed payment must not depend on email.
+    if (result?.justConfirmed && notifier) {
+      await notifier.bookingConfirmed(result.ref);
+    }
+    return result;
+  }
+
+  // ── Mark a payment failed from a webhook (idempotent). Returns the booking ref ONLY when it flipped a
+  //    non-failed payment to failed, so the caller emails the payer exactly once. ──
+  async function markPaymentFailed(reference: string, raw: unknown): Promise<string | null> {
+    return db.tx(async (q) => {
+      const payRes = await q.query(
+        `SELECT p.id, p.status, b.ref AS booking_ref, b.payment_state
+         FROM payment p JOIN booking b ON b.id = p.booking_id
+         WHERE p.ref = $1 FOR UPDATE OF p`, [reference]);
+      const pay = payRes.rows[0];
+      if (!pay) return null;                               // unknown reference — no-op
+      if (pay.payment_state === 'paid') return null;       // already paid — ignore a stray fail event
+      if (pay.status === 'failed') return null;            // already failed — don't re-notify
+      await q.query(`UPDATE payment SET status = 'failed', raw = $2 WHERE id = $1`,
+        [pay.id, JSON.stringify(raw)]);
+      return pay.booking_ref as string;
     });
   }
 
@@ -412,6 +440,11 @@ export function createBookingService(db: Db, cfg: Config, paystack: PaystackClie
     if (['failed', 'abandoned', 'reversed'].includes(result.status)) {
       await db.query(`UPDATE payment SET status = 'failed', raw = $2 WHERE ref = $1`,
         [payRef, JSON.stringify(result.raw)]);
+      // Email the payer once on the transition into failed (not on repeated verify polls of an already
+      // failed payment). Fire-and-forget: never let an email issue affect the verify response.
+      if (notifier && pay?.status !== 'failed') {
+        await notifier.paymentFailed(b.ref);
+      }
     }
     const fresh = await loadBooking(db, ref);
     return { ref: b.ref, status: fresh.status, paymentState: fresh.payment_state, verified: false };
@@ -454,6 +487,13 @@ export function createBookingService(db: Db, cfg: Config, paystack: PaystackClie
 
     if (type === 'charge.success' && reference) {
       await markPaid(reference, eventId ?? reference, data);
+    }
+    // A failed/abandoned charge webhook: mark the payment failed (once) and email the payer. Keep the
+    // seat hold — the expiry sweep releases it if they never pay. markFailed returns the booking ref
+    // only when it actually transitioned a non-failed payment, so we email exactly once.
+    if ((type === 'charge.failed' || type === 'charge.abandoned') && reference) {
+      const bookingRef = await markPaymentFailed(reference, data);
+      if (bookingRef && notifier) await notifier.paymentFailed(bookingRef);
     }
     if (eventId) {
       await db.query(`UPDATE paystack_event SET processed_at = now() WHERE event_id = $1`, [eventId]);
