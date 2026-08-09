@@ -345,6 +345,9 @@
     // capacity below already-reserved seats with a 409 (no oversell / no negative availability).
     updateDeparture: function (id, patch) { return req("PATCH", "/departures/" + encodeURIComponent(id), patch || {}); },
     cancelDeparture: function (id, reason) { return req("POST", "/departures/" + encodeURIComponent(id) + "/cancel", { reason: reason }); },
+    // TRI-1004: end a departure server-side (status → completed) and issue per-booking review
+    // invites (idempotent; sends the review_invite email). Returns { departureStatus, eligible, issued[], skipped[] }.
+    requestReviews: function (id) { return req("POST", "/departures/" + encodeURIComponent(id) + "/request-reviews", {}); },
     // bookings
     listBookings: function () { return req("GET", "/bookings"); },
     getBooking: function (ref) { return req("GET", "/bookings/" + encodeURIComponent(ref)); },
