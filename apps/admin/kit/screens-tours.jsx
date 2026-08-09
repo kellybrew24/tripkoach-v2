@@ -133,6 +133,17 @@ function TourEdit({ go, state }) {
   const [defaultTrack, setDefaultTrack] = React.useState(null);
   const tuidRef = React.useRef(0);
   const nextTrackId = () => "t" + (tuidRef.current++);
+
+  // Flat "Group pricing" tiers (TRI-1003): tour-level per-person price by party size,
+  // for single-itinerary tours (no tracks). Persisted as `tiers` on the tour — separate
+  // rows from per-track tiers (price_tier.tour_id vs .package_id). Controlled state,
+  // seeded from the loaded detail like the gallery/tracks so Save actually persists edits.
+  const [tiers, setTiers] = React.useState([]);
+  const seedTiers = (raw, basePrice) => {
+    const rows = (Array.isArray(raw) && raw.length ? raw : [{ minPax: 1, price: basePrice != null ? basePrice : "" }])
+      .map(t => ({ minPax: t.minPax, price: t.price }));
+    setTiers(rows);
+  };
   const seedTracks = (pkgs, defSlug) => {
     const rows = (Array.isArray(pkgs) ? pkgs : []).map(p => ({
       _uid: nextTrackId(), slug: p.id || "", name: p.name || "", tag: p.tag || "",
@@ -153,13 +164,13 @@ function TourEdit({ go, state }) {
   const touch = () => setDirty(true);
 
   // Flag-off / new: seed the gallery + tracks synchronously from the initial record.
-  React.useEffect(() => { if (!(live && !isNew)) { seedMedia(detail && detail.images, detail && detail.image); seedTracks(detail && detail.packages, detail && detail.defaultPackage); } }, []);
+  React.useEffect(() => { if (!(live && !isNew)) { seedMedia(detail && detail.images, detail && detail.image); seedTracks(detail && detail.packages, detail && detail.defaultPackage); seedTiers(detail && detail.tiers, detail && detail.price); } }, []);
   // Live existing tour: fetch full detail, then hydrate fields + gallery + tracks.
   React.useEffect(() => {
     if (isNew || !live) return;
     let alive = true;
     window.TK_ADMIN_API.getTour(apiId)
-      .then(d => { if (!alive || !d) return; setDetail(d); setPublished(!!d.published); if (d.region) setRegion(d.region); seedMedia(d.images, d.image); seedTracks(d.packages, d.defaultPackage); })
+      .then(d => { if (!alive || !d) return; setDetail(d); setPublished(!!d.published); if (d.region) setRegion(d.region); seedMedia(d.images, d.image); seedTracks(d.packages, d.defaultPackage); seedTiers(d.tiers, d.price); })
       .catch(() => { if (alive) { setDetail(listTour || blank); setLoadErr(true); } });
     return () => { alive = false; };
   }, [state.editId]);
@@ -171,6 +182,11 @@ function TourEdit({ go, state }) {
   const addTrackTier = (uid) => { setTracks(ts => ts.map(t => t._uid === uid ? Object.assign({}, t, { tiers: t.tiers.concat([{ minPax: "", price: "" }]) }) : t)); touch(); };
   const removeTrackTier = (uid, i) => { setTracks(ts => ts.map(t => t._uid === uid ? Object.assign({}, t, { tiers: t.tiers.filter((_, j) => j !== i) }) : t)); touch(); };
   const setTrackTier = (uid, i, field, value) => { setTracks(ts => ts.map(t => t._uid === uid ? Object.assign({}, t, { tiers: t.tiers.map((tier, j) => j === i ? Object.assign({}, tier, { [field]: value }) : tier) }) : t)); touch(); };
+
+  // Flat "Group pricing" tier handlers (TRI-1003). Editing tiers is a real change → mark dirty.
+  const addTier = () => { setTiers(ts => ts.concat([{ minPax: "", price: "" }])); touch(); };
+  const removeTier = (i) => { setTiers(ts => ts.filter((_, j) => j !== i)); touch(); };
+  const setTierField = (i, field, value) => { setTiers(ts => ts.map((t, j) => j === i ? Object.assign({}, t, { [field]: value }) : t)); touch(); };
 
   const commitRegion = () => { const v = newRegion.trim(); if (!v) return; window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.createRegion(v), () => { window.TK_ADD_REGION(v); setRegions(window.TK_DATA.regions.slice()); setRegion(v); setNewRegion(""); setAddingRegion(false); touch(); setToast("Region “" + v + "” added — now live in browse filters and the Regions page"); }); };
 
@@ -236,6 +252,12 @@ function TourEdit({ go, state }) {
       body.packages = packages;
       const def = tracks.find(t => t._uid === defaultTrack && (t.name || "").trim());
       if (def) body.defaultPackage = def.slug || def.name.trim();
+      // Flat "Group pricing" tiers (TRI-1003) → tour-level price_tier rows. Same
+      // authoritative-load guard: a failed detail load must not wipe stored tiers.
+      // Drop blank rows; the server recomputes the "from" price as the min tier.
+      body.tiers = tiers
+        .map(tr => ({ minPax: num(tr.minPax), price: num(tr.price) }))
+        .filter(tr => tr.minPax != null && tr.price != null);
     }
     const optimistic = () => { setDirty(false); setToast(isNew ? "Tour created" : "Tour saved"); };
     window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.saveTour(body), optimistic);
@@ -294,22 +316,25 @@ function TourEdit({ go, state }) {
             <table className="tk-table" data-density="compact">
               <thead><tr><th>Party size</th><th style={{ textAlign: "end" }}>Price / person</th><th /></tr></thead>
               <tbody>
-                {(t.tiers || [{ minPax: 1, price: t.price || 0 }]).map((tier, i, arr) => (
+                {tiers.map((tier, i, arr) => {
+                  const nextPax = parseInt(arr[i + 1] && arr[i + 1].minPax, 10);
+                  return (
                   <tr key={i}>
                     <td style={{ width: 200 }}>
                       <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <Input defaultValue={tier.minPax} onChange={touch} inputMode="numeric" style={{ width: 70 }} aria-label="Minimum travellers" />
-                        <span className="tk-caption">or more{i < arr.length - 1 ? " (up to " + (arr[i + 1].minPax - 1) + ")" : ""}</span>
+                        <Input value={tier.minPax} onChange={(e) => setTierField(i, "minPax", e.target.value)} inputMode="numeric" style={{ width: 70 }} aria-label="Minimum travellers" />
+                        <span className="tk-caption">or more{i < arr.length - 1 && Number.isFinite(nextPax) ? " (up to " + (nextPax - 1) + ")" : ""}</span>
                       </span>
                     </td>
-                    <td style={{ textAlign: "end", width: 160 }}><Input defaultValue={tier.price} onChange={touch} inputMode="numeric" iconStart="wallet" /></td>
-                    <td className="tk-rowkebab"><IconButton icon="trash-2" label="Remove tier" variant="ghost" size="sm" onClick={touch} /></td>
+                    <td style={{ textAlign: "end", width: 160 }}><Input value={tier.price} onChange={(e) => setTierField(i, "price", e.target.value)} inputMode="numeric" iconStart="wallet" aria-label="Price per person" /></td>
+                    <td className="tk-rowkebab"><IconButton icon="trash-2" label="Remove tier" variant="ghost" size="sm" onClick={() => removeTier(i)} /></td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
-          <Button variant="secondary" size="sm" iconStart="plus" onClick={touch} style={{ alignSelf: "flex-start" }}>Add price tier</Button>
+          <Button variant="secondary" size="sm" iconStart="plus" onClick={addTier} style={{ alignSelf: "flex-start" }}>Add price tier</Button>
         </Section>
 
         <Section title="Tracks" hint="Optional route variants a traveller picks on the tour page (e.g. the Accra City Tour's three half-day routes). Leave empty for a single-itinerary tour.">
