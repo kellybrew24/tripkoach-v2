@@ -200,6 +200,7 @@ function MfaEnrollGate({ go }) {
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState(false);
   const [loadErr, setLoadErr] = React.useState(false);
+  const [copied, setCopied] = React.useState(false);
   const enterRes = React.useRef(null);
   const refs = React.useRef([]);
   // Begin enrollment on mount: fetch a fresh secret + otpauth URI for the QR.
@@ -268,9 +269,10 @@ function MfaEnrollGate({ go }) {
         <>
           <h2 className="tk-h2">Save your recovery codes</h2>
           <p className="tk-body-sm tk-muted" style={{ marginTop: 4, marginBottom: "var(--space-5)" }}>Two-factor authentication is now on. Store these one-time recovery codes somewhere safe — each works once if you lose access to your authenticator.</p>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: "var(--space-4)", background: "var(--surface-muted)", borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)", marginBottom: "var(--space-4)" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: "var(--space-4)", background: "var(--surface-muted)", borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)", marginBottom: "var(--space-3)" }}>
             {(recoveryCodes || []).map((c) => <span key={c} className="tk-num" style={{ fontSize: 14, letterSpacing: "0.04em", color: "var(--text-strong)" }}>{c}</span>)}
           </div>
+          <Button block variant="secondary" size="sm" iconStart="copy" style={{ marginBottom: "var(--space-4)" }} onClick={() => { try { navigator.clipboard && navigator.clipboard.writeText((recoveryCodes || []).join("\n")); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch (_) {} }}>{copied ? "Copied" : "Copy codes"}</Button>
           <Button block size="lg" onClick={enter}>Enter the console</Button>
         </>
       )}

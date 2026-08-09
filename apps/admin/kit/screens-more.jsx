@@ -690,6 +690,7 @@ function MfaEnrollDrawer({ open, mode, onClose, onEnabled, setToast }) {
             {(recoveryCodes || []).map((c) => <span key={c} className="tk-num" style={{ fontSize: 14, letterSpacing: "0.04em", color: "var(--text-strong)" }}>{c}</span>)}
             <span className="tk-caption tk-muted" style={{ gridColumn: "1 / -1" }}>These won't be shown again.</span>
           </div>
+          <Button variant="secondary" size="sm" iconStart="copy" style={{ marginTop: 10 }} onClick={() => { try { navigator.clipboard && navigator.clipboard.writeText((recoveryCodes || []).join("\n")); setToast && setToast("Recovery codes copied"); } catch (_) {} }}>Copy codes</Button>
         </>
       )}
     </Drawer>
@@ -719,7 +720,7 @@ function MfaManageDrawer({ open, onClose, status, onReconfigure, onChanged, setT
         <span><strong style={{ fontSize: 14, color: "var(--text-strong)" }}>Recovery codes</strong><p className="tk-body-sm tk-muted" style={{ margin: "2px 0 0" }}>{remaining == null ? "Use these if you lose your phone." : remaining + " unused. Regenerating replaces all of them."}</p></span>
         <Button variant="secondary" size="sm" disabled={busy} onClick={regen}>{busy ? "Generating…" : "Regenerate"}</Button>
       </div>
-      {codes && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: "12px 14px", background: "var(--bg-sunken)", borderRadius: "var(--radius-md)" }}>{codes.map((c) => <span key={c} className="tk-num" style={{ fontSize: 14, letterSpacing: "0.04em", color: "var(--text-strong)" }}>{c}</span>)}<span className="tk-caption tk-muted" style={{ gridColumn: "1 / -1" }}>Save these now — they won't be shown again.</span></div>}
+      {codes && <><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: "12px 14px", background: "var(--bg-sunken)", borderRadius: "var(--radius-md)" }}>{codes.map((c) => <span key={c} className="tk-num" style={{ fontSize: 14, letterSpacing: "0.04em", color: "var(--text-strong)" }}>{c}</span>)}<span className="tk-caption tk-muted" style={{ gridColumn: "1 / -1" }}>Save these now — they won't be shown again.</span></div><Button variant="secondary" size="sm" iconStart="copy" style={{ marginTop: 10 }} onClick={() => { try { navigator.clipboard && navigator.clipboard.writeText(codes.join("\n")); setToast && setToast("Recovery codes copied"); } catch (_) {} }}>Copy codes</Button></>}
       <Alert tone="warning" title="Turning 2FA off isn't allowed">Policy requires two-factor for all staff. Use Reconfigure to switch to a new device; contact an admin to reset a lost one.</Alert>
     </Drawer>
   );
