@@ -1651,7 +1651,13 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
   }
 
   // ── Audit-log read (A16) — paginated, read-only, for the AuditTimeline screen ─
-  async function listAuditLog(opts: { action?: string; targetType?: string; targetId?: string; actorId?: string; page?: number; pageSize?: number } = {}) {
+  // TRI-997: the audit log is now searchable/filterable. Beyond the exact-match
+  // facets (action/targetType/targetId/actorId) it accepts a free-text query `q`
+  // (matched across action, target, actor name/email and the before/after JSON)
+  // and a `from`/`to` date range on created_at. It also returns `facets` — the
+  // distinct actions, actors and entity types across the WHOLE log — so the
+  // console can populate its filter dropdowns without scraping the paged rows.
+  async function listAuditLog(opts: { action?: string; targetType?: string; targetId?: string; actorId?: string; q?: string; from?: string; to?: string; page?: number; pageSize?: number } = {}) {
     const where: string[] = [];
     const params: unknown[] = [];
     const eq = (col: string, val?: string) => { if (val) { params.push(val); where.push(`${col} = $${params.length}`); } };
@@ -1659,10 +1665,23 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     eq('a.target_type', opts.targetType);
     eq('a.target_id', opts.targetId);
     eq('a.actor_id', opts.actorId);
+    const q = (opts.q || '').trim();
+    if (q) {
+      params.push(`%${q}%`);
+      const p = `$${params.length}`;
+      where.push(`(a.action ILIKE ${p} OR a.target_type ILIKE ${p} OR a.target_id ILIKE ${p}
+                   OR u.name ILIKE ${p} OR u.email ILIKE ${p}
+                   OR COALESCE(a.before::text, '') ILIKE ${p} OR COALESCE(a.after::text, '') ILIKE ${p})`);
+    }
+    // Date range: `from`/`to` are YYYY-MM-DD (or any timestamp). `to` is inclusive
+    // of the whole day, so we compare against the start of the following day.
+    if (opts.from) { params.push(opts.from); where.push(`a.created_at >= $${params.length}::date`); }
+    if (opts.to) { params.push(opts.to); where.push(`a.created_at < ($${params.length}::date + interval '1 day')`); }
     const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
     const page = Math.max(1, opts.page || 1);
     const pageSize = Math.min(200, Math.max(1, opts.pageSize || 50));
-    const total = Number((await db.query(`SELECT COUNT(*)::int AS n FROM audit_log a ${whereSql}`, params)).rows[0].n);
+    const total = Number((await db.query(
+      `SELECT COUNT(*)::int AS n FROM audit_log a LEFT JOIN staff_user u ON u.id = a.actor_id ${whereSql}`, params)).rows[0].n);
     params.push(pageSize); const lim = params.length;
     params.push((page - 1) * pageSize); const off = params.length;
     const { rows } = await db.query(
@@ -1679,7 +1698,25 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
       before: r.before ?? null, after: r.after ?? null,
       ip: r.ip ?? null, createdAt: r.created_at,
     }));
-    return { items, page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
+    return { items, page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)), facets: await auditFacets() };
+  }
+
+  // Distinct filter options across the entire audit log (unfiltered) so the
+  // console's Actor / Action / Entity dropdowns stay stable while filtering.
+  async function auditFacets() {
+    const [actions, actors, targetTypes] = await Promise.all([
+      db.query(`SELECT DISTINCT action FROM audit_log WHERE action IS NOT NULL ORDER BY action`),
+      db.query(`SELECT a.actor_id AS id, COALESCE(u.name, u.email, 'System') AS name, u.email
+                  FROM audit_log a LEFT JOIN staff_user u ON u.id = a.actor_id
+                 WHERE a.actor_id IS NOT NULL
+                 GROUP BY a.actor_id, u.name, u.email ORDER BY name`),
+      db.query(`SELECT DISTINCT target_type FROM audit_log WHERE target_type IS NOT NULL ORDER BY target_type`),
+    ]);
+    return {
+      actions: actions.rows.map((r) => r.action),
+      actors: actors.rows.map((r) => ({ id: r.id, name: r.name, email: r.email ?? null })),
+      targetTypes: targetTypes.rows.map((r) => r.target_type),
+    };
   }
 
   // ── Dashboard aggregates (A15) — summary counts for the console home ──────────

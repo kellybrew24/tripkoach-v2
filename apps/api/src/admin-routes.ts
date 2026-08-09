@@ -446,7 +446,8 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
       const q = query(req);
       return svc.listAuditLog({
         action: qStr(q, 'action'), targetType: qStr(q, 'targetType'), targetId: qStr(q, 'targetId'),
-        actorId: qStr(q, 'actorId'), page: qNum(q, 'page'), pageSize: qNum(q, 'pageSize'),
+        actorId: qStr(q, 'actorId'), q: qStr(q, 'q'), from: qStr(q, 'from'), to: qStr(q, 'to'),
+        page: qNum(q, 'page'), pageSize: qNum(q, 'pageSize'),
       });
     });
 
