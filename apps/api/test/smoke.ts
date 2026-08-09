@@ -1753,6 +1753,28 @@ console.log('\n[admin MFA: enroll → verify → login challenge → recovery]')
   ok('mfa: challenge TOTP → full session', challenge.status === 200 && challenge.body.staff?.role === 'admin' && Array.isArray(challenge.body.permissions), JSON.stringify(challenge.body?.staff));
   ok('mfa: promoted session → /me 200', (await call('GET', '/api/admin/me', { cookie: pendingCookie })).status === 200);
 
+  // ── TRI-983 · "Trust this device for 30 days" ──────────────────────────────
+  // 1) Login with trust:true — still challenged (no trust cookie exists yet), but the intent is recorded.
+  const TRUST = cfg.adminTrustCookieName;
+  const trustLogin = await call('POST', '/api/admin/auth/login', { payload: { email: 'admin@tripkoach.com', password: 'Sup3r-Secret!', trust: true } });
+  ok('trust: login with trust:true still challenges first time', trustLogin.status === 200 && trustLogin.body.mfaRequired === true, JSON.stringify(trustLogin.body));
+  const trustPending = trustLogin.cookies.find((c) => c.name === COOKIE)?.value ?? '';
+  // 2) Completing the challenge now mints a trusted-device token in the tk_admin_trust cookie.
+  const trustChallenge = await call('POST', '/api/admin/auth/mfa', { cookie: trustPending, payload: { code: totp(secret) } });
+  ok('trust: challenge completes with full session', trustChallenge.status === 200 && !!trustChallenge.body.staff);
+  const trustToken = trustChallenge.cookies.find((c) => c.name === TRUST)?.value ?? '';
+  ok('trust: MFA success set a tk_admin_trust cookie', !!trustToken, JSON.stringify(trustChallenge.cookies));
+  // 3) A subsequent login FROM THIS DEVICE (presenting the trust cookie) SKIPS the challenge entirely.
+  const trustSkip = await app.inject({ method: 'POST', url: '/api/admin/auth/login', payload: { email: 'admin@tripkoach.com', password: 'Sup3r-Secret!' }, cookies: { [TRUST]: trustToken } });
+  const trustSkipBody = JSON.parse(trustSkip.body);
+  ok('trust: trusted device SKIPS MFA (full session, no mfaRequired)', trustSkip.statusCode === 200 && !!trustSkipBody.staff && !trustSkipBody.mfaRequired, trustSkip.body);
+  // 4) A fresh browser profile (no trust cookie) is STILL challenged.
+  const freshProfile = await call('POST', '/api/admin/auth/login', { payload: { email: 'admin@tripkoach.com', password: 'Sup3r-Secret!' } });
+  ok('trust: fresh profile (no cookie) still challenges', freshProfile.status === 200 && freshProfile.body.mfaRequired === true, JSON.stringify(freshProfile.body));
+  // 5) A forged/garbage trust cookie does NOT skip — the token must match a live hashed record.
+  const forged = await app.inject({ method: 'POST', url: '/api/admin/auth/login', payload: { email: 'admin@tripkoach.com', password: 'Sup3r-Secret!' }, cookies: { [TRUST]: 'not-a-real-token' } });
+  ok('trust: forged trust cookie is rejected → still challenges', forged.statusCode === 200 && JSON.parse(forged.body).mfaRequired === true, forged.body);
+
   // Recovery code path: a fresh login, then complete the challenge with a single-use recovery code.
   const login3 = await call('POST', '/api/admin/auth/login', { payload: { email: 'admin@tripkoach.com', password: 'Sup3r-Secret!' } });
   const pending3 = login3.cookies.find((c) => c.name === COOKIE)?.value ?? '';

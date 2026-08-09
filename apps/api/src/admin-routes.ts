@@ -11,6 +11,8 @@ import {
   clearMfaEnrollPending, mfaEnforcedFor, makeRequireAuthAllowingEnroll,
   setSessionCookie, clearSessionCookie, permissionsFor,
   makeRequireAuth, makeRequirePermission, audit, type Permission,
+  verifyTrustedDevice, issueTrustedDevice, sessionWasTrusted,
+  revokeTrustedDevices, setTrustCookie, clearTrustCookie,
 } from './auth.ts';
 import { createAdminService, AdminError, ValidationError } from './admin.ts';
 import type { NotificationService } from './notifications.ts';
@@ -102,6 +104,21 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
         return reply.code(401).send({ error: { code: 'invalid_credentials', message: 'That email and password do not match.' } });
       }
       const trust = b.trustDevice === true || b.trust === true;
+      // TRI-983: a device the operator previously chose to trust skips the second factor for 30 days. We
+      // check the long-lived tk_admin_trust cookie against a live trusted_device row scoped to THIS staff
+      // user; a match means we can issue a full session straight away instead of the mfa_pending half-auth.
+      // (Scoping to u.id is what stops a trusted cookie for one account from skipping MFA for another.)
+      if (u.mfa_enabled && await verifyTrustedDevice(db, u.id, req.cookies?.[cfg.adminTrustCookieName])) {
+        const sid = await createSession(db, cfg, u.id, {
+          ip: req.ip, userAgent: req.headers['user-agent'], trustedDevice: true,
+        });
+        setSessionCookie(reply, cfg, sid);
+        await audit(db, { actorId: u.id, action: 'staff.login', targetType: 'staff_user', targetId: u.id, after: { mfa: 'skipped_trusted_device' }, ip: req.ip ?? null });
+        return {
+          staff: { id: u.id, email: u.email, name: u.name ?? null, role: u.role, jobTitle: u.job_title ?? null },
+          permissions: [...await permissionsFor(db, u.role)],
+        };
+      }
       // MFA-enabled staff get a half-auth session (mfa_pending); the auth guard rejects it until the
       // second factor clears it via POST /auth/mfa. The cookie is set now so the challenge can find it.
       if (u.mfa_enabled) {
@@ -156,6 +173,14 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
         return reply.code(401).send({ error: { code: 'invalid_code', message: "That code didn't match or has expired." } });
       }
       await clearMfaPending(db, pending.sessionId);
+      // TRI-983: the operator ticked "Trust this device for 30 days" at login — now that the factor has
+      // verified, mint a trusted-device token and drop it in the long-lived tk_admin_trust cookie so the
+      // next login on this device skips the challenge. Only issued after a real second-factor success.
+      if (pending.trustedDevice) {
+        const token = await issueTrustedDevice(db, cfg, pending.staffId, { ip: req.ip ?? null, userAgent: req.headers['user-agent'] ?? null });
+        setTrustCookie(reply, cfg, token);
+        await audit(db, { actorId: pending.staffId, action: 'staff.device_trusted', targetType: 'staff_user', targetId: pending.staffId, ip: req.ip ?? null });
+      }
       const ctx = await resolveSession(db, cfg, pending.sessionId);
       await audit(db, { actorId: pending.staffId, action: 'staff.login', targetType: 'staff_user', targetId: pending.staffId, after: { mfa: true }, ip: req.ip ?? null });
       if (!ctx) return reply.code(401).send({ error: { code: 'unauthorized', message: 'Session expired. Please sign in again.' } });
@@ -253,14 +278,27 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
         const sid = req.cookies?.[cfg.adminCookieName];
         if (sid) await clearMfaEnrollPending(db, sid);
         const s = req.staff!;
+        // TRI-983: an enroll-gated login can also carry the "trust this device" intent (it was stored on
+        // the half-auth session at login). The factor is now confirmed, so honor it the same way the
+        // ordinary MFA-challenge path does.
+        if (sid && await sessionWasTrusted(db, sid)) {
+          const token = await issueTrustedDevice(db, cfg, s.id, { ip: req.ip ?? null, userAgent: req.headers['user-agent'] ?? null });
+          setTrustCookie(reply, cfg, token);
+          await audit(db, { actorId: s.id, action: 'staff.device_trusted', targetType: 'staff_user', targetId: s.id, ip: req.ip ?? null });
+        }
         await audit(db, { actorId: s.id, action: 'staff.login', targetType: 'staff_user', targetId: s.id, after: { mfa: true, viaEnrollGate: true }, ip: req.ip ?? null });
         return { ...result, staff: { id: s.id, email: s.email, name: s.name, role: s.role, jobTitle: s.jobTitle }, permissions: [...s.permissions] };
       }
       return result;
     });
-    admin.post('/auth/mfa/disable', { preHandler: auth }, async (req) => {
+    admin.post('/auth/mfa/disable', { preHandler: auth }, async (req, reply) => {
       const b = body(req) as Record<string, unknown>;
-      return staffSvc.disableMfa(req.staff!.id, typeof b.code === 'string' ? b.code : '', actorOf(req));
+      const result = await staffSvc.disableMfa(req.staff!.id, typeof b.code === 'string' ? b.code : '', actorOf(req));
+      // TRI-983: with MFA off there is no challenge to skip, so any trusted-device tokens are moot — forget
+      // them all and clear this device's cookie so re-enabling MFA starts from a clean, fully-challenged state.
+      await revokeTrustedDevices(db, req.staff!.id);
+      clearTrustCookie(reply, cfg);
+      return result;
     });
     admin.post('/auth/mfa/recovery-codes', { preHandler: auth }, async (req) => staffSvc.regenerateRecoveryCodes(req.staff!.id, actorOf(req)));
 

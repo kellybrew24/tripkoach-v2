@@ -29,6 +29,10 @@ export interface Config {
   adminCookieSameSite: 'lax' | 'strict' | 'none';
   /** Idle-timeout for admin sessions, minutes. The console signs staff out after inactivity (sliding). */
   adminSessionIdleMinutes: number;
+  /** TRI-983: cookie name for the long-lived "trust this device" token (separate from the session cookie). */
+  adminTrustCookieName: string;
+  /** TRI-983: how many days a trusted device skips the MFA challenge. Drives both the DB TTL and the cookie maxAge. */
+  trustedDeviceDays: number;
   /** Consumer (subject_type='user') auth — TRI-881. Cookie + session/reset windows for the client SPA. */
   consumer: ConsumerConfig;
   /** Public origin of the admin console (used to build the invite accept-link in staff invite emails). */
@@ -191,6 +195,8 @@ export function loadConfig(): Config {
     adminCookieSecure: process.env.COOKIE_SECURE ? process.env.COOKIE_SECURE === 'true' : true,
     adminCookieSameSite: (process.env.COOKIE_SAMESITE as 'lax' | 'strict' | 'none') || 'lax',
     adminSessionIdleMinutes: Number(process.env.ADMIN_SESSION_IDLE_MINUTES || 30),
+    adminTrustCookieName: process.env.ADMIN_TRUST_COOKIE_NAME || 'tk_admin_trust',
+    trustedDeviceDays: num(process.env.TRUSTED_DEVICE_DAYS) ?? 30,
     consumer: {
       cookieName: process.env.USER_COOKIE_NAME || 'tk_user_session',
       sessionIdleMinutes: num(process.env.USER_SESSION_IDLE_MINUTES) ?? 20_160, // 14 days

@@ -2,7 +2,7 @@
 // sessions (revocable + sliding idle expiry), and a role→permission resolver used by the route guards.
 // Tables come from Phase 1 migration 006 (staff_user, role_permission, session, audit_log).
 
-import { randomBytes } from 'node:crypto';
+import { randomBytes, createHash } from 'node:crypto';
 import { argon2id, argon2Verify } from 'hash-wasm';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Db } from './db.ts';
@@ -93,10 +93,10 @@ export async function revokeSession(db: Db, sessionId: string): Promise<void> {
  *  session is live (not expired/revoked), its staff user is active, AND it is still mfa_pending. */
 export async function resolvePendingSession(
   db: Db, sessionId: string,
-): Promise<{ sessionId: string; staffId: string } | null> {
+): Promise<{ sessionId: string; staffId: string; trustedDevice: boolean } | null> {
   if (!sessionId) return null;
   const { rows } = await db.query<any>(
-    `SELECT s.id AS session_id, u.id AS staff_id, u.status
+    `SELECT s.id AS session_id, u.id AS staff_id, u.status, s.trusted_device
        FROM session s JOIN staff_user u ON u.id = s.subject_id
       WHERE s.id = $1 AND s.subject_type = 'staff'
         AND s.revoked_at IS NULL AND s.expires_at > now() AND s.mfa_pending = true`,
@@ -104,7 +104,7 @@ export async function resolvePendingSession(
   );
   const r = rows[0];
   if (!r || r.status !== 'active') return null;
-  return { sessionId: r.session_id, staffId: r.staff_id };
+  return { sessionId: r.session_id, staffId: r.staff_id, trustedDevice: !!r.trusted_device };
 }
 
 /** Promote a pending session to fully authenticated once the second factor has verified. */
@@ -179,6 +179,76 @@ export function setSessionCookie(reply: FastifyReply, cfg: Config, sessionId: st
 
 export function clearSessionCookie(reply: FastifyReply, cfg: Config): void {
   reply.clearCookie(cfg.adminCookieName, { path: cfg.adminPrefix });
+}
+
+// ── Trusted devices (TRI-983 · "Trust this device for 30 days") ───────────────
+// A trusted-device credential lets an MFA-enabled staffer skip the TOTP challenge on a device they have
+// already verified, for a fixed 30-day window. It is deliberately SEPARATE from the session cookie: the
+// session is short-lived (30-min sliding idle) and revoked on logout, whereas trust must survive logout
+// and outlive the session. We store only the SHA-256 of the opaque token, scope every check to a single
+// staff_id, and let logout keep the trust (so the next login on this device stays fast).
+const sha256hex = (s: string): string => createHash('sha256').update(s).digest('hex');
+
+/** Did a given session row carry the "trust this device" intent (checkbox at login)? Used by the MFA
+ *  completion handlers to decide whether to mint a trusted-device token after the factor verifies. */
+export async function sessionWasTrusted(db: Db, sessionId: string): Promise<boolean> {
+  if (!sessionId) return false;
+  const { rows } = await db.query<{ trusted_device: boolean }>(
+    `SELECT trusted_device FROM session WHERE id = $1`, [sessionId]);
+  return !!rows[0]?.trusted_device;
+}
+
+/** Mint a trusted-device token for this staffer: random 32-byte secret, stored only as its SHA-256 hash
+ *  with a 30-day TTL. Returns the RAW token for the caller to drop into the tk_admin_trust cookie. */
+export async function issueTrustedDevice(
+  db: Db, cfg: Config, staffId: string, meta: { ip?: string | null; userAgent?: string | null } = {},
+): Promise<string> {
+  const token = randomBytes(32).toString('hex');
+  await db.query(
+    `INSERT INTO trusted_device (staff_id, token_hash, expires_at, ip, user_agent)
+     VALUES ($1, $2, now() + ($3 * interval '1 day'), $4, $5)`,
+    [staffId, sha256hex(token), cfg.trustedDeviceDays, meta.ip ?? null, meta.userAgent ?? null],
+  );
+  return token;
+}
+
+/** Honor a presented trusted-device cookie: true iff it matches a LIVE (not expired/revoked) row for THIS
+ *  staff user. Scoping to staffId is the guard that a device trusted for account A can never skip MFA for
+ *  account B. Stamps last_used_at on a hit. */
+export async function verifyTrustedDevice(
+  db: Db, staffId: string, token: string | undefined | null,
+): Promise<boolean> {
+  if (!token) return false;
+  const { rows } = await db.query<{ id: string }>(
+    `SELECT id FROM trusted_device
+      WHERE staff_id = $1 AND token_hash = $2
+        AND revoked_at IS NULL AND expires_at > now()`,
+    [staffId, sha256hex(token)],
+  );
+  const hit = rows[0];
+  if (!hit) return false;
+  await db.query(`UPDATE trusted_device SET last_used_at = now() WHERE id = $1`, [hit.id]);
+  return true;
+}
+
+/** Forget every trusted device for a staffer (e.g. when MFA is disabled). Idempotent. */
+export async function revokeTrustedDevices(db: Db, staffId: string): Promise<void> {
+  await db.query(
+    `UPDATE trusted_device SET revoked_at = now() WHERE staff_id = $1 AND revoked_at IS NULL`, [staffId]);
+}
+
+export function setTrustCookie(reply: FastifyReply, cfg: Config, token: string): void {
+  reply.setCookie(cfg.adminTrustCookieName, token, {
+    httpOnly: true,
+    secure: cfg.adminCookieSecure,
+    sameSite: cfg.adminCookieSameSite,
+    path: cfg.adminPrefix,
+    maxAge: cfg.trustedDeviceDays * 24 * 60 * 60,
+  });
+}
+
+export function clearTrustCookie(reply: FastifyReply, cfg: Config): void {
+  reply.clearCookie(cfg.adminTrustCookieName, { path: cfg.adminPrefix });
 }
 
 // ── Route guards (Fastify preHandlers) ───────────────────────────────────────
