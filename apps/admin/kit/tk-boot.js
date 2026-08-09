@@ -355,6 +355,11 @@
     cancelBooking: function (ref, reason) { return req("POST", "/bookings/" + encodeURIComponent(ref) + "/cancel", { reason: reason }); },
     // TRI-970: move a booking to another departure of the same tour (availability-checked server-side).
     rescheduleBooking: function (ref, targetDepartureId, opts) { return req("POST", "/bookings/" + encodeURIComponent(ref) + "/reschedule", Object.assign({ targetDepartureId: targetDepartureId }, opts || {})); },
+    // TRI-1007: re-send the booking confirmation email. Resolves { ref, outcome, to } where outcome is
+    // 'sent' | 'skipped' (transport off) | 'failed' | 'no_recipient'; 409 for cancelled/failed bookings.
+    resendBookingConfirmation: function (ref) { return req("POST", "/bookings/" + encodeURIComponent(ref) + "/resend"); },
+    // TRI-1007: Customers row-menu — re-send the confirmation for a customer's most recent booking.
+    resendCustomerLastConfirmation: function (id) { return req("POST", "/customers/" + encodeURIComponent(id) + "/resend-confirmation"); },
     // payments
     listPayments: function () { return req("GET", "/payments"); },
     // TRI-897: real Paystack refund (was a flag-only stub that hit a non-existent
@@ -490,6 +495,28 @@
       // Do NOT run the optimistic update on failure — the write didn't persist.
       throw err;
     });
+  };
+
+  // TRI-1007 · Turn a resend-confirmation API result into an honest operator toast. `res` is undefined
+  // in fixture mode (TK_ADMIN_ACT short-circuits off the live API) → show the passed-in fallback so the
+  // DS demo copy is unchanged. Live → report what actually happened with the send.
+  window.TK_RESEND_MSG = function (res, fallback) {
+    if (!res) return fallback;
+    var to = res.to ? " to " + res.to : "";
+    switch (res.outcome) {
+      case "sent": return "Confirmation re-sent" + to + ".";
+      case "skipped": return "Email sending is off in this environment — nothing was sent.";
+      case "no_recipient": return "No contact email on file — nothing was sent.";
+      default: return "Couldn't send the confirmation — check the email log.";
+    }
+  };
+  // Summarise a bulk resend (array of per-ref results, some may be rejections caught as {outcome:'error'}).
+  window.TK_RESEND_BULK_MSG = function (results, count) {
+    if (!results) return "Confirmation resent to " + count + " customers";
+    var sent = results.filter(function (r) { return r && r.outcome === "sent"; }).length;
+    if (sent === results.length) return "Confirmation re-sent to " + sent + " customer" + (sent === 1 ? "" : "s") + ".";
+    if (sent === 0) return "No confirmations sent — recipients had no email, sending is off, or the bookings can't be resent.";
+    return "Re-sent " + sent + " of " + results.length + " confirmations (the rest had no email or can't be resent).";
   };
 
   // ---- live hydration -------------------------------------------------------

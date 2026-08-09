@@ -685,6 +685,50 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     return getBooking(ref);
   }
 
+  // TRI-1007 · Re-send the booking confirmation email on operator demand (was a toast-only no-op in the
+  // Bookings bulk bar, the booking drawer, and the Customers row menu). Delegates the recipient
+  // resolution + template choice + send-log to the notifier (same path as the automatic confirmation).
+  // Refuses for bookings that have no confirmation to re-send (cancelled/failed) with a 409. Returns the
+  // concrete outcome so the UI can tell the operator whether an email actually went out.
+  async function resendBookingConfirmation(ref: string, actor: Actor) {
+    const cur = (await db.query(`SELECT ref, status FROM booking WHERE ref=$1`, [ref])).rows[0];
+    if (!cur) throw notFound('booking');
+    if (['cancelled', 'failed'].includes(cur.status)) {
+      throw conflict(`cannot resend a confirmation for a booking in "${cur.status}" state`);
+    }
+    // `outcome`: 'sent' (delivered to transport) | 'skipped' (transport disabled) | 'failed' (transport
+    // error) | 'no_recipient' (guest with no contact email / opted-out account). Never throws for the
+    // send itself — the notifier swallows send errors and the send-log carries the detail for ops.
+    const res = notifier ? await notifier.resendConfirmation(ref) : null;
+    const outcome = res ? res.status : 'no_recipient';
+    await audit(db, {
+      actorId: actor.id, action: 'booking.resend_confirmation', targetType: 'booking', targetId: ref,
+      after: { ref, outcome, to: res?.to ?? null }, ip: actor.ip,
+    });
+    return { ref, outcome, to: res?.to ?? null };
+  }
+
+  // TRI-1007 · Customers row-menu entry point: re-send the confirmation for a person's most recent
+  // resendable booking. Resolves the person the same way getCustomer does (registered account id first,
+  // else guest booking-contact) so it works for account bookings whose customer_id is never populated.
+  async function resendCustomerLastConfirmation(id: string, actor: Actor) {
+    let acct = (await db.query(`SELECT id FROM user_account WHERE id::text = $1`, [id])).rows[0];
+    let bookingWhere: string;
+    if (acct) {
+      bookingWhere = `(b.user_id = $1 OR b.customer_id IN (SELECT c2.id FROM customer c2 WHERE c2.user_id = $1))`;
+    } else {
+      acct = (await db.query(`SELECT id FROM customer WHERE id::text = $1 AND user_id IS NULL`, [id])).rows[0];
+      bookingWhere = `b.customer_id = $1`;
+    }
+    if (!acct) throw notFound('customer');
+    const last = (await db.query(
+      `SELECT b.ref FROM booking b
+        WHERE ${bookingWhere} AND b.status NOT IN ('cancelled', 'failed')
+        ORDER BY b.created_at DESC LIMIT 1`, [acct.id])).rows[0];
+    if (!last) throw conflict('this customer has no booking with a confirmation to resend');
+    return resendBookingConfirmation(last.ref, actor);
+  }
+
   async function cancelBooking(ref: string, body: unknown, actor: Actor) {
     if (!isPlainObject(body)) throw new ValidationError('body must be an object');
     const reason = normalizeReason(reqStr(body, 'reason', 500));
@@ -2039,6 +2083,7 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     listTours, getTour, createTour, updateTour, setTourPublished, deleteTour,
     listDepartures, getDeparture, createDeparture, updateDeparture, cancelDeparture,
     listBookings, getBooking, confirmBooking, cancelBooking, rescheduleBooking,
+    resendBookingConfirmation, resendCustomerLastConfirmation,
     listPayments, getPayment, executeRefund, markPaid, reconciliationReport,
     listReviews, moderateReview, replyReview,
     listGuides, getGuide, createGuide, updateGuide, deleteGuide,

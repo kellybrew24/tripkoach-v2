@@ -199,7 +199,7 @@ function CustomersAdmin({ go, state, setState }) {
   const kebab = (r) => [
     { label: "View details", icon: "eye", onClick: () => setState({ detailRef: r.id }) },
     { label: "Email customer", icon: "mail", onClick: () => setToast("Opening email to " + r.name) },
-    { label: "Resend last confirmation", icon: "ticket", onClick: () => setToast("Confirmation resent to " + r.email) },
+    { label: "Resend last confirmation", icon: "ticket", onClick: () => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.resendCustomerLastConfirmation(r.id), (res) => setToast(window.TK_RESEND_MSG(res, "Confirmation resent to " + r.email))) },
     { label: "Copy email address", icon: "receipt", onClick: () => setToast(r.email + " copied") },
     { divider: true },
     { label: "Export bookings (CSV)", icon: "download", onClick: () => setToast("Exporting " + r.name + "'s bookings") },

@@ -73,7 +73,10 @@ function BookingsAdmin({ go, state, setState }) {
           <div className="tk-bulkbar">
             <span>{sel.length} selected</span>
             <Button size="sm" variant="secondary" iconStart="download" onClick={() => exportBookingsCsv(A.bookings.filter(b => sel.includes(b.ref)))}>Export</Button>
-            <Button size="sm" variant="secondary" iconStart="mail" onClick={() => window.tkToast("Confirmation resent to " + sel.length + " customers")}>Resend confirmation</Button>
+            <Button size="sm" variant="secondary" iconStart="mail" onClick={() => window.TK_ADMIN_ACT(
+              () => Promise.all(sel.map(ref => window.TK_ADMIN_API.resendBookingConfirmation(ref).catch(err => ({ ref, outcome: "error", error: err })))),
+              (results) => window.tkToast(window.TK_RESEND_BULK_MSG(results, sel.length))
+            )}>Resend confirmation</Button>
             <button type="button" onClick={() => setSel([])} style={{ marginInlineStart: "auto", background: "none", border: 0, color: "var(--text-link)", fontWeight: 600, cursor: "pointer" }}>Clear</button>
           </div>
         )}
@@ -149,7 +152,7 @@ function BookingDrawer({ booking, onClose }) {
   const footer = cur === "pending"
     ? <>{moveBtn}<Button variant="danger" onClick={() => setConfirmCancel(true)}>Cancel booking</Button><Button style={{ marginInlineStart: "auto" }} iconStart="check" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.confirmBooking(booking.ref), () => { booking.status = "confirmed"; setStatus("confirmed"); setToast("Booking " + booking.ref + " confirmed"); })}>Confirm booking</Button></>
     : cur === "confirmed"
-      ? <>{moveBtn}<Button variant="secondary" iconStart="mail" onClick={() => window.tkToast("Confirmation resent")}>Resend confirmation</Button><Button variant="danger" style={{ marginInlineStart: "auto" }} onClick={() => setConfirmCancel(true)}>Cancel booking</Button></>
+      ? <>{moveBtn}<Button variant="secondary" iconStart="mail" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.resendBookingConfirmation(booking.ref), (res) => setToast(window.TK_RESEND_MSG(res, "Confirmation resent")))}>Resend confirmation</Button><Button variant="danger" style={{ marginInlineStart: "auto" }} onClick={() => setConfirmCancel(true)}>Cancel booking</Button></>
       : (canReschedule
         ? <>{moveBtn}<Button variant="secondary" style={{ marginInlineStart: "auto" }} onClick={onClose}>Close</Button></>
         : <Button variant="secondary" style={{ marginInlineStart: "auto" }} onClick={onClose}>Close</Button>);

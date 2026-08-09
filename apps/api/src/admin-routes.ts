@@ -262,6 +262,8 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
     admin.post('/bookings/:ref/cancel', perm('bookings.cancel'), async (req) => svc.cancelBooking((req.params as any).ref, body(req), actorOf(req)));
     // TRI-970 · Move a paid/held booking to another departure of the same tour (availability-checked, audited).
     admin.post('/bookings/:ref/reschedule', perm('bookings.manage'), async (req) => svc.rescheduleBooking((req.params as any).ref, body(req), actorOf(req)));
+    // TRI-1007 · Re-send the booking confirmation email (Bookings bulk/drawer). 409 for cancelled/failed.
+    admin.post('/bookings/:ref/resend', perm('bookings.manage'), async (req) => svc.resendBookingConfirmation((req.params as any).ref, actorOf(req)));
 
     // ── Payments (view + REAL refund + manual settlement) ──────────────────────
     admin.get('/payments', perm('bookings.view'), async (req) => {
@@ -424,6 +426,8 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
     admin.get('/customers/:id', perm('customers.view'), async (req) => svc.getCustomer((req.params as any).id));
     // TRI-972: customer-scoped activity/events timeline (bookings, cancellations, reschedules, refunds, reviews).
     admin.get('/customers/:id/activity', perm('customers.view'), async (req) => svc.getCustomerActivity((req.params as any).id));
+    // TRI-1007 · Customers row-menu "Resend last confirmation" — re-send the person's most recent booking confirmation.
+    admin.post('/customers/:id/resend-confirmation', perm('bookings.manage'), async (req) => svc.resendCustomerLastConfirmation((req.params as any).id, actorOf(req)));
 
     // ── Avatar moderation (TRI-943) — queue + actions, guarded by content.manage ─
     // Queue lists pending/hidden (auto-flagged) avatars with owner + media + last report reason. An admin

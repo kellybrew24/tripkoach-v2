@@ -41,6 +41,13 @@ const CANCEL_REASON_PHRASE: Record<string, string> = {
 
 export interface NotificationService {
   bookingConfirmed(ref: string): Promise<SendEmailResult | null>;
+  /**
+   * Re-send the booking confirmation on operator demand (TRI-1007). Picks the template that matches
+   * the booking's current lifecycle — a confirmed/completed booking gets the "you're going"
+   * confirmation, a still-held (reserved/pending) booking gets the "spot reserved / total due"
+   * receipt. Honours the same booking_confirmations preference + guest-fallback as the automatic send.
+   */
+  resendConfirmation(ref: string): Promise<SendEmailResult | null>;
   bookingCancelled(ref: string, opts?: { reason?: string | null }): Promise<SendEmailResult | null>;
   /** Admin moved this booking to a new departure. `previousDepartureLabel` is the old date (booking already carries the new one). */
   bookingRescheduled(ref: string, opts?: { previousDepartureLabel?: string | null }): Promise<SendEmailResult | null>;
@@ -59,6 +66,7 @@ interface BookingCtx {
   partySize: number;
   tourTitle: string;
   departureLabel: string;
+  status: string;                // booking.status — picks the resend template
   cancelReason: string | null;
   userId: string | null;         // account link (booking.user_id) — null for guest bookings
   accountEmail: string | null;   // user_account.email when linked
@@ -90,7 +98,7 @@ export function createNotificationService(
   // Load everything the templates + recipient resolution need in one round-trip-ish shot.
   async function loadCtx(ref: string): Promise<BookingCtx | null> {
     const { rows } = await db.query(
-      `SELECT b.id, b.ref, b.currency, b.total_minor, b.party_size, b.user_id, b.cancel_reason,
+      `SELECT b.id, b.ref, b.currency, b.total_minor, b.party_size, b.user_id, b.status, b.cancel_reason,
               t.title AS tour_title,
               d.date_label, d.time_label,
               ua.email AS account_email
@@ -108,6 +116,7 @@ export function createNotificationService(
       bookingId: b.id, ref: b.ref, currency: b.currency, totalMinor: Number(b.total_minor),
       partySize: Number(b.party_size), tourTitle: b.tour_title,
       departureLabel: [b.date_label, b.time_label].filter(Boolean).join(', '),
+      status: b.status,
       cancelReason: b.cancel_reason ?? null,
       userId: b.user_id ?? null, accountEmail: b.account_email ?? null,
       leadName: lead?.name ?? null, leadEmail: lead?.email ?? null,
@@ -164,6 +173,25 @@ export function createNotificationService(
       }, baseLog);
     } catch (e) {
       baseLog(`[notify] bookingConfirmed ${ref} failed (swallowed): ${(e as Error).message}`);
+      return null;
+    }
+  }
+
+  async function resendConfirmation(ref: string): Promise<SendEmailResult | null> {
+    try {
+      const ctx = await loadCtx(ref);
+      if (!ctx) return null;
+      // Match the confirmation to the booking's lifecycle: paid/confirmed → the "you're going"
+      // receipt; still held (reserved/pending) → the "spot reserved / total due" email. Both carry
+      // the same vars and both honour the booking_confirmations preference (event key below).
+      const template = ['confirmed', 'completed'].includes(ctx.status) ? 'booking_confirmed' : 'booking_pending';
+      return await dispatch(ctx, 'booking_confirmed', template, {
+        firstName: firstName(ctx.leadName), ref: ctx.ref, tourTitle: ctx.tourTitle,
+        departureLabel: ctx.departureLabel, travellers: ctx.partySize,
+        totalDisplay: money(ctx.totalMinor, ctx.currency), manageUrl: manageUrl(ctx.ref),
+      }, baseLog);
+    } catch (e) {
+      baseLog(`[notify] resendConfirmation ${ref} failed (swallowed): ${(e as Error).message}`);
       return null;
     }
   }
@@ -267,5 +295,5 @@ export function createNotificationService(
     return out;
   }
 
-  return { bookingConfirmed, bookingCancelled, bookingRescheduled, paymentFailed, sendDepartureReminders };
+  return { bookingConfirmed, resendConfirmation, bookingCancelled, bookingRescheduled, paymentFailed, sendDepartureReminders };
 }

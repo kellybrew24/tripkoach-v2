@@ -33,6 +33,7 @@ const VERB = {
   refund: "refunded", refund_failed: "failed to refund", mark_paid: "marked as paid",
   deactivate: "deactivated", reply: "replied to", approve: "approved", reject: "rejected",
   invite: "invited", disable: "disabled", enable: "re-enabled", resend_invite: "re-sent an invite to",
+  resend_confirmation: "re-sent the confirmation for",
   login: "signed in", login_failed: "failed to sign in", logout: "signed out",
   mfa_challenge: "was prompted for two-factor", mfa_failed: "failed two-factor",
   mfa_enroll_required: "was asked to set up two-factor", device_trusted: "trusted a device",
