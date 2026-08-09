@@ -823,8 +823,8 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     const fxCols = await paymentSelect();
     const { rows } = await db.query(
       `SELECT p.ref, p.amount_minor, p.currency, p.method, p.status, p.provider_ref, p.raw, p.created_at,
-              ${fxCols}, b.ref AS booking_ref, c.name AS customer_name
-         FROM payment p JOIN booking b ON b.id=p.booking_id LEFT JOIN customer c ON c.id=b.customer_id
+              ${fxCols}, b.ref AS booking_ref, ${BOOKING_PERSON_COLS}
+         FROM payment p JOIN booking b ON b.id=p.booking_id ${BOOKING_PERSON_JOINS}
         WHERE p.booking_id=$1 ORDER BY p.created_at`, [bookingId]);
     return rows.map(paymentDTO);
   }
@@ -834,18 +834,20 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     const where: string[] = [];
     const params: unknown[] = [];
     if (opts.status && opts.status !== 'all') { params.push(opts.status); where.push(`p.status = $${params.length}`); }
-    if (opts.q) { params.push(`%${opts.q}%`); where.push(`(p.ref ILIKE $${params.length} OR b.ref ILIKE $${params.length} OR c.name ILIKE $${params.length})`); }
+    if (opts.q) { params.push(`%${opts.q}%`); where.push(`(p.ref ILIKE $${params.length} OR b.ref ILIKE $${params.length}
+                   OR COALESCE(ua.name, c.name, lt.name) ILIKE $${params.length}
+                   OR COALESCE(ua.email, c.email, lt.email) ILIKE $${params.length})`); }
     const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
     const page = Math.max(1, opts.page || 1);
     const pageSize = Math.min(100, Math.max(1, opts.pageSize || 25));
     const total = Number((await db.query(
-      `SELECT COUNT(*)::int AS n FROM payment p JOIN booking b ON b.id=p.booking_id LEFT JOIN customer c ON c.id=b.customer_id ${whereSql}`, params)).rows[0].n);
+      `SELECT COUNT(*)::int AS n FROM payment p JOIN booking b ON b.id=p.booking_id ${BOOKING_PERSON_JOINS} ${whereSql}`, params)).rows[0].n);
     params.push(pageSize); const lim = params.length;
     params.push((page - 1) * pageSize); const off = params.length;
     const { rows } = await db.query(
       `SELECT p.ref, p.amount_minor, p.currency, p.method, p.status, p.provider_ref, p.raw, p.created_at,
-              ${fxCols}, b.ref AS booking_ref, c.name AS customer_name
-         FROM payment p JOIN booking b ON b.id=p.booking_id LEFT JOIN customer c ON c.id=b.customer_id
+              ${fxCols}, b.ref AS booking_ref, ${BOOKING_PERSON_COLS}
+         FROM payment p JOIN booking b ON b.id=p.booking_id ${BOOKING_PERSON_JOINS}
         ${whereSql} ORDER BY p.created_at DESC LIMIT $${lim} OFFSET $${off}`, params);
     return { items: rows.map(paymentDTO), page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
   }
@@ -854,8 +856,8 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     const fxCols = await paymentSelect();
     const { rows } = await db.query(
       `SELECT p.ref, p.amount_minor, p.currency, p.method, p.status, p.provider_ref, p.raw, p.created_at,
-              ${fxCols}, b.ref AS booking_ref, c.name AS customer_name
-         FROM payment p JOIN booking b ON b.id=p.booking_id LEFT JOIN customer c ON c.id=b.customer_id
+              ${fxCols}, b.ref AS booking_ref, ${BOOKING_PERSON_COLS}
+         FROM payment p JOIN booking b ON b.id=p.booking_id ${BOOKING_PERSON_JOINS}
         WHERE p.ref=$1`, [ref]);
     if (!rows[0]) throw notFound('payment');
     return paymentDTO(rows[0]);
@@ -973,8 +975,8 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
     const { rows } = await db.query(
       `SELECT p.ref, p.amount_minor, p.currency, p.method, p.status, p.provider_ref, p.raw, p.created_at,
-              ${fxCols}, ${refundCols}, b.ref AS booking_ref, c.name AS customer_name
-         FROM payment p JOIN booking b ON b.id=p.booking_id LEFT JOIN customer c ON c.id=b.customer_id
+              ${fxCols}, ${refundCols}, b.ref AS booking_ref, ${BOOKING_PERSON_COLS}
+         FROM payment p JOIN booking b ON b.id=p.booking_id ${BOOKING_PERSON_JOINS}
         ${whereSql} ORDER BY p.created_at ASC`, params);
 
     const items = rows.map((r) => {
