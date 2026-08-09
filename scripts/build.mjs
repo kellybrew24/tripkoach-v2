@@ -94,9 +94,24 @@ const APPS = {
     // screens (login/MFA, no shell) keep their natural document scroll. Fixed
     // drawers/modals/toasts are position:fixed (no transformed ancestor) so the
     // shell's overflow:hidden does not clip them.
+    //
+    // TRI-978 #1 (reopen — board: "the table is in a div of specific height,
+    // impossible to see all data"). The scroll region above is correct, but the DS
+    // ships `.tk-shell__main` as a *flex column* (display:flex;flex-direction:column).
+    // Giving a fixed-height flex column overflow-y:auto does NOT let its children
+    // overflow-and-scroll the way a block would — flex first SHRINKS the shrinkable
+    // children (default flex-shrink:1) to fit the viewport. So `.tk-page` was squeezed
+    // from its true ~2000px down to the viewport height, its inner `.tk-tablewrap`
+    // (which is overflow:hidden for its rounded corners) then clipped the full table,
+    // and because nothing overflowed `.tk-shell__main` there was no scrollbar at all —
+    // the bottom rows were simply unreachable. Pin the main column's direct children
+    // (the sticky topbar + the page) at their natural height so the page keeps its full
+    // content height and `.tk-shell__main` actually overflows and scrolls. Verified in
+    // a real browser: 50-row table fully reachable, topbar stays pinned at top:0.
     headCss: `html:has(.tk-shell),body:has(.tk-shell){height:100%;overflow:hidden}
 .tk-shell{height:100vh;overflow:hidden;grid-template-rows:minmax(0,1fr)}
-.tk-shell__main{overflow-y:auto;min-height:0}`,
+.tk-shell__main{overflow-y:auto;min-height:0}
+.tk-shell__main>*{flex-shrink:0}`,
   },
 };
 
