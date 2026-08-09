@@ -127,6 +127,10 @@
         ? null
         : major(d.price, d.priceMinor != null ? d.priceMinor : d.price_minor),
       spotsLeft: d.spotsLeft != null ? d.spotsLeft : d.spots_left,
+      // Track / route this departure belongs to (TRI-992). Null when the tour has no
+      // per-track packages; the tour page groups departures under these headings.
+      packageSlug: d.packageSlug != null ? d.packageSlug : (d.package_slug != null ? d.package_slug : null),
+      packageName: d.packageName != null ? d.packageName : (d.package_name != null ? d.package_name : null),
     };
   }
 

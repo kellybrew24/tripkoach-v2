@@ -17,6 +17,40 @@ function cvt(usd, cur) { return usd == null ? null : (cur === "GHS" ? Math.round
 function money(usd, cur) { return TK_SYM[cur] + cvt(usd, cur).toLocaleString(); }
 function cvtDeps(deps, cur) { return (deps || []).map(d => ({ ...d, price: cvt(d.price, cur) })); }
 
+// Group departures under their track (route) heading (TRI-992). A tour whose
+// departures carry a packageSlug renders one DeparturePicker per track, each under
+// the track name; departures with no track fall under a "Standard" bucket. A tour
+// with a single group (no tracks, or every departure on one track) renders a plain
+// picker with no heading — so a no-track tour shows no empty section. `packages`
+// (t0.packages) drives track ordering + display names when present.
+function GroupedDeparturePicker({ departures, value, onChange, currency, packages, legend }) {
+  const deps = departures || [];
+  const groups = [];
+  const bySlug = new Map();
+  const push = (key, name, d) => {
+    let g = bySlug.get(key);
+    if (!g) { g = { key, name, items: [] }; bySlug.set(key, g); groups.push(g); }
+    g.items.push(d);
+  };
+  // Seed named tracks in package order so headings read Route 1 / Route 2 / Route 3.
+  (packages || []).forEach(p => { const g = { key: p.id, name: p.name, items: [] }; bySlug.set(p.id, g); groups.push(g); });
+  deps.forEach(d => push(d.packageSlug || "__standard", d.packageName || "Standard", d));
+  const nonEmpty = groups.filter(g => g.items.length > 0);
+  if (nonEmpty.length <= 1) {
+    return <DeparturePicker departures={cvtDeps(deps, currency)} value={value} onChange={onChange} currency={currency} legend={legend} />;
+  }
+  return (
+    <fieldset style={{ border: 0, margin: 0, padding: 0 }}>
+      <legend className="tk-label" style={{ marginBottom: "var(--space-3)" }}>{legend}</legend>
+      <div className="tk-stack" style={{ gap: "var(--space-4)" }}>
+        {nonEmpty.map(g => (
+          <DeparturePicker key={g.key} departures={cvtDeps(g.items, currency)} value={value} onChange={onChange} currency={currency} legend={g.name} />
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
 function Stars({ value, size = 15 }) {
   return <span style={{ display: "inline-flex", gap: 1 }} aria-label={value + " out of 5"}>{[1,2,3,4,5].map(i => <Icon key={i} name="star" size={size} style={{ color: i <= Math.round(value) ? "#f5b301" : "var(--border-strong)", fill: i <= Math.round(value) ? "#f5b301" : "transparent" }} />)}</span>;
 }
@@ -662,7 +696,7 @@ function TourWeb({ go, currency, slug }) {
               <Price amount={cvt(t.price, currency)} currency={currency} size="lg" from unit="per person" />
               {t0.packages ? <span className="tk-caption">{t.packageName} package</span> : null}
             </div>
-            <DeparturePicker departures={cvtDeps(t.departures, currency)} value={dep} onChange={setDep} currency={currency} legend="Choose a departure" />
+            <GroupedDeparturePicker departures={t.departures} value={dep} onChange={setDep} currency={currency} packages={t0.packages} legend="Choose a departure" />
             <Button size="lg" block onClick={() => { window.TK_SEL = { tourId: t0.id, apiTourId: t0._apiId, packageId: pkgId, packageName: t.packageName, departureId: dep }; go("checkout"); }}>Reserve my spot</Button>
             <p className="tk-caption" style={{ display: "flex", gap: 6 }}><Icon name="wallet" size={14} />Nothing is charged today. Pay before departure.</p>
           </div></div>

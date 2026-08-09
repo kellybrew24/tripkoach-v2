@@ -209,13 +209,20 @@ function departureDTO(r: any) {
     price: r.price_minor == null ? null : fromMinor(r.price_minor),
     spotsLeft: Math.max(0, Number(r.seats_total) - Number(r.seats_reserved)),
     status: r.status,
+    // Track / route this departure belongs to (TRI-992). Null when the tour has no
+    // per-track packages — the FE renders those under an ungrouped "Standard" bucket.
+    packageSlug: r.package_slug ?? null,
+    packageName: r.package_name ?? null,
   };
 }
 
 async function departuresForTour(db: Db, tourId: string) {
   const { rows } = await db.query(
-    `SELECT id, date_label, time_label, price_minor, seats_total, seats_reserved, status
-     FROM departure WHERE tour_id = $1 ORDER BY depart_on NULLS LAST, created_at`, [tourId]);
+    `SELECT d.id, d.date_label, d.time_label, d.price_minor, d.seats_total, d.seats_reserved, d.status,
+            p.slug AS package_slug, p.name AS package_name
+     FROM departure d
+     LEFT JOIN tour_package p ON p.id = d.package_id
+     WHERE d.tour_id = $1 ORDER BY d.depart_on NULLS LAST, d.created_at`, [tourId]);
   return rows.map(departureDTO);
 }
 
