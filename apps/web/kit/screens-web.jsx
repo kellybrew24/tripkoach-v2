@@ -715,7 +715,11 @@ function TourWeb({ go, currency, slug }) {
         <div style={{ position: "sticky", top: "calc(var(--header-h) + 24px)", display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
           <div className="tk-card" style={{ boxShadow: "var(--elev-3)" }}><div className="tk-card__body" style={{ gap: "var(--space-4)", padding: "var(--space-5)" }}>
             <div className="tk-stack" style={{ gap: 2 }}>
-              <Price amount={cvt(t.price, currency)} currency={currency} size="lg" from unit="per person" />
+              {/* TRI-994: headline must map to the tier for the default party size (1 traveller),
+                  not the tour's base/6+ ("6 or more") tier. `t.price` is the base (cheapest) tier —
+                  showing it here made a solo booker see the biggest-group price. Group pricing table
+                  below still lists every tier; the price recomputes at checkout as the count changes. */}
+              <Price amount={cvt(window.TK_PRICE.perPerson(t, 1), currency)} currency={currency} size="lg" unit="per person" />
               {t0.packages ? <span className="tk-caption">{t.packageName} package</span> : null}
             </div>
             <GroupedDeparturePicker departures={t.departures} value={dep} onChange={setDep} currency={currency} packages={t0.packages} legend="Choose a departure" />
@@ -747,7 +751,9 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
   // checkout opens on step 1 — so it "assumed 4 travellers" with no way to change
   // it. Live now defaults to 2 and renders a working count control on the
   // travellers step (below); flag off keeps the prototype default 4 (byte-identical).
-  const [pax, setPax] = React.useState(() => LIVE_BOOK() ? 2 : 4);
+  // TRI-994: live default is 1 traveller (was 2) — a booking starts as a solo reservation and the
+  // count control lets the guest add companions, recomputing the per-person tier price as they go.
+  const [pax, setPax] = React.useState(() => LIVE_BOOK() ? 1 : 4);
   const [mode, setMode] = React.useState("later");
   // Live-checkout state (inert when the flag is off; hooks always run so order is stable).
   const live = LIVE_BOOK();
