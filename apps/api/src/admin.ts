@@ -1597,7 +1597,7 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
 
     const { rows } = await db.query(
       `WITH cust_bookings AS (
-         SELECT b.id, b.ref, b.created_at, b.total_minor, b.currency, t.title AS tour_title
+         SELECT b.id, b.ref, b.status, b.updated_at, b.created_at, b.total_minor, b.currency, t.title AS tour_title
            FROM booking b JOIN tour t ON t.id = b.tour_id
           WHERE ${bookingWhere}
        )
@@ -1623,6 +1623,15 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
            JOIN cust_bookings cb ON cb.ref = a.target_id AND a.target_type = 'booking'
            LEFT JOIN staff_user su ON su.id = a.actor_id
           WHERE a.action IN ('booking.cancel','booking.reschedule','booking.confirm')
+         UNION ALL
+         -- Fallback cancellation: a booking that's currently cancelled but has NO booking.cancel audit
+         -- row (cancelled outside the audited admin path). Timestamped at the last update so the state
+         -- change still appears on the timeline; the audit branch above wins when both exist.
+         SELECT 'booking_cancelled', cb.updated_at, cb.ref, cb.tour_title, NULL::int, NULL::text, NULL, NULL::jsonb
+           FROM cust_bookings cb
+          WHERE cb.status = 'cancelled'
+            AND NOT EXISTS (SELECT 1 FROM audit_log a2
+                             WHERE a2.target_type = 'booking' AND a2.target_id = cb.ref AND a2.action = 'booking.cancel')
        ) e ORDER BY e.at DESC, e.type`, [acct.id]);
 
     return {
