@@ -70,8 +70,14 @@ function AdminLogin({ go, state }) {
     e.preventDefault();
     if (!LIVE) { go("mfa"); return; }
     const form = e.target;
-    const email = (form.querySelector('input[type="email"]') || {}).value || "";
-    const pwEl = form.querySelector('input[type="password"]') || {};
+    // TRI-990: read by stable id, NOT by input[type]. The DS PasswordInput's
+    // "Show password" toggle flips the input's type from "password" to "text"
+    // when revealed, so a `input[type="password"]` selector returns null and the
+    // password reads as empty — the backend then 400s "email and password are
+    // required" on a fully-filled form. Ids ("a-email"/"a-pw") are stamped onto
+    // the inner inputs by FormField and never change with reveal state.
+    const email = (form.querySelector('#a-email') || {}).value || "";
+    const pwEl = form.querySelector('#a-pw') || {};
     const password = pwEl.value || "";
     const trust = !!(form.querySelector("#a-trust") && form.querySelector("#a-trust").checked);
     // TRI-952: remember the email being authenticated so the MFA screen names the
