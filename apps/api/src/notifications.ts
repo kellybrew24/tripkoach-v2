@@ -25,6 +25,7 @@ import { fromMinor } from './util.ts';
 const PREF_TYPE = {
   booking_confirmed: 'booking_confirmations',
   booking_cancelled: 'urgent_updates',
+  booking_rescheduled: 'urgent_updates',
   payment_failed: 'payment_reminders',
   departure_reminder: 'departure_reminders',
 } as const;
@@ -41,6 +42,8 @@ const CANCEL_REASON_PHRASE: Record<string, string> = {
 export interface NotificationService {
   bookingConfirmed(ref: string): Promise<SendEmailResult | null>;
   bookingCancelled(ref: string, opts?: { reason?: string | null }): Promise<SendEmailResult | null>;
+  /** Admin moved this booking to a new departure. `previousDepartureLabel` is the old date (booking already carries the new one). */
+  bookingRescheduled(ref: string, opts?: { previousDepartureLabel?: string | null }): Promise<SendEmailResult | null>;
   paymentFailed(ref: string): Promise<SendEmailResult | null>;
   /** Daily cron: email a departure reminder to every paid booking departing `daysBefore` days out. */
   sendDepartureReminders(opts?: { daysBefore?: number; now?: Date; log?: (m: string) => void }):
@@ -181,6 +184,23 @@ export function createNotificationService(
     }
   }
 
+  async function bookingRescheduled(
+    ref: string, opts: { previousDepartureLabel?: string | null } = {},
+  ): Promise<SendEmailResult | null> {
+    try {
+      const ctx = await loadCtx(ref); // ctx.departureLabel is the NEW departure (booking already moved)
+      if (!ctx) return null;
+      return await dispatch(ctx, 'booking_rescheduled', 'booking_rescheduled', {
+        firstName: firstName(ctx.leadName), ref: ctx.ref, tourTitle: ctx.tourTitle,
+        previousDepartureLabel: opts.previousDepartureLabel || '—',
+        departureLabel: ctx.departureLabel, travellers: ctx.partySize, manageUrl: manageUrl(ctx.ref),
+      }, baseLog);
+    } catch (e) {
+      baseLog(`[notify] bookingRescheduled ${ref} failed (swallowed): ${(e as Error).message}`);
+      return null;
+    }
+  }
+
   async function paymentFailed(ref: string): Promise<SendEmailResult | null> {
     try {
       const ctx = await loadCtx(ref);
@@ -247,5 +267,5 @@ export function createNotificationService(
     return out;
   }
 
-  return { bookingConfirmed, bookingCancelled, paymentFailed, sendDepartureReminders };
+  return { bookingConfirmed, bookingCancelled, bookingRescheduled, paymentFailed, sendDepartureReminders };
 }

@@ -335,6 +335,8 @@
     getBooking: function (ref) { return req("GET", "/bookings/" + encodeURIComponent(ref)); },
     confirmBooking: function (ref) { return req("POST", "/bookings/" + encodeURIComponent(ref) + "/confirm"); },
     cancelBooking: function (ref, reason) { return req("POST", "/bookings/" + encodeURIComponent(ref) + "/cancel", { reason: reason }); },
+    // TRI-970: move a booking to another departure of the same tour (availability-checked server-side).
+    rescheduleBooking: function (ref, targetDepartureId, opts) { return req("POST", "/bookings/" + encodeURIComponent(ref) + "/reschedule", Object.assign({ targetDepartureId: targetDepartureId }, opts || {})); },
     // payments
     listPayments: function () { return req("GET", "/payments"); },
     // TRI-897: real Paystack refund (was a flag-only stub that hit a non-existent

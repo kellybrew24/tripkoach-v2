@@ -484,6 +484,54 @@ console.log('\n[admin booking cancel releases seats]');
   ok('audit_log row written for booking.cancel', audits >= 1, `got ${audits}`);
 }
 
+console.log('\n[admin reschedule — move a paid booking to another departure (TRI-970)]');
+{
+  // Two scheduled departures of the same tour: source (paid booking sits here) + a pricier target.
+  const src = (await db.query(
+    `INSERT INTO departure (tour_id, date_label, time_label, price_minor, currency, seats_total, seats_reserved, status)
+     VALUES ($1, 'Src Departure', '09:00', 10000, 'USD', 5, 2, 'scheduled') RETURNING id`, [accraTourId])).rows[0];
+  const tgt = (await db.query(
+    `INSERT INTO departure (tour_id, date_label, time_label, price_minor, currency, seats_total, seats_reserved, status)
+     VALUES ($1, 'Tgt Departure', '14:00', 12000, 'USD', 5, 0, 'scheduled') RETURNING id`, [accraTourId])).rows[0];
+  const full = (await db.query(
+    `INSERT INTO departure (tour_id, date_label, price_minor, currency, seats_total, seats_reserved, status)
+     VALUES ($1, 'Full Departure', 10000, 'USD', 2, 2, 'scheduled') RETURNING id`, [accraTourId])).rows[0];
+  const otherTour = (await db.query(`SELECT id FROM tour WHERE slug <> 'accra-city-tour' AND published LIMIT 1`)).rows[0];
+  const foreign = otherTour ? (await db.query(
+    `INSERT INTO departure (tour_id, date_label, price_minor, currency, seats_total, seats_reserved, status)
+     VALUES ($1, 'Foreign Departure', 10000, 'USD', 5, 0, 'scheduled') RETURNING id`, [otherTour.id])).rows[0] : null;
+  await db.query(
+    `INSERT INTO booking (ref, tour_id, departure_id, party_size, unit_price_minor, total_minor, currency, status, payment_state)
+     VALUES ('TK-RESCH1', $1, $2, 2, 10000, 20000, 'USD', 'confirmed', 'paid')`, [accraTourId, src.id]);
+
+  // Guards
+  ok('reschedule to different tour → 409', (await call('POST', '/api/admin/bookings/TK-RESCH1/reschedule', { cookie: adminCookie, payload: { targetDepartureId: foreign ? foreign.id : '00000000-0000-0000-0000-000000000000' } })).status === 409 || !foreign);
+  ok('reschedule to full departure → 409 (no room)', (await call('POST', '/api/admin/bookings/TK-RESCH1/reschedule', { cookie: adminCookie, payload: { targetDepartureId: full.id } })).status === 409);
+  ok('reschedule to same departure → 409', (await call('POST', '/api/admin/bookings/TK-RESCH1/reschedule', { cookie: adminCookie, payload: { targetDepartureId: src.id } })).status === 409);
+  const vlogin = await call('POST', '/api/admin/auth/login', { payload: { email: 'viewer@tripkoach.com', password: 'Just-Look!' } });
+  const vcookie = vlogin.cookies.find((c) => c.name === COOKIE)?.value ?? '';
+  ok('viewer reschedule → 403 (missing bookings.manage)', (await call('POST', '/api/admin/bookings/TK-RESCH1/reschedule', { cookie: vcookie, payload: { targetDepartureId: tgt.id } })).status === 403);
+
+  // Happy path
+  const move = await call('POST', '/api/admin/bookings/TK-RESCH1/reschedule', { cookie: adminCookie, payload: { targetDepartureId: tgt.id, notify: false } });
+  ok('reschedule → 200', move.status === 200, JSON.stringify(move.body));
+  ok('booking now points at target departure date', /Tgt Departure/.test(move.body.date || ''), JSON.stringify(move.body.date));
+  ok('amount preserved (total unchanged $200)', move.body.total === 200, JSON.stringify(move.body.total));
+  ok('price delta reported (+$40 = (120-100)×2, amount kept)', move.body.priceDelta === 40, JSON.stringify(move.body.priceDelta));
+  const sSeats = Number((await db.query(`SELECT seats_reserved FROM departure WHERE id=$1`, [src.id])).rows[0].seats_reserved);
+  const tSeats = Number((await db.query(`SELECT seats_reserved FROM departure WHERE id=$1`, [tgt.id])).rows[0].seats_reserved);
+  ok('source seats released to 0', sSeats === 0, `got ${sSeats}`);
+  ok('target seats reserved 2', tSeats === 2, `got ${tSeats}`);
+  const dep = (await db.query(`SELECT departure_id FROM booking WHERE ref='TK-RESCH1'`)).rows[0].departure_id;
+  ok('booking.departure_id updated to target', dep === tgt.id);
+  const ra = Number((await db.query(`SELECT COUNT(*)::int AS n FROM audit_log WHERE action='booking.reschedule'`)).rows[0].n);
+  ok('audit_log row written for booking.reschedule', ra >= 1, `got ${ra}`);
+
+  // Cannot reschedule a cancelled booking
+  await db.query(`UPDATE booking SET status='cancelled' WHERE ref='TK-RESCH1'`);
+  ok('reschedule cancelled booking → 409', (await call('POST', '/api/admin/bookings/TK-RESCH1/reschedule', { cookie: adminCookie, payload: { targetDepartureId: src.id } })).status === 409);
+}
+
 console.log('\n[admin payments view + REAL refund execution (TRI-897)]');
 {
   // Attach a paid payment to the cancelled smoke booking so the payment views have a row to return.

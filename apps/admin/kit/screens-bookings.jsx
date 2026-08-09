@@ -1,5 +1,5 @@
 const NS = window.TripKoachDesignSystem_c9e4af;
-const { DataTable, FilterBar, Drawer, AuditTimeline, StatusBadge, Badge, Button, IconButton, Icon, Price, Modal, Alert, SearchField, Tabs, FormField, Select, Textarea, EmptyState, Toast } = NS;
+const { DataTable, FilterBar, Drawer, AuditTimeline, StatusBadge, Badge, Button, IconButton, Icon, Price, Modal, Alert, SearchField, Tabs, FormField, Select, Textarea, Switch, EmptyState, Toast } = NS;
 
 function paymentBadge(p) {
   const map = { paid: "paid", unpaid: "pending", refunded: "refunded", failed: "failed" };
@@ -106,9 +106,23 @@ function BookingDrawer({ booking, onClose }) {
   const [confirmCancel, setConfirmCancel] = React.useState(false);
   const [reason, setReason] = React.useState("");
   const [toast, setToast] = React.useState(null);
-  React.useEffect(() => { setStatus(null); setConfirmCancel(false); setReason(""); }, [booking && booking.ref]);
+  // TRI-970 reschedule state
+  const [moveOpen, setMoveOpen] = React.useState(false);
+  const [targetDep, setTargetDep] = React.useState("");
+  const [notifyMove, setNotifyMove] = React.useState(true);
+  const [movedDate, setMovedDate] = React.useState(null);
+  React.useEffect(() => { setStatus(null); setConfirmCancel(false); setReason(""); setMoveOpen(false); setTargetDep(""); setNotifyMove(true); setMovedDate(null); }, [booking && booking.ref]);
   if (!booking) return null;
   const cur = status || booking.status;
+  const shownDate = movedDate || booking.date;
+
+  // Candidate target departures: same tour, scheduled, room for the party, not the current one.
+  const A = window.TK_ADMIN || {};
+  const moveOptions = (A.departures || [])
+    .filter((d) => d.tourId === booking.tourId && d.id !== booking.departureId
+      && d.status === "scheduled" && Number(d.spotsLeft) >= Number(booking.travellers))
+    .map((d) => ({ value: d.id, label: (d.date || "Departure") + (d.time ? " · " + d.time : "") + " — " + d.spotsLeft + " left" }));
+  const canReschedule = cur !== "cancelled" && cur !== "completed" && cur !== "failed";
 
   const events = [
     { type: "created", text: "Booking created via website", actor: "System", time: booking.created + ", 09:14" },
@@ -118,11 +132,18 @@ function BookingDrawer({ booking, onClose }) {
     { type: "email", text: "Confirmation email sent to " + booking.customer, actor: "System", time: booking.created + ", 09:16" },
   ];
 
+  const moveBtn = canReschedule
+    ? <Button variant="secondary" iconStart="calendar-days" disabled={moveOptions.length === 0}
+        title={moveOptions.length === 0 ? "No other scheduled departure with room on this tour" : undefined}
+        onClick={() => setMoveOpen(true)}>Move departure</Button>
+    : null;
   const footer = cur === "pending"
-    ? <><Button variant="danger" onClick={() => setConfirmCancel(true)}>Cancel booking</Button><Button style={{ marginInlineStart: "auto" }} iconStart="check" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.confirmBooking(booking.ref), () => { setStatus("confirmed"); setToast("Booking " + booking.ref + " confirmed"); })}>Confirm booking</Button></>
+    ? <>{moveBtn}<Button variant="danger" onClick={() => setConfirmCancel(true)}>Cancel booking</Button><Button style={{ marginInlineStart: "auto" }} iconStart="check" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.confirmBooking(booking.ref), () => { setStatus("confirmed"); setToast("Booking " + booking.ref + " confirmed"); })}>Confirm booking</Button></>
     : cur === "confirmed"
-      ? <><Button variant="secondary" iconStart="mail" onClick={() => window.tkToast("Confirmation resent")}>Resend confirmation</Button><Button variant="danger" style={{ marginInlineStart: "auto" }} onClick={() => setConfirmCancel(true)}>Cancel booking</Button></>
-      : <Button variant="secondary" style={{ marginInlineStart: "auto" }} onClick={onClose}>Close</Button>;
+      ? <>{moveBtn}<Button variant="secondary" iconStart="mail" onClick={() => window.tkToast("Confirmation resent")}>Resend confirmation</Button><Button variant="danger" style={{ marginInlineStart: "auto" }} onClick={() => setConfirmCancel(true)}>Cancel booking</Button></>
+      : (canReschedule
+        ? <>{moveBtn}<Button variant="secondary" style={{ marginInlineStart: "auto" }} onClick={onClose}>Close</Button></>
+        : <Button variant="secondary" style={{ marginInlineStart: "auto" }} onClick={onClose}>Close</Button>);
 
   return (
     <>
@@ -135,7 +156,7 @@ function BookingDrawer({ booking, onClose }) {
         <section>
           <h3 className="tk-h6" style={{ marginBottom: 8 }}>Trip</h3>
           <div className="tk-summary" style={{ padding: 0 }}>
-            {[["Tour", booking.tour], ["Region", booking.region], ["Departure", booking.date], ["Travellers", booking.travellers], ["Reference", booking.ref]].map(([k, v]) => (
+            {[["Tour", booking.tour], ["Region", booking.region], ["Departure", shownDate], ["Travellers", booking.travellers], ["Reference", booking.ref]].map(([k, v]) => (
               <div className="tk-summary__line" key={k}><span>{k}</span><span style={{ fontWeight: 600, color: "var(--text-strong)" }}>{v}</span></div>
             ))}
           </div>
@@ -161,6 +182,31 @@ function BookingDrawer({ booking, onClose }) {
           <Select value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Choose a reason"
             options={[{ value: "Customer request", label: "Customer request" }, { value: "Non-payment", label: "Non-payment" }, { value: "Departure cancelled", label: "Departure cancelled" }, { value: "Duplicate", label: "Duplicate booking" }]} />
         </FormField>
+      </Modal>
+
+      <Modal open={moveOpen} title={"Move booking " + booking.ref + " to another departure"}
+        description={"Choose a scheduled departure of " + booking.tour + " with room for " + booking.travellers + " traveller(s). The payment carries over — the amount is unchanged."}
+        onClose={() => setMoveOpen(false)}
+        actions={<><Button variant="secondary" onClick={() => setMoveOpen(false)}>Cancel</Button><Button iconStart="calendar-days" disabled={!targetDep} onClick={() => {
+          const chosen = moveOptions.find((o) => o.value === targetDep);
+          window.TK_ADMIN_ACT(
+            () => window.TK_ADMIN_API.rescheduleBooking(booking.ref, targetDep, { notify: notifyMove }),
+            (res) => {
+              const newDate = (res && (res.newDeparture || res.date)) || (chosen ? chosen.label.split(" — ")[0] : booking.date);
+              setMovedDate(newDate);
+              booking.date = newDate; booking.departureId = targetDep; // optimistic local sync
+              setMoveOpen(false);
+              setToast("Booking " + booking.ref + " moved to " + newDate + (notifyMove ? " · traveller emailed" : ""));
+            });
+        }}>Move booking</Button></>}>
+        <FormField id="move-target" label="New departure" required>
+          <Select value={targetDep} onChange={(e) => setTargetDep(e.target.value)}
+            placeholder={moveOptions.length ? "Choose a departure" : "No eligible departures"}
+            options={moveOptions} />
+        </FormField>
+        <div style={{ marginTop: 12 }}>
+          <Switch id="move-notify" label="Email the traveller about the new date" checked={notifyMove} onChange={() => setNotifyMove(!notifyMove)} />
+        </div>
       </Modal>
 
       {toast && <div style={{ position: "fixed", bottom: 20, insetInline: 0, display: "flex", justifyContent: "center", zIndex: 800 }}><Toast tone="success" onClose={() => setToast(null)}>{toast}</Toast></div>}

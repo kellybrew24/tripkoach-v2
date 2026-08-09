@@ -217,6 +217,8 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
     admin.get('/bookings/:ref', perm('bookings.view'), async (req) => svc.getBooking((req.params as any).ref));
     admin.post('/bookings/:ref/confirm', perm('bookings.manage'), async (req) => svc.confirmBooking((req.params as any).ref, actorOf(req)));
     admin.post('/bookings/:ref/cancel', perm('bookings.cancel'), async (req) => svc.cancelBooking((req.params as any).ref, body(req), actorOf(req)));
+    // TRI-970 · Move a paid/held booking to another departure of the same tour (availability-checked, audited).
+    admin.post('/bookings/:ref/reschedule', perm('bookings.manage'), async (req) => svc.rescheduleBooking((req.params as any).ref, body(req), actorOf(req)));
 
     // ── Payments (view + REAL refund + manual settlement) ──────────────────────
     admin.get('/payments', perm('bookings.view'), async (req) => {

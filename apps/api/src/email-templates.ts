@@ -249,6 +249,57 @@ Book another date: {{manageUrl}}
 TripKoach Ghana Ltd · Accra`,
   },
 
+  // booking-rescheduled (TRI-970) — admin moved the booking to a new departure. Payment/amount unchanged.
+  // {{previousDepartureLabel}} = old date; {{departureLabel}} = new date.
+  booking_rescheduled: {
+    subject: 'Your TripKoach booking {{ref}} has a new date',
+    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Booking {{ref}} rescheduled</title>
+<style>
+body{margin:0;padding:24px 0;background:#F1EDE6;font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#2B2724}
+table{border-collapse:collapse}.w{width:600px;max-width:100%}
+a.btn{display:block;background:#1E1C1A;color:#FFFFFF;text-decoration:none;font-weight:700;font-size:16px;padding:15px 20px;border-radius:10px;text-align:center}
+.mut{color:#6F675E;font-size:13px;line-height:1.5}
+@media (max-width:620px){.w{width:100%!important}.pad{padding-left:20px!important;padding-right:20px!important}}
+</style></head>
+<body>
+<table role="presentation" align="center" class="w" style="background:#FFFFFF;border-radius:14px;overflow:hidden">
+  <tr><td style="background:#1E1C1A;padding:20px 28px;color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Booking rescheduled</td></tr>
+  <tr><td class="pad" style="padding:32px 28px 8px">
+    <h1 style="margin:0 0 8px;font-size:26px;line-height:1.2;letter-spacing:-.02em;color:#1E1C1A">New date for your {{tourTitle}}, {{firstName}}</h1>
+    <p style="margin:0;font-size:16px;line-height:1.55">We’ve moved your {{travellers}} spot(s) to a new departure. Your booking and payment carry over — nothing else to do.</p>
+  </td></tr>
+  <tr><td class="pad" style="padding:20px 28px 0">
+    <table role="presentation" width="100%" style="border:1px solid #E4DFD6;border-radius:10px">
+      <tr><td style="padding:14px 16px;border-bottom:1px solid #F1EDE6">
+        <div style="font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:#6F675E;font-weight:700">Booking reference</div>
+        <div style="font-size:20px;font-weight:800;letter-spacing:.06em;color:#1E1C1A;margin-top:2px">{{ref}}</div>
+      </td></tr>
+      <tr><td style="padding:11px 16px;border-bottom:1px solid #F1EDE6;font-size:14px"><span style="color:#6F675E">Tour</span><span style="float:right;font-weight:600;color:#1E1C1A;text-align:right">{{tourTitle}}</span></td></tr>
+      <tr><td style="padding:11px 16px;border-bottom:1px solid #F1EDE6;font-size:14px"><span style="color:#6F675E">Was</span><span style="float:right;color:#6F675E;text-decoration:line-through;text-align:right">{{previousDepartureLabel}}</span></td></tr>
+      <tr><td style="padding:11px 16px;font-size:14px"><span style="color:#6F675E">New departure</span><span style="float:right;font-weight:700;color:#1E1C1A;text-align:right">{{departureLabel}}</span></td></tr>
+    </table>
+  </td></tr>
+  <tr><td class="pad" style="padding:22px 28px 0"><a class="btn" href="{{manageUrl}}">View this booking</a></td></tr>
+  <tr><td class="pad" style="padding:14px 28px 0"><p class="mut" style="margin:0">If this new date doesn’t work for you, just reply to this email and our team will help.</p></td></tr>
+  <tr><td style="background:#1E1C1A;padding:20px 28px"><p style="margin:0;color:#A8A096;font-size:12px;line-height:1.6">TripKoach Ghana Ltd · Accra</p></td></tr>
+</table>
+</body></html>`,
+    text: `New date for your {{tourTitle}}, {{firstName}}.
+
+We’ve moved your {{travellers}} spot(s) to a new departure. Your booking and payment carry over — nothing else to do.
+
+Booking reference: {{ref}}
+Tour: {{tourTitle}}
+Was: {{previousDepartureLabel}}
+New departure: {{departureLabel}}
+
+If this new date doesn’t work for you, just reply to this email and our team will help.
+View this booking: {{manageUrl}}
+
+TripKoach Ghana Ltd · Accra`,
+  },
+
   // payment-failed — a Paystack charge failed/abandoned. Nudge to retry; the seat hold may still be live.
   payment_failed: {
     subject: 'Payment didn’t go through for booking {{ref}}',

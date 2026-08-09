@@ -704,6 +704,87 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     return { ...(await getBooking(ref)), seatsReleased: result.seatsReleased };
   }
 
+  // TRI-970 · Reschedule — move a seat-holding booking to another departure of the SAME tour, atomically,
+  // preserving payment. Same guarded-increment/-release inventory dance as create + cancel; the DB
+  // no-oversell CHECK is the final seatbelt. v1 policy: KEEP the paid amount (no re-charge / total change);
+  // the target's list-price delta is computed and logged for the operator, not applied. Because we restrict
+  // to the same tour + same party size + same package, the only price mover between two departures is a
+  // per-departure `price_minor` override — tier/base pricing is identical — so the delta is a best-effort
+  // (override-vs-paid-unit) informational flag. A real re-charge/refund is a manual payments follow-up.
+  async function rescheduleBooking(ref: string, body: unknown, actor: Actor) {
+    if (!isPlainObject(body)) throw new ValidationError('body must be an object');
+    const targetDepartureId = reqStr(body, 'targetDepartureId', 200);
+    const notify = optBool(body, 'notify') ?? false;
+    const reason = optStr(body, 'reason', 500) ?? null;
+
+    const result = await db.tx(async (q) => {
+      const cur = (await q.query(`SELECT * FROM booking WHERE ref = $1 FOR UPDATE`, [ref])).rows[0];
+      if (!cur) throw notFound('booking');
+      if (!['reserved', 'pending', 'confirmed'].includes(cur.status)) {
+        throw conflict(`cannot reschedule a booking in "${cur.status}" state`);
+      }
+      if (cur.departure_id === targetDepartureId) throw conflict('booking is already on that departure');
+
+      // Load + lock both departures. Source is loaded for its label (audit) and to release seats.
+      const src = (await q.query(
+        `SELECT id, date_label, time_label FROM departure WHERE id = $1 FOR UPDATE`, [cur.departure_id])).rows[0];
+      const tgt = (await q.query(
+        `SELECT id, tour_id, date_label, time_label, price_minor, seats_total, seats_reserved, status
+           FROM departure WHERE id = $1 FOR UPDATE`, [targetDepartureId])).rows[0];
+      if (!tgt) throw notFound('target departure');
+      if (tgt.tour_id !== cur.tour_id) throw conflict('target departure belongs to a different tour');
+      if (tgt.status !== 'scheduled') throw conflict(`target departure is ${tgt.status}`);
+
+      const party = Number(cur.party_size);
+      // Atomic guarded increment on the target — the real concurrency gate (mirrors booking create).
+      const reserve = await q.query<{ seats_reserved: number }>(
+        `UPDATE departure
+            SET seats_reserved = seats_reserved + $2, updated_at = now()
+          WHERE id = $1 AND status = 'scheduled' AND seats_reserved + $2 <= seats_total
+        RETURNING seats_reserved, seats_total`, [tgt.id, party]);
+      if (reserve.rowCount === 0) {
+        const left = Math.max(0, Number(tgt.seats_total) - Number(tgt.seats_reserved));
+        throw conflict(`only ${left} seat(s) left on the target departure`);
+      }
+      // Release the seats held on the source (guarded so we never drive below 0).
+      await q.query(
+        `UPDATE departure SET seats_reserved = GREATEST(0, seats_reserved - $1), updated_at = now() WHERE id = $2`,
+        [party, cur.departure_id]);
+
+      // Move the booking. Amount is intentionally UNCHANGED (v1 keep-amount policy).
+      await q.query(`UPDATE booking SET departure_id = $1, updated_at = now() WHERE id = $2`, [tgt.id, cur.id]);
+
+      // Best-effort list-price delta (see the policy note above). Only a target override moves it.
+      const newUnitMinor = tgt.price_minor != null ? Number(tgt.price_minor) : Number(cur.unit_price_minor);
+      const priceDeltaMinor = (newUnitMinor - Number(cur.unit_price_minor)) * party;
+      const label = (r: any) => [r?.date_label, r?.time_label].filter(Boolean).join(', ');
+      return {
+        before: cur, party,
+        srcLabel: label(src), tgtLabel: label(tgt),
+        priceDeltaMinor, newUnitMinor,
+      };
+    });
+
+    await audit(db, {
+      actorId: actor.id, action: 'booking.reschedule', targetType: 'booking', targetId: ref,
+      before: { departureId: result.before.departure_id, date: result.srcLabel },
+      after: {
+        departureId: targetDepartureId, date: result.tgtLabel, seatsMoved: result.party,
+        priceDeltaMinor: result.priceDeltaMinor, keptAmount: true, reason,
+      },
+      ip: actor.ip,
+    });
+    // Notify the traveller of the new date (fire-and-forget; never throws). Only when the operator opts in.
+    if (notify && notifier) await notifier.bookingRescheduled(ref, { previousDepartureLabel: result.srcLabel });
+    return {
+      ...(await getBooking(ref)),
+      seatsMoved: result.party,
+      priceDelta: fromMinor(result.priceDeltaMinor),
+      newDepartureListPrice: fromMinor(result.newUnitMinor),
+      previousDeparture: result.srcLabel, newDeparture: result.tgtLabel,
+    };
+  }
+
   // ── Payments (admin views + refund FLAG) ────────────────────────────────────
   async function paymentSelect() {
     const fx = await hasFxColumns(db);
@@ -1726,7 +1807,7 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     listRegions, createRegion, updateRegion, deleteRegion,
     listTours, getTour, createTour, updateTour, setTourPublished, deleteTour,
     listDepartures, getDeparture, createDeparture, updateDeparture, cancelDeparture,
-    listBookings, getBooking, confirmBooking, cancelBooking,
+    listBookings, getBooking, confirmBooking, cancelBooking, rescheduleBooking,
     listPayments, getPayment, executeRefund, markPaid, reconciliationReport,
     listReviews, moderateReview, replyReview,
     listGuides, getGuide, createGuide, updateGuide, deleteGuide,
