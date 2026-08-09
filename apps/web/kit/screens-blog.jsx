@@ -11,6 +11,31 @@ function WhatsAppGlyph({ size = 18 }) {
   );
 }
 
+// X (formerly Twitter) brand glyph — the DS icon set still ships the legacy
+// "twitter" bird, so we inline the current X mark here (DS bundle is vendored
+// verbatim and must not be edited). Filled, 24 viewBox.
+function XGlyph({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false" style={{ display: "block" }}>
+      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24h-6.66l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231 5.45-6.231zm-1.161 17.52h1.833L7.084 4.126H5.117L17.083 19.77z" />
+    </svg>
+  );
+}
+
+// Data-driven share targets — every current and future post gets these with no
+// per-post editing. Deep links open the native app on mobile / web on desktop.
+function shareTargets(title, url) {
+  const t = encodeURIComponent(title);
+  const u = encodeURIComponent(url);
+  const tu = encodeURIComponent(title + " — " + url);
+  return [
+    { key: "whatsapp", label: "Share on WhatsApp", color: "#25D366", glyph: <WhatsAppGlyph size={17} />, href: "https://wa.me/?text=" + tu },
+    { key: "x", label: "Share on X", color: "var(--text-strong)", glyph: <XGlyph size={15} />, href: "https://twitter.com/intent/tweet?text=" + t + "&url=" + u },
+    { key: "facebook", label: "Share on Facebook", color: "#1877F2", glyph: <Icon name="facebook" size={16} />, href: "https://www.facebook.com/sharer/sharer.php?u=" + u },
+    { key: "linkedin", label: "Share on LinkedIn", color: "#0A66C2", glyph: <Icon name="linkedin" size={16} />, href: "https://www.linkedin.com/sharing/share-offsite/?url=" + u },
+  ];
+}
+
 const BLOG_GRADS = ["linear-gradient(145deg,#c67d2a 0%,#7a481c 100%)", "linear-gradient(145deg,#3f7a63 0%,#244b3f 100%)", "linear-gradient(145deg,#5a7d8f 0%,#2f4b58 100%)", "linear-gradient(145deg,#a8562f 0%,#5e2c18 100%)"];
 function hashIdx(s, n) { let h = 0; for (let i = 0; i < (s || "").length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return h % n; }
 function BlogImg({ src, alt, seed, overlay }) {
@@ -82,6 +107,13 @@ function BlogPost({ go, slug }) {
   const p = posts.find(x => x.slug === slug) || posts[0];
   const related = posts.filter(x => x.slug !== p.slug).slice(0, 3);
   const url = "https://tripkoach.com/blog/" + p.slug + "/";
+  const share = shareTargets(p.title, url);
+  const [copied, setCopied] = React.useState(false);
+  const copyLink = () => {
+    const done = () => { setCopied(true); window.setTimeout(() => setCopied(false), 1800); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(done).catch(done);
+    else done();
+  };
   return (
     <div>
       <header style={{ position: "relative", overflow: "hidden" }}>
@@ -127,18 +159,20 @@ function BlogPost({ go, slug }) {
 
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: "var(--space-8)", paddingTop: "var(--space-5)", borderTop: "1px solid var(--border-subtle)" }}>
           <span className="tk-caption" style={{ fontWeight: 700 }}>Share</span>
-          <a
-            href={"https://wa.me/?text=" + encodeURIComponent(p.title + " — " + url)}
-            target="_blank" rel="noopener noreferrer"
-            aria-label="Share on WhatsApp" title="Share on WhatsApp"
-            style={{ width: 38, height: 38, borderRadius: "50%", border: "1px solid var(--border-default)", display: "grid", placeItems: "center", color: "#25D366", cursor: "pointer", textDecoration: "none" }}>
-            <WhatsAppGlyph size={17} />
-          </a>
-          {["twitter", "facebook", "linkedin", "link"].map(ic => (
-            <span key={ic} style={{ width: 38, height: 38, borderRadius: "50%", border: "1px solid var(--border-default)", display: "grid", placeItems: "center", color: "var(--text-muted)", cursor: "pointer" }}>
-              <Icon name={ic === "twitter" ? "twitter" : ic === "facebook" ? "facebook" : ic === "linkedin" ? "linkedin" : "link"} size={16} />
-            </span>
+          {share.map(s => (
+            <a key={s.key}
+              href={s.href}
+              target="_blank" rel="noopener noreferrer"
+              aria-label={s.label} title={s.label}
+              style={{ width: 38, height: 38, borderRadius: "50%", border: "1px solid var(--border-default)", display: "grid", placeItems: "center", color: s.color, cursor: "pointer", textDecoration: "none" }}>
+              {s.glyph}
+            </a>
           ))}
+          <button type="button" onClick={copyLink}
+            aria-label={copied ? "Link copied" : "Copy link"} title={copied ? "Link copied" : "Copy link"}
+            style={{ width: 38, height: 38, borderRadius: "50%", border: "1px solid var(--border-default)", display: "grid", placeItems: "center", color: copied ? "var(--success-fg)" : "var(--text-muted)", cursor: "pointer", background: "transparent" }}>
+            <Icon name={copied ? "check" : "link"} size={16} />
+          </button>
         </div>
       </article>
 
