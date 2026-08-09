@@ -329,6 +329,9 @@
     // departures / schedules
     listDepartures: function () { return req("GET", "/departures"); },
     createDeparture: function (v) { return req("POST", "/departures", v); },
+    // TRI-974: patch a departure (capacity/price/time/status/guide/notes). Server rejects
+    // capacity below already-reserved seats with a 409 (no oversell / no negative availability).
+    updateDeparture: function (id, patch) { return req("PATCH", "/departures/" + encodeURIComponent(id), patch || {}); },
     cancelDeparture: function (id, reason) { return req("POST", "/departures/" + encodeURIComponent(id) + "/cancel", { reason: reason }); },
     // bookings
     listBookings: function () { return req("GET", "/bookings"); },

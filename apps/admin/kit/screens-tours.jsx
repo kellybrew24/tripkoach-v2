@@ -268,6 +268,8 @@ function DeparturesAdmin({ go, state, setState }) {
   let rows = A.departures;
   if (scoped) rows = rows.filter(d => d.tourId === state.editId);
   const [cancelDep, setCancelDep] = React.useState(null);
+  const [capDep, setCapDep] = React.useState(null);   // TRI-974: departure whose capacity is being edited
+  const [capVal, setCapVal] = React.useState(0);
   const [endDep, setEndDep] = React.useState(null);
   const [ended, setEnded] = React.useState({});
   const [toast, setToast] = React.useState(null);
@@ -329,7 +331,7 @@ function DeparturesAdmin({ go, state, setState }) {
           rowActions={(r) => (
             <span onClick={(e) => e.stopPropagation()} style={{ display: "flex", gap: 2 }}>
               {!ended[r.id] && r.booked > 0 && <IconButton icon="circle-check-big" label="End departure and request reviews" variant="ghost" size="sm" onClick={() => setEndDep(r)} />}
-              <IconButton icon="sliders-horizontal" label="Adjust capacity" variant="ghost" size="sm" onClick={() => window.tkToast("Capacity editor — open the departure to adjust")} />
+              <IconButton icon="sliders-horizontal" label="Adjust capacity" variant="ghost" size="sm" onClick={() => { setCapDep(r); setCapVal(r.capacity); }} />
               <IconButton icon="x" label="Cancel departure" variant="ghost" size="sm" onClick={() => setCancelDep(r)} />
             </span>)}
           empty={<EmptyState icon="calendar-days" title="No departures scheduled" body="Add a departure so travellers can book this tour." action={<Button iconStart="plus" onClick={openAdd}>Add departure</Button>} />} />
@@ -379,6 +381,36 @@ function DeparturesAdmin({ go, state, setState }) {
               {endDep.booked > 5 && <span className="tk-caption">+ {endDep.booked - 5} more traveller{endDep.booked - 5 === 1 ? "" : "s"}</span>}
             </div>
           </div>
+        </div>}
+      </Modal>
+      {/* TRI-974 · Adjust a departure's seat capacity. Saves via PATCH /departures/:id; the
+          server refuses a capacity below already-booked seats and the error surfaces as a toast. */}
+      <Modal open={!!capDep} title="Adjust capacity"
+        description={capDep ? capDep.tour + " on " + capDep.date + (capDep.time ? " · " + capDep.time : "") : ""}
+        onClose={() => setCapDep(null)}
+        actions={<><Button variant="secondary" onClick={() => setCapDep(null)}>Cancel</Button>
+          <Button iconStart="check" disabled={!capDep || !(+capVal >= Math.max(1, capDep.booked)) || +capVal === capDep.capacity} onClick={() => {
+            const dep = capDep, next = +capVal;
+            window.TK_ADMIN_ACT(
+              () => window.TK_ADMIN_API.updateDeparture(dep.id, { capacity: next }),
+              (res) => {
+                const cap = (res && res.capacity != null) ? res.capacity : next;
+                dep.capacity = cap;
+                dep.booked = (res && res.booked != null) ? res.booked : dep.booked;
+                dep.spotsLeft = (res && res.spotsLeft != null) ? res.spotsLeft : Math.max(0, cap - dep.booked);
+                setCapDep(null);
+                setToast("Capacity updated — " + dep.tour + " on " + dep.date + " now seats " + cap + " (" + dep.spotsLeft + " left)");
+              });
+          }}>Save capacity</Button></>}>
+        {capDep && <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <FormField id="cap-edit" label="Seat capacity" hint={capDep.booked > 0 ? "Can't go below " + capDep.booked + " already-booked seat" + (capDep.booked === 1 ? "" : "s") + "." : "Max travellers on this departure."}>
+            <Input id="cap-edit" type="number" min={Math.max(1, capDep.booked)} value={capVal} onChange={(e) => setCapVal(e.target.value)} />
+          </FormField>
+          <Alert tone={(+capVal >= Math.max(1, capDep.booked)) ? "info" : "warning"} title={(+capVal >= Math.max(1, capDep.booked)) ? "Availability preview" : "Below booked seats"}>
+            {(+capVal >= Math.max(1, capDep.booked))
+              ? capDep.booked + " booked · " + Math.max(0, (+capVal) - capDep.booked) + " spot" + (Math.max(0, (+capVal) - capDep.booked) === 1 ? "" : "s") + " left after saving."
+              : "You can't set capacity below the " + capDep.booked + " seats already booked — that would oversell the departure."}
+          </Alert>
         </div>}
       </Modal>
       <Modal open={!!cancelDep} tone="danger" title="Cancel this departure?"
