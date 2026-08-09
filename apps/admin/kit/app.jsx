@@ -23,7 +23,10 @@ function navGroups(role) {
   const groups = [
     { items: [{ id: "dashboard", label: "Dashboard", icon: "house" }] },
     { label: "Operations", items: [
-      { id: "bookings", label: "Bookings", icon: "ticket", badge: 5 },
+      // TRI-978 #2: the badge was a hardcoded stub (always "5"), contradicting the
+      // dashboard's real "Pending confirmation" figure. Drive it off the real,
+      // hydrated bookings so it matches — pending = awaiting confirmation.
+      { id: "bookings", label: "Bookings", icon: "ticket", badge: ((window.TK_ADMIN && window.TK_ADMIN.bookings) || []).filter(function (b) { return b.status === "pending"; }).length || undefined },
       { id: "departures", label: "Departures", icon: "calendar-days" },
       { id: "customers", label: "Customers", icon: "users" },
       { id: "guides", label: "Guides", icon: "user" },
@@ -47,6 +50,35 @@ function navGroups(role) {
     return groups.map(g => ({ ...g, items: g.items.filter(it => !ADMIN_ONLY.includes(it.id)) })).filter(g => g.items.length);
   }
   return groups;
+}
+
+// TRI-978 #4: build the top-right notifications feed from real hydrated data.
+// Categories mirror what an operator actually needs to see; each row deep-links
+// to the relevant screen. Returns [] when nothing needs attention.
+function buildNotifications(role, go) {
+  const A = window.TK_ADMIN || {};
+  const out = [];
+  // Bookings awaiting confirmation (held, payment pending).
+  (A.bookings || []).filter((b) => b.status === "pending").slice(0, 6).forEach((b) => {
+    out.push({ icon: "ticket", tone: "pending", text: "Booking " + b.ref + " awaiting confirmation — " + b.tour, time: b.created || "", onClick: () => go("bookings", b.ref) });
+  });
+  // Failed payments — skip cancelled bookings (moot) and dedupe by reference.
+  const cancelled = new Set((A.bookings || []).filter((b) => b.status === "cancelled").map((b) => b.ref));
+  const seen = {};
+  (A.payments || []).filter((p) => p.status === "failed").forEach((p) => {
+    if (!p.ref || seen[p.ref] || cancelled.has(p.ref)) return;
+    seen[p.ref] = 1;
+    out.push({ icon: "triangle-alert", tone: "failed", text: "Payment failed on " + p.ref, time: "", onClick: () => go("bookings", p.ref) });
+  });
+  // Nearly-full scheduled departures (>=90% booked).
+  (A.departures || []).filter((d) => d.status === "scheduled").forEach((d) => {
+    const cap = Number(d.capacity || 0);
+    const left = d.spotsLeft != null ? Number(d.spotsLeft) : NaN;
+    if (!cap || isNaN(left)) return;
+    const pct = Math.round((1 - left / cap) * 100);
+    if (pct >= 90) out.push({ icon: "calendar-days", tone: "warning", text: (d.tour || "Departure") + " on " + (d.date || "") + " is " + pct + "% full", time: "", onClick: () => go("departures") });
+  });
+  return out.slice(0, 12);
 }
 
 const META = {
@@ -238,14 +270,20 @@ function AdminApp() {
     guides: <Button size="sm" iconStart="plus" onClick={() => window.dispatchEvent(new CustomEvent("tk-add-guide"))}>Add guide</Button>,
   }[screen];
 
-  const notifs = [
-    { icon: "ticket", tone: "pending", text: "New booking TK-4821 — Accra City Tour", time: "2 min ago", onClick: () => go("bookings", "TK-4821") },
-    { icon: "triangle-alert", tone: "failed", text: "Payment failed on TK-4610", time: "1 hr ago", onClick: () => go(role === "operator" ? "bookings" : "payments", "TK-4610") },
-    { icon: "calendar-days", tone: "warning", text: "Cape Coast departure is 90% full", time: "3 hr ago", onClick: () => go("departures") },
-  ];
+  // TRI-978 #4: the notifications bell was a hardcoded 3-item fixture (TK-4821 /
+  // TK-4610 / Cape Coast — none of which exist). Derive a real "needs attention"
+  // feed from the already-hydrated console data (no new backend surface): bookings
+  // awaiting confirmation, failed payments on live bookings, and departures that
+  // are nearly full. Passing our own non-empty array also prevents the frozen DS
+  // TopBar from falling back to its built-in demo notifications when the feed is
+  // empty — instead we show an explicit "all caught up" row.
+  const notifs = buildNotifications(role, go);
+  const notifCount = notifs.length;
+  const notifItems = notifCount ? notifs
+    : [{ icon: "check", tone: "success", text: "You're all caught up", time: "Nothing needs attention" }];
   return (
     <Frame demo={demo} setDemo={setDemo} screen={screen} go={go}>
-      <AppShell groups={navGroups(role)} current={navCurrent} onNavigate={go} notifications={3} notificationItems={notifs}
+      <AppShell groups={navGroups(role)} current={navCurrent} onNavigate={go} notifications={notifCount} notificationItems={notifItems}
         user={user} onSignOut={signOut} onProfile={() => go("admin-profile")} onPreferences={() => go("admin-prefs")} logoSrc="../../assets/logo-badge.png">
         <PageHeader title={meta.title} subtitle={forbidden ? null : meta.sub} breadcrumbs={crumbs} actions={forbidden ? null : actions} />
         {body}

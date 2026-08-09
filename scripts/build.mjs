@@ -83,7 +83,20 @@ const APPS = {
     data: ["data.js", "admin-data.js"],
     title: "TripKoach Ops — admin console",
     bodyBg: "var(--shell-content-bg)",
-    headCss: "",
+    // TRI-978 #1: app-shell scroll fix (app layer; design-system/ stays pristine).
+    // The DS shell let the whole window scroll while the sidebar (height:100vh,
+    // overflow-y:auto) grew its OWN scrollbar whenever its nav content exceeded the
+    // viewport — two competing scrollbars, and the content read as "trapped inside
+    // the nav's scroll". Lock the document to the viewport and make the main column
+    // the single content scroll region: the topbar stays pinned (it's sticky within
+    // the main column) and the sidebar only scrolls internally when it genuinely
+    // overflows. The lock is scoped with :has(.tk-shell) so the full-bleed auth
+    // screens (login/MFA, no shell) keep their natural document scroll. Fixed
+    // drawers/modals/toasts are position:fixed (no transformed ancestor) so the
+    // shell's overflow:hidden does not clip them.
+    headCss: `html:has(.tk-shell),body:has(.tk-shell){height:100%;overflow:hidden}
+.tk-shell{height:100vh;overflow:hidden;grid-template-rows:minmax(0,1fr)}
+.tk-shell__main{overflow-y:auto;min-height:0}`,
   },
 };
 

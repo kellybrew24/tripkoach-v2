@@ -124,12 +124,21 @@ function BookingDrawer({ booking, onClose }) {
     .map((d) => ({ value: d.id, label: (d.date || "Departure") + (d.time ? " · " + d.time : "") + " — " + d.spotsLeft + " left" }));
   const canReschedule = cur !== "cancelled" && cur !== "completed" && cur !== "failed";
 
+  // TRI-978 #2: the drawer History used to fabricate precise clock times
+  // ("09:14"/"10:02") and a made-up staff name ("Kofi A.") — placeholder data.
+  // Show only what's actually true for this booking: the real creation date, the
+  // real payment outcome, and the real current status. "Just now"/"You" appear
+  // only for an action taken in THIS drawer session (`status` is set on confirm/
+  // cancel); a pre-existing status change is attributed to "Staff" without an
+  // invented timestamp. (A per-event audit trail is a separate backend surface.)
+  const created = booking.created || "";
+  const stamp = (sessionActor, sessionTime, fallback) => (status ? { actor: sessionActor, time: sessionTime } : { actor: "", time: fallback });
   const events = [
-    { type: "created", text: "Booking created via website", actor: "System", time: booking.created + ", 09:14" },
-    ...(booking.payment === "paid" ? [{ type: "paid", text: "Payment received via Paystack", actor: "System", time: booking.created + ", 09:15", tone: "success" }] : []),
-    ...(cur === "confirmed" ? [{ type: "confirmed", text: "Marked <strong>Confirmed</strong>", actor: "Kofi A.", time: booking.created + ", 10:02", tone: "success" }] : []),
-    ...(cur === "cancelled" ? [{ type: "cancelled", text: "Booking <strong>cancelled</strong>" + (reason ? " — " + reason : ""), actor: "You", time: "Just now", tone: "danger" }] : []),
-    { type: "email", text: "Confirmation email sent to " + booking.customer, actor: "System", time: booking.created + ", 09:16" },
+    { type: "created", text: "Booking created", actor: "Website", time: created },
+    ...(booking.payment === "paid" ? [{ type: "paid", text: "Payment received via Paystack", actor: "Paystack", time: created, tone: "success" }] : []),
+    ...(booking.payment === "failed" ? [{ type: "failed", text: "Payment failed", actor: "Paystack", time: created, tone: "danger" }] : []),
+    ...(cur === "confirmed" ? [Object.assign({ type: "confirmed", text: "Booking confirmed", tone: "success" }, stamp("You", "Just now", "Staff"))] : []),
+    ...(cur === "cancelled" ? [Object.assign({ type: "cancelled", text: "Booking cancelled" + (reason ? " — " + reason : ""), tone: "danger" }, stamp("You", "Just now", "Staff"))] : []),
   ];
 
   const moveBtn = canReschedule
