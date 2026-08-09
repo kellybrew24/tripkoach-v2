@@ -206,8 +206,12 @@ function CustomersAdmin({ go, state, setState }) {
               <div className="tk-caption">{open.country} · member since {open.joined}</div>
             </div>
           </div>
-          {/* TRI-972: Overview keeps the profile + booking history; Activity is the lifecycle timeline. */}
-          {LIVE && <Tabs value={custTab} onChange={setCustTab} tabs={[{ id: "overview", label: "Overview" }, { id: "activity", label: "Activity" }]} />}
+          {/* TRI-972: Overview keeps the profile + booking history; Activity is the lifecycle timeline.
+              The wrapper's flexShrink:0 is load-bearing: .tk-drawer__body is a flex column and the DS
+              .tk-tabs (flex:0 1 auto + overflow:auto → min-height 0) otherwise collapses to a 1px sliver
+              when the drawer content is tall, hiding the tab bar entirely. Other Tabs usages sit in normal
+              page flow so they're unaffected; only Tabs-inside-a-drawer needs this. */}
+          {LIVE && <div style={{ flexShrink: 0 }}><Tabs value={custTab} onChange={setCustTab} tabs={[{ id: "overview", label: "Overview" }, { id: "activity", label: "Activity" }]} /></div>}
           {(!LIVE || custTab === "overview") && <>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10 }}>
             {[["Trips", tripsCount], ["Lifetime value", "$" + spendAmount.toLocaleString()], ["Pending", pendingCount]].map(([k, v]) => (
