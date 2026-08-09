@@ -1683,13 +1683,32 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
   }
 
   // ── Dashboard aggregates (A15) — summary counts for the console home ──────────
-  const RANGE_DAYS: Record<string, number | null> = { '7d': 7, '30d': 30, '90d': 90, ytd: null, all: null };
+  // Each range drives (a) the created_at window for the booking/revenue KPIs and
+  // (b) a gap-filled activity time series. Short ranges bucket hourly (TRI-984)
+  // so 12h/24h render real resolution instead of a flat/empty line; longer ranges
+  // step up to day/week/month. `since` references booking alias `b`; `start`/`stop`
+  // bound the generate_series that fills every bucket even when no bookings landed.
+  const RANGE_SPEC: Record<string, { since: string; trunc: string; start: string; stop: string; step: string; fmt: string }> = {
+    '12h': { since: `b.created_at >= now() - interval '12 hours'`, trunc: 'hour',
+             start: `date_trunc('hour', now()) - interval '11 hours'`, stop: `date_trunc('hour', now())`, step: '1 hour', fmt: 'HH24:00' },
+    '24h': { since: `b.created_at >= now() - interval '24 hours'`, trunc: 'hour',
+             start: `date_trunc('hour', now()) - interval '23 hours'`, stop: `date_trunc('hour', now())`, step: '1 hour', fmt: 'HH24:00' },
+    '7d':  { since: `b.created_at >= now() - interval '7 days'`, trunc: 'day',
+             start: `date_trunc('day', now()) - interval '6 days'`, stop: `date_trunc('day', now())`, step: '1 day', fmt: 'Dy' },
+    '30d': { since: `b.created_at >= now() - interval '30 days'`, trunc: 'day',
+             start: `date_trunc('day', now()) - interval '29 days'`, stop: `date_trunc('day', now())`, step: '1 day', fmt: 'Mon DD' },
+    '90d': { since: `b.created_at >= now() - interval '90 days'`, trunc: 'week',
+             start: `date_trunc('week', now()) - interval '12 weeks'`, stop: `date_trunc('week', now())`, step: '1 week', fmt: 'Mon DD' },
+    ytd:   { since: `b.created_at >= date_trunc('year', now())`, trunc: 'month',
+             start: `date_trunc('year', now())`, stop: `date_trunc('month', now())`, step: '1 month', fmt: 'Mon' },
+    all:   { since: `true`, trunc: 'month',
+             start: `date_trunc('month', now()) - interval '11 months'`, stop: `date_trunc('month', now())`, step: '1 month', fmt: 'Mon' },
+  };
   async function getDashboard(opts: { range?: string } = {}) {
-    const range = opts.range && opts.range in RANGE_DAYS ? opts.range : '30d';
+    const range = opts.range && opts.range in RANGE_SPEC ? opts.range : '30d';
+    const spec = RANGE_SPEC[range];
     // created_at window for booking/revenue metrics (ytd = since Jan 1; all = no bound).
-    let sinceSql = 'true';
-    if (range === 'ytd') sinceSql = `b.created_at >= date_trunc('year', now())`;
-    else if (range !== 'all') sinceSql = `b.created_at >= now() - interval '${RANGE_DAYS[range]} days'`;
+    const sinceSql = spec.since;
 
     // Booking counts by status within the window + total.
     const byStatus = (await db.query(
@@ -1734,12 +1753,26 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     const seatsTotal = Number(seatRow.total), seatsReserved = Number(seatRow.reserved);
     const occupancyPct = seatsTotal > 0 ? Math.round((seatsReserved / seatsTotal) * 1000) / 10 : 0;
 
+    // Activity series: one row per bucket across the range (0 where no bookings
+    // landed), so the console chart shows real shape — hourly for 12h/24h,
+    // daily/weekly/monthly for longer ranges. Labels are server-local (UTC).
+    const seriesRows = (await db.query(
+      `WITH buckets AS (
+         SELECT generate_series(${spec.start}, ${spec.stop}, interval '${spec.step}') AS bucket
+       )
+       SELECT trim(to_char(bk.bucket, '${spec.fmt}')) AS label, COUNT(b.id)::int AS n
+         FROM buckets bk
+         LEFT JOIN booking b ON date_trunc('${spec.trunc}', b.created_at) = bk.bucket
+        GROUP BY bk.bucket ORDER BY bk.bucket`)).rows;
+    const series = seriesRows.map((r) => ({ label: String(r.label), value: Number(r.n) }));
+
     return {
       range,
       bookings: { total: bookingsTotal, byStatus: bookingsByStatus },
       revenue: { usd: revenueUsd, currency: 'USD', ghs: revenueGhs, ghsCurrency: 'GHS' },
       departures: { upcoming: upcomingCount, next: upcoming },
       occupancy: { seatsTotal, seatsReserved, spotsLeft: Math.max(0, seatsTotal - seatsReserved), utilizationPct: occupancyPct },
+      series,
     };
   }
 

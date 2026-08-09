@@ -1107,6 +1107,14 @@ console.log('\n[admin dashboard aggregates (TRI-898)]');
   ok('dashboard occupancy has utilizationPct', typeof dash.body.occupancy.utilizationPct === 'number' && dash.body.occupancy.seatsTotal >= 0, JSON.stringify(dash.body.occupancy));
   ok('dashboard upcoming departures counted', typeof dash.body.departures.upcoming === 'number' && Array.isArray(dash.body.departures.next), JSON.stringify(dash.body.departures.upcoming));
   ok('dashboard default range 30d, honours ?range=all', dash.body.range === '30d' && (await call('GET', '/api/admin/dashboard?range=all', { cookie: adminCookie })).body.range === 'all');
+  // TRI-984: gap-filled activity series; hourly buckets for 12h/24h.
+  ok('dashboard exposes activity series (30d, gap-filled)', Array.isArray(dash.body.series) && dash.body.series.length === 30
+    && dash.body.series.every((p: any) => typeof p.label === 'string' && typeof p.value === 'number'), JSON.stringify(dash.body.series?.slice(0, 2)));
+  const d12 = await call('GET', '/api/admin/dashboard?range=12h', { cookie: adminCookie });
+  ok('dashboard ?range=12h → 12 hourly buckets', d12.body.range === '12h' && Array.isArray(d12.body.series) && d12.body.series.length === 12
+    && /^\d{2}:00$/.test(d12.body.series[0].label), JSON.stringify(d12.body.series?.slice(0, 3)));
+  const d24 = await call('GET', '/api/admin/dashboard?range=24h', { cookie: adminCookie });
+  ok('dashboard ?range=24h → 24 hourly buckets', d24.body.range === '24h' && Array.isArray(d24.body.series) && d24.body.series.length === 24, JSON.stringify(d24.body.series?.length));
   // viewer has bookings.view → dashboard is visible to all console roles.
   const vlogin = await call('POST', '/api/admin/auth/login', { payload: { email: 'viewer@tripkoach.com', password: 'Just-Look!' } });
   const vcookie = vlogin.cookies.find((c) => c.name === COOKIE)?.value ?? '';

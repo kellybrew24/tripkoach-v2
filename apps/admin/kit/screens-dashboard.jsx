@@ -2,6 +2,12 @@ const NS = window.TripKoachDesignSystem_c9e4af;
 const { StatCard, MiniChart, DataTable, StatusBadge, Button, Icon, Price, AuditTimeline, EmptyState, Select } = NS;
 
 const PERIODS = {
+  "12h": { label: "Last 12 hours", short: "last 12h", bookings: "7", confirmed: 5, revenue: "$4,120", bDelta: "+3%",
+    series: [{label:"08:00",value:0},{label:"09:00",value:1},{label:"10:00",value:0},{label:"11:00",value:2},{label:"12:00",value:1},{label:"13:00",value:0},{label:"14:00",value:1},{label:"15:00",value:0},{label:"16:00",value:1},{label:"17:00",value:0},{label:"18:00",value:1},{label:"19:00",value:0}],
+    trend: "Bookings trickled in through the afternoon, peaking mid-morning" },
+  "24h": { label: "Last 24 hours", short: "last 24h", bookings: "13", confirmed: 9, revenue: "$8,240", bDelta: "+6%",
+    series: [{label:"20:00",value:1},{label:"21:00",value:0},{label:"22:00",value:1},{label:"23:00",value:0},{label:"00:00",value:0},{label:"01:00",value:0},{label:"02:00",value:0},{label:"03:00",value:0},{label:"04:00",value:0},{label:"05:00",value:0},{label:"06:00",value:1},{label:"07:00",value:0},{label:"08:00",value:1},{label:"09:00",value:2},{label:"10:00",value:1},{label:"11:00",value:1},{label:"12:00",value:0},{label:"13:00",value:1},{label:"14:00",value:1},{label:"15:00",value:0},{label:"16:00",value:1},{label:"17:00",value:0},{label:"18:00",value:0},{label:"19:00",value:0}],
+    trend: "Bookings quiet overnight, picking up from mid-morning" },
   "7d": { label: "Last 7 days", short: "this week", bookings: "38", confirmed: 24, revenue: "$24,180", bDelta: "+12%",
     series: [{label:"Mon",value:4},{label:"Tue",value:6},{label:"Wed",value:5},{label:"Thu",value:8},{label:"Fri",value:7},{label:"Sat",value:9},{label:"Sun",value:6}],
     trend: "Bookings rose from 4 on Monday to 9 on Sunday" },
@@ -51,19 +57,27 @@ function Dashboard({ go, state, role = "admin" }) {
   const statPending = live ? String(n(bs.pending)) : "5";
   const statDepartures = live ? String(n(live.departures.upcoming)) : "6";
   const statTravellers = live ? String(n(live.occupancy.seatsReserved)) : "34";
-  // Bookings chart: backend exposes no time series, so when live we show the real
-  // status breakdown as bars; off, the mock trend line.
-  const chartType = live ? "bar" : "line";
-  const chartData = live ? Object.keys(bs).map((k) => ({ label: cap(k), value: n(bs[k]) })) : P.series;
-  const chartAria = live ? ("Bookings by status: " + chartData.map((d) => d.value + " " + d.label.toLowerCase()).join(", ")) : P.trend;
+  // Live status breakdown — drives the right-hand donut, and the main chart when
+  // the backend returns no time series.
+  const statusBars = live ? Object.keys(bs).map((k) => ({ label: cap(k), value: n(bs[k]) })) : null;
+  // Main activity chart: prefer the real booking time series (TRI-984 — hourly
+  // for 12h/24h, daily/weekly/monthly for longer ranges); fall back to the status
+  // breakdown if the backend omits it, and to the mock trend when the flag is off.
+  const timeSeries = (live && Array.isArray(live.series) && live.series.length) ? live.series : null;
+  const chartType = timeSeries ? "line" : (live ? "bar" : "line");
+  const chartData = timeSeries || (live ? statusBars : P.series);
+  const seriesTotal = timeSeries ? timeSeries.reduce((s, d) => s + n(d.value), 0) : 0;
+  const chartAria = timeSeries
+    ? ("New bookings over " + P.label.toLowerCase() + ", " + seriesTotal + " total across " + timeSeries.length + " intervals")
+    : (live ? ("Bookings by status: " + statusBars.map((d) => d.value + " " + d.label.toLowerCase()).join(", ")) : P.trend);
   // Right-hand donut: revenue-by-region is fixture-only, so live shows the real
   // bookings-by-status split for both roles.
   const donutTitle = live ? "Bookings by status" : (role === "admin" ? "Revenue by region" : "Bookings by status");
-  const donutData = live ? chartData : (role === "admin"
+  const donutData = live ? statusBars : (role === "admin"
     ? [{label:"Central",value:9600},{label:"Greater Accra",value:7200},{label:"Eastern",value:4180},{label:"Other",value:3200}]
     : [{label:"Confirmed",value:82},{label:"Pending",value:41},{label:"Cancelled",value:12}]);
   const donutAria = live
-    ? chartAria
+    ? ("Bookings by status: " + statusBars.map((d) => d.value + " " + d.label.toLowerCase()).join(", "))
     : (role === "admin"
       ? "Revenue $9,600 Central, $7,200 Greater Accra, $4,180 Eastern, $3,200 other"
       : "82 confirmed, 41 pending, 12 cancelled");
@@ -96,7 +110,7 @@ function Dashboard({ go, state, role = "admin" }) {
             <div><h3 className="tk-h5" style={{ margin: 0 }}>Bookings, {P.label.toLowerCase()}</h3><p className="tk-caption">{statBookings} new bookings · {statConfirmed} confirmed</p></div>
             <div className="tk-row" style={{ gap: 12 }}>
               <Select aria-label="Period" value={period} onChange={(e) => setPeriod(e.target.value)} style={{ width: 150, minHeight: 36 }}
-                options={[{ value: "7d", label: "Last 7 days" }, { value: "30d", label: "Last 30 days" }, { value: "90d", label: "Last 90 days" }, { value: "ytd", label: "Year to date" }]} />
+                options={[{ value: "12h", label: "Last 12 hours" }, { value: "24h", label: "Last 24 hours" }, { value: "7d", label: "Last 7 days" }, { value: "30d", label: "Last 30 days" }, { value: "90d", label: "Last 90 days" }, { value: "ytd", label: "Year to date" }]} />
               <div className="tk-legend"><span><i style={{ background: "var(--chart-1)" }} />New bookings</span></div>
             </div>
           </div>
