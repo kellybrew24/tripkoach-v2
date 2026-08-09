@@ -326,6 +326,16 @@ function CustomersAdmin({ go, state, setState }) {
 function PaymentsAdmin({ go, state }) {
   const A = window.TK_ADMIN;
   const [tab, setTab] = React.useState("all");
+  // TRI-980: apply the settled state to the SHARED payment record (and keep the
+  // linked booking's payment flag in sync so the Outstanding stat + Bookings list
+  // agree) so the console reflects the change live. TK_ADMIN_ACT broadcasts
+  // tk-admin-mutated after this runs → AdminApp re-renders → this screen re-reads
+  // A.payments and the row moves tabs / the badge flips with no manual refresh.
+  const patchPayment = (row, status) => {
+    const p = (A.payments || []).find(x => x.id === row.id); if (p) p.status = status;
+    const bk = (A.bookings || []).find(b => b.ref === row.ref);
+    if (bk) bk.payment = status === "paid" ? "paid" : status === "refunded" ? "refunded" : bk.payment;
+  };
   const totalPaid = A.payments.filter(p => p.status === "paid").reduce((s, p) => s + p.amount, 0);
   const outstanding = A.bookings.filter(b => b.payment === "unpaid").reduce((s, b) => s + b.total, 0);
   let rows = A.payments.filter(p => tab === "all" || p.status === tab);
@@ -354,8 +364,8 @@ function PaymentsAdmin({ go, state }) {
           ]}
           rows={rows} getRowId={r => r.id}
           rowActions={(r) => r.status === "pending"
-            ? <Button size="sm" variant="secondary" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.markPaid(r.id), () => window.tkToast("Marked " + r.id + " as paid"))}>Mark paid</Button>
-            : r.status === "paid" ? <IconButton icon="receipt" label="Issue refund" variant="ghost" size="sm" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.refundPayment(r.id), () => window.tkToast("Refund started for " + r.id))} /> : <IconButton icon="ellipsis" label="Actions" variant="ghost" size="sm" onClick={() => window.tkToast("Retry requested for " + r.id)} />}
+            ? <Button size="sm" variant="secondary" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.markPaid(r.id), () => { patchPayment(r, "paid"); window.tkToast("Marked " + r.id + " as paid"); })}>Mark paid</Button>
+            : r.status === "paid" ? <IconButton icon="receipt" label="Issue refund" variant="ghost" size="sm" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.refundPayment(r.id), () => { patchPayment(r, "refunded"); window.tkToast("Refund started for " + r.id); })} /> : <IconButton icon="ellipsis" label="Actions" variant="ghost" size="sm" onClick={() => window.tkToast("Retry requested for " + r.id)} />}
           empty={<EmptyState icon="wallet" title="No transactions" body="Payments appear here once money starts moving." />} />
       </div>
     </div>

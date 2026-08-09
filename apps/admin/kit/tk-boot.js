@@ -404,14 +404,29 @@
     }
     return err.message || "Something went wrong. Please try again.";
   }
+  // TRI-980: SYSTEMIC re-render seam. Admin screens read mutable module globals
+  // (window.TK_ADMIN.*, window.TK_REVIEWS) directly — a successful mutation that
+  // updates the shared record does NOT, on its own, make the mounted screen
+  // re-read it, so the row stayed stale until a manual refresh re-hydrated the
+  // console (reviews approve/publish, payments mark-paid, refund, …). Every write
+  // funnels through TK_ADMIN_ACT, so we bump a global revision and broadcast a
+  // single event here AFTER the optimistic callback has applied its data change.
+  // AdminApp (app.jsx) subscribes and force-re-renders the whole tree, so any
+  // screen that mutated its shared global re-reads it live. One seam, whole family.
+  function notifyMutated() {
+    window.TK_ADMIN_REV = (window.TK_ADMIN_REV || 0) + 1;
+    try { window.dispatchEvent(new CustomEvent("tk-admin-mutated")); } catch (_) {}
+  }
+  window.TK_ADMIN_NOTIFY_MUTATED = notifyMutated;
   window.TK_ADMIN_ACT = function (call, optimistic, opts) {
     opts = opts || {};
-    if (!live()) { if (optimistic) optimistic(); return Promise.resolve(); }
+    if (!live()) { if (optimistic) optimistic(); notifyMutated(); return Promise.resolve(); }
     var p = typeof call === "function" ? call() : call;
-    if (!p || typeof p.then !== "function") { if (optimistic) optimistic(); return Promise.resolve(); }
+    if (!p || typeof p.then !== "function") { if (optimistic) optimistic(); notifyMutated(); return Promise.resolve(); }
     return p.then(function (res) {
       if (optimistic) optimistic(res);
       if (opts.onSuccess) opts.onSuccess(res);
+      notifyMutated();
       return res;
     }, function (err) {
       if (err && err.status === 401) window.dispatchEvent(new CustomEvent("tk-admin-401"));

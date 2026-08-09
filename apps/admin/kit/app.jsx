@@ -146,6 +146,18 @@ function AdminApp() {
   const [editId, setEditId] = React.useState(first.editId);
   const [detailRef, setDetailRef] = React.useState(null);
   const [demo, setDemo] = React.useState({}); // per-screen view toggles
+  // TRI-980: whole-console reactive binding. Screens read mutable module globals
+  // (window.TK_ADMIN.*, window.TK_REVIEWS) that mutations update in place; those
+  // in-place edits don't trigger React on their own. TK_ADMIN_ACT broadcasts
+  // "tk-admin-mutated" after every successful write, so bumping this counter here
+  // re-renders the whole tree and every mounted screen re-reads its global live —
+  // no manual refresh, and it covers the entire family of admin mutations at once.
+  const [, bumpDataRev] = React.useReducer((x) => x + 1, 0);
+  React.useEffect(() => {
+    const onMutated = () => bumpDataRev();
+    window.addEventListener("tk-admin-mutated", onMutated);
+    return () => window.removeEventListener("tk-admin-mutated", onMutated);
+  }, []);
   // Role/user come from the live session when signed in; otherwise the demo/
   // fixture identity (unchanged prototype behaviour).
   const session = tkSession();
