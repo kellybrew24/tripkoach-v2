@@ -277,7 +277,10 @@ function AdminApp() {
     : [];
   const actions = {
     tours: <Button size="sm" iconStart="plus" onClick={() => go("tour-edit", "new")}>Create tour</Button>,
-    bookings: <Button size="sm" variant="secondary" iconStart="download">Export</Button>,
+    // TRI-982: the Bookings page had TWO Export buttons — this PageHeader one was a
+    // dead no-op (no onClick). The real CSV export lives in the Bookings FilterBar
+    // (exportBookingsCsv, wired in TRI-968). Removed the duplicate; no header action
+    // for bookings now.
     departures: <Button size="sm" iconStart="plus" onClick={() => window.dispatchEvent(new CustomEvent("tk-add-departure"))}>Add departure</Button>,
     guides: <Button size="sm" iconStart="plus" onClick={() => window.dispatchEvent(new CustomEvent("tk-add-guide"))}>Add guide</Button>,
   }[screen];
