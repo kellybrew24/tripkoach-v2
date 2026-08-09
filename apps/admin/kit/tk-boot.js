@@ -308,6 +308,7 @@
     verifyMfa: function (code) { return req("POST", "/auth/mfa", { code: code }); }, // login challenge (TOTP or recovery code)
     logout: function () { return req("POST", "/auth/logout"); },
     me: function () { return req("GET", "/me"); },
+    patchMe: function (body) { return req("PATCH", "/me", body); },
     // self-service MFA management (TRI-899 → TRI-895 /auth/mfa/*)
     mfaStatus: function () { return req("GET", "/auth/mfa/status"); },
     mfaEnroll: function () { return req("POST", "/auth/mfa/enroll"); },

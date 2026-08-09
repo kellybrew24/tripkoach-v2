@@ -412,8 +412,32 @@ export function createStaffService(db: Db, cfg: Config) {
     return { enabled: !!staff.mfa_enabled, pendingEnrollment: pending, recoveryCodesRemaining: remaining };
   }
 
+  // ── Self-update (PATCH /me) ───────────────────────────────────────────────────
+  // Any staff may update their own name. Job title is admin-only: non-admins cannot set it on themselves.
+  async function updateSelf(id: string, body: unknown, actorRole: string) {
+    if (!isPlainObject(body)) throw new ValidationError('body must be an object');
+    const cur = await getStaffRow(id);
+    if (!cur) throw notFound('staff member');
+
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    const set = (col: string, val: unknown) => { params.push(val); sets.push(`${col} = $${params.length}`); };
+
+    if (body.name !== undefined) set('name', optName(body));
+    if (body.jobTitle !== undefined) {
+      if (actorRole !== 'admin') throw new AdminError('forbidden', 'only admins may set their own job title', 403);
+      set('job_title', typeof body.jobTitle === 'string' ? body.jobTitle.trim().slice(0, 200) || null : null);
+    }
+
+    if (!sets.length) throw new ValidationError('no updatable fields provided (name, jobTitle)');
+    params.push(id);
+    await db.query(`UPDATE staff_user SET ${sets.join(', ')}, updated_at=now() WHERE id=$${params.length}`, params);
+    await audit(db, { actorId: id, action: 'staff.update_self', targetType: 'staff_user', targetId: id, before: { name: cur.name, job_title: cur.job_title }, after: { name: body.name ?? cur.name, job_title: body.jobTitle ?? cur.job_title }, ip: null });
+    return staffDTO(await getStaffRow(id));
+  }
+
   return {
-    listStaff, inviteStaff, resendInvite, previewInvite, acceptInvite, updateStaff, setStatus,
+    listStaff, inviteStaff, resendInvite, previewInvite, acceptInvite, updateStaff, updateSelf, setStatus,
     enrollMfa, verifyMfaEnrollment, disableMfa, regenerateRecoveryCodes, verifyChallenge, mfaStatus,
   };
 }

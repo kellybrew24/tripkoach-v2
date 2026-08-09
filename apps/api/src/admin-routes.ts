@@ -209,6 +209,12 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
       };
     });
 
+    // TRI-988: self-update own profile (name always; jobTitle only for admins).
+    admin.patch('/me', { preHandler: auth }, async (req: FastifyRequest) => {
+      const s = req.staff!;
+      return staffSvc.updateSelf(s.id, body(req), s.role);
+    });
+
     // ── Regions ────────────────────────────────────────────────────────────
     admin.get('/regions', perm('tours.view'), async () => ({ regions: await svc.listRegions() }));
     admin.post('/regions', perm('tours.edit'), async (req, reply) => reply.code(201).send(await svc.createRegion(body(req), actorOf(req))));

@@ -619,7 +619,12 @@ function MfaEnrollDrawer({ open, mode, onClose, onEnabled, setToast }) {
       setData(null); setConfirmCode(""); setCode(["", "", "", "", "", ""]); setRecoveryCodes(null); setBusy(false); setErr(null);
       return;
     }
-    if (mode !== "reconfigure") beginEnroll(); // first-time: enroll immediately
+    // On open, seed the starting step from mode. The drawer is always mounted (open just toggles),
+    // so the useState initializer above ran while mode was still "enroll" — we can't rely on it to
+    // land reconfigure on "confirm". Without this, reconfigure opened straight into "scan" with no
+    // enroll data, so the QR never rendered (TRI-987).
+    if (mode === "reconfigure") setStep("confirm"); // confirm a current code → disables old factor → enroll
+    else beginEnroll(); // first-time: enroll immediately
   }, [open, mode, beginEnroll]);
 
   // Reconfigure: verify a current code (disables the old factor), then enroll.
@@ -725,14 +730,31 @@ function AccountProfileAdmin({ go, user }) {
   const LIVE = !!(window.TK_CONFIG && window.TK_CONFIG.USE_LIVE_API);
   const [toast, setToast] = React.useState(null);
   const [dirty, setDirty] = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
   const [manage2fa, setManage2fa] = React.useState(false);
   const [changePw, setChangePw] = React.useState(false);
   const [pw, setPw] = React.useState({ cur: "", next: "", conf: "" });
   const pwOk = pw.next.length >= 10 && pw.next === pw.conf && pw.cur.length > 0;
   const [showCodes, setShowCodes] = React.useState(false);
   const codes = ["7F2K-9QL4", "B3MX-1WP8", "D6RT-5YC2", "H9NA-4VE7", "K2QZ-8JU3", "M5LP-6XB9"];
+  const u = user || { name: "Kwame Boateng", role: "Admin", rawRole: "admin", initials: "KB", email: "kwame@tripkoach.com", jobTitle: null };
+  const isAdmin = (u.rawRole || "").toLowerCase() === "admin";
+  const [nameVal, setNameVal] = React.useState(u.name || "");
+  const [titleVal, setTitleVal] = React.useState(u.jobTitle || "");
   const touch = () => setDirty(true);
-  const u = user || { name: "Kwame Boateng", role: "Admin", initials: "KB", email: "kwame@tripkoach.com" };
+
+  function saveProfile() {
+    if (!LIVE || !window.TK_ADMIN_API) { setDirty(false); setToast("Profile saved"); return; }
+    const patch = { name: nameVal.trim() || undefined };
+    if (isAdmin) patch.jobTitle = titleVal.trim() || null;
+    setSaving(true);
+    window.TK_ADMIN_API.patchMe(patch).then(function () {
+      setDirty(false); setSaving(false); setToast("Profile saved");
+    }, function (err) {
+      setSaving(false);
+      setToast((err && err.message) ? err.message : "Couldn't save profile. Please try again.");
+    });
+  }
 
   // --- Live MFA state (TRI-899). None of this runs (and none of the LIVE-only
   //     markup below mounts) when the flag is off, so the DS prototype is
@@ -753,10 +775,10 @@ function AccountProfileAdmin({ go, user }) {
           <Badge tone="neutral" style={{ marginInlineStart: "auto" }}>{u.role}</Badge>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-4)" }}>
-          <FormField id="ap-name" label="Full name"><Input defaultValue={u.name} onChange={touch} /></FormField>
-          <FormField id="ap-email" label="Work email"><Input type="email" defaultValue={u.email} onChange={touch} /></FormField>
+          <FormField id="ap-name" label="Full name"><Input value={nameVal} onChange={e => { setNameVal(e.target.value); touch(); }} /></FormField>
+          <FormField id="ap-email" label="Work email"><Input type="email" defaultValue={u.email} readOnly /></FormField>
           <FormField id="ap-phone" label="Phone"><PhoneInput id="ap-phone" onChange={touch} /></FormField>
-          <FormField id="ap-title" label="Job title" optional><Input placeholder="Operations lead" onChange={touch} /></FormField>
+          <FormField id="ap-title" label="Job title" optional hint={isAdmin ? undefined : "Set by your admin"}><Input placeholder="Operations lead" value={titleVal} onChange={e => { setTitleVal(e.target.value); touch(); }} disabled={!isAdmin} /></FormField>
         </div>
       </div></div>
       <div className="tk-card"><div className="tk-card__body" style={{ padding: "var(--space-6)", gap: "var(--space-4)" }}>
@@ -820,7 +842,7 @@ function AccountProfileAdmin({ go, user }) {
         <Alert tone="warning" title="Turning 2FA off isn't allowed">Policy requires two-factor for all staff. Contact an admin to reset a lost device.</Alert>
       </Drawer>
       )}
-      <div className="tk-stickysave"><span className="tk-caption">{dirty ? "Unsaved changes" : "All changes saved"}</span><Button iconStart="check" disabled={!dirty} onClick={() => { setDirty(false); setToast("Profile saved"); }} style={{ marginInlineStart: "auto" }}>Save changes</Button></div>
+      <div className="tk-stickysave"><span className="tk-caption">{dirty ? "Unsaved changes" : "All changes saved"}</span><Button iconStart="check" disabled={!dirty || saving} onClick={saveProfile} style={{ marginInlineStart: "auto" }}>{saving ? "Saving…" : "Save changes"}</Button></div>
       {toast && <div style={{ position: "fixed", bottom: 20, insetInline: 0, display: "flex", justifyContent: "center", zIndex: 800 }}><Toast tone="success" onClose={() => setToast(null)}>{toast}</Toast></div>}
     </div>
   );

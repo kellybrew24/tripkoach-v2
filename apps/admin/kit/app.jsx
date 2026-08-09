@@ -167,7 +167,7 @@ function AdminApp() {
     ? (function () {
         const s = session.staff || {};
         const name = s.name || "Staff";
-        return { name, role: (role.charAt(0).toUpperCase() + role.slice(1)), initials: s.initials || name.split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase(), email: s.email || "", greet: (name.split(/\s+/)[0]) };
+        return { name, role: (role.charAt(0).toUpperCase() + role.slice(1)), rawRole: role, initials: s.initials || name.split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase(), email: s.email || "", greet: (name.split(/\s+/)[0]), jobTitle: s.jobTitle || null };
       })()
     // TRI-952: never show the seeded "Kwame" demo identity in a live console. When
     // live-but-unauthenticated the app already forces the /login screen (no shell),
