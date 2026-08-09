@@ -98,6 +98,11 @@
       date: date,
       time: time,
       departureLabel: date + (time ? ", " + time : ""),
+      // Review-invite state for this booking (TRI-1014). { state: 'none'|'open'|'submitted', token? }.
+      // `open` carries the one-time review token so the Bookings CTA can submit the real review.
+      review: (b.review && typeof b.review === "object")
+        ? { state: pick(b.review.state) || "none", token: pick(b.review.token) || "" }
+        : { state: "none", token: "" },
       raw: b,
     };
   }

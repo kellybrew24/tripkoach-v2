@@ -105,15 +105,41 @@ function ReviewCard({ r }) {
     </div></div>
   );
 }
-function ReviewModal({ tour, onClose }) {
+// Bookings "Leave a review" modal. When `token` is present (the owner's one-time
+// review-invite token surfaced by /me/bookings, TRI-1014) the submit POSTs the
+// REAL review against that token via TK_REVIEWS_API.submit — the same verified,
+// moderated path the emailed link uses. With no token (the fixture demo / DS
+// preview) it keeps the original toast-only behaviour, byte-identical.
+function ReviewModal({ tour, token, onClose, onSubmitted }) {
   const [rating, setRating] = React.useState(0);
   const [title, setTitle] = React.useState("");
   const [text, setText] = React.useState("");
+  const [submitting, setSubmitting] = React.useState(false);
+  const [err, setErr] = React.useState(null);
   const ok = rating > 0 && text.trim().length >= 10;
+  const live = !!(token && LIVE_REVIEW());
+
+  async function onSubmit() {
+    if (!ok || submitting) return;
+    if (!live) { onClose(); window.tkToast && window.tkToast("Thanks! Your review is awaiting approval."); return; }
+    setErr(null); setSubmitting(true);
+    try {
+      await window.TK_REVIEWS_API.submit(token, { rating, title, text });
+      onSubmitted && onSubmitted();
+      onClose();
+      window.tkToast && window.tkToast("Thanks! Your review is awaiting approval.");
+    } catch (e) {
+      const gone = e && e.status === 410;
+      setErr(gone ? "You've already left a review for this trip." : ((e && e.message) || "We couldn't submit your review. Please try again."));
+      setSubmitting(false);
+    }
+  }
+
   return (
-    <Modal open title={"Review " + tour.title} description="Share your experience. Reviews are checked by our team before they appear publicly — usually within a day." onClose={onClose}
-      actions={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button disabled={!ok} iconStart="check" onClick={() => { onClose(); window.tkToast && window.tkToast("Thanks! Your review is awaiting approval."); }}>Submit review</Button></>}>
+    <Modal open title={"Review " + tour.title} description="Share your experience. Reviews are checked by our team before they appear publicly — usually within a day." onClose={submitting ? undefined : onClose}
+      actions={<><Button variant="secondary" onClick={onClose} disabled={submitting}>Cancel</Button><Button disabled={!ok || submitting} iconStart="check" onClick={onSubmit}>{submitting ? "Submitting…" : "Submit review"}</Button></>}>
       <div style={{ display: "grid", gap: "var(--space-4)" }}>
+        {err && <Alert tone="danger" title="We couldn't submit your review">{err}</Alert>}
         <div><span className="tk-label" style={{ display: "block", marginBottom: 4 }}>Your rating</span><StarInput value={rating} onChange={setRating} /></div>
         <FormField id="rv-title" label="Title" optional><Input id="rv-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Sum it up in a few words" /></FormField>
         <FormField id="rv-text" label="Your review" required hint="At least 10 characters. Please keep it about the tour."><Textarea id="rv-text" rows={4} value={text} onChange={(e) => setText(e.target.value)} placeholder="What did you enjoy? How was your guide?" /></FormField>
@@ -1037,14 +1063,19 @@ function BookingsWeb({ go, currency = "USD" }) {
         {bookings.length === 0
           ? <div className="tk-card"><div className="tk-card__body" style={{ padding: "var(--space-8)", alignItems: "center", textAlign: "center", gap: 10 }}><span className="tk-body-sm tk-muted">No bookings yet. When you book a tour it'll show up here.</span><Button variant="secondary" size="sm" onClick={() => go("browse")}>Browse tours</Button></div></div>
           : <div style={{ display: "grid", gap: 12 }}>
-            {shown.map(b => (
+            {shown.map(b => {
+              const rv = b.review || { state: "none" };
+              return (
               <div key={b.ref} style={{ display: "grid", gap: 8 }}>
                 <BookingRow reference={b.ref} title={b.tourTitle} date={b.departureLabel || b.date} travellers={paxLabel(b.partySize)} total={cvt(b.total, currency)} currency={currency} status={b.ds} image={imgFor(b)} onClick={() => go("booking", b.ref)} />
-                {b.ds === "confirmed" && <div style={{ display: "flex", justifyContent: "flex-end" }}><Button variant="secondary" size="sm" iconStart="pencil" onClick={() => setReviewFor(tourFor(b))}>Leave a review</Button></div>}
+                {rv.state === "open" && <div style={{ display: "flex", justifyContent: "flex-end" }}><Button variant="secondary" size="sm" iconStart="pencil" onClick={() => setReviewFor({ tour: tourFor(b), token: rv.token, ref: b.ref })}>Leave a review</Button></div>}
+                {rv.state === "submitted" && <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 6, color: "var(--success-fg)" }}><Icon name="circle-check-big" size={15} /><span className="tk-caption">Review submitted — thanks!</span></div>}
               </div>
-            ))}
+              );
+            })}
           </div>}
-        {reviewFor && <ReviewModal tour={reviewFor} onClose={() => setReviewFor(null)} />}
+        {reviewFor && <ReviewModal tour={reviewFor.tour} token={reviewFor.token} onClose={() => setReviewFor(null)}
+          onSubmitted={() => setRows(prev => (prev || []).map(x => x.ref === reviewFor.ref ? { ...x, review: { state: "submitted", token: "" } } : x))} />}
       </AccountShell>
     );
   }

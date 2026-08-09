@@ -406,14 +406,21 @@ export function createConsumerService(db: Db, cfg: Config) {
 
   // ── "My bookings" (authed) ──────────────────────────────────────────────────
   async function listMyBookings(userId: string) {
+    // Reviews are invite-token only (TRI-892): an invite is minted per eligible booking when the
+    // departure is ended, and the verified review is submitted against that one-time token. Surface
+    // the owner's own invite state here so the Bookings "Leave a review" CTA can submit the REAL
+    // review (open) / say it's already in (submitted) / explain the emailed link is pending (none) —
+    // instead of collecting a rating and silently discarding it (TRI-1014).
     const { rows } = await db.query(
       `SELECT b.ref, b.status, b.payment_state, b.party_size, b.total_minor, b.currency,
               b.reservation_expires_at, b.created_at,
               t.slug AS tour_slug, t.title AS tour_title,
-              d.id AS departure_id, d.date_label, d.time_label
+              d.id AS departure_id, d.date_label, d.time_label,
+              ri.token AS review_token, ri.redeemed_at AS review_redeemed_at
          FROM booking b
          JOIN tour t ON t.id = b.tour_id
          JOIN departure d ON d.id = b.departure_id
+         LEFT JOIN review_invite ri ON ri.booking_id = b.id
         WHERE b.user_id = $1
         ORDER BY b.created_at DESC`, [userId]);
     return rows.map((b) => ({
@@ -427,6 +434,12 @@ export function createConsumerService(db: Db, cfg: Config) {
       createdAt: b.created_at,
       tour: { slug: b.tour_slug, title: b.tour_title },
       departure: { id: b.departure_id, date: b.date_label, time: b.time_label ?? '' },
+      // `open` carries the live one-time token so the owner can submit; `submitted` never leaks it.
+      review: !b.review_token
+        ? { state: 'none' as const }
+        : b.review_redeemed_at
+          ? { state: 'submitted' as const }
+          : { state: 'open' as const, token: b.review_token },
     }));
   }
 
