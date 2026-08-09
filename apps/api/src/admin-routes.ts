@@ -201,6 +201,13 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
       return { ok: true };
     });
 
+    // ── Password reset (TRI-1000) ──────────────────────────────────────────────
+    // Forgot-password from the sign-in screen: request is public + always 200 (no account enumeration);
+    // consume redeems the emailed single-use token and sets the new password. Change-password (below,
+    // under /me) is the authed self-service flow. All three were previously front-end-only fakes.
+    admin.post('/auth/password-reset/request', async (req: FastifyRequest) => staffSvc.requestPasswordReset(body(req), { ip: req.ip ?? null }));
+    admin.post('/auth/password-reset/consume', async (req: FastifyRequest) => staffSvc.consumePasswordReset(body(req), { ip: req.ip ?? null }));
+
     admin.get('/me', { preHandler: auth }, async (req: FastifyRequest) => {
       const s = req.staff!;
       return {
@@ -208,6 +215,11 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
         permissions: [...s.permissions],
       };
     });
+
+    // Change own password while signed in (requires current password). Excludes the caller's own
+    // session id so the operator stays signed in on this device while other devices are revoked.
+    admin.post('/me/password', { preHandler: auth }, async (req: FastifyRequest) =>
+      staffSvc.changeOwnPassword(req.staff!.id, body(req), { ip: req.ip ?? null, exceptSid: req.cookies?.[cfg.adminCookieName] ?? null }));
 
     // TRI-988: self-update own profile (name always; jobTitle only for admins).
     admin.patch('/me', { preHandler: auth }, async (req: FastifyRequest) => {

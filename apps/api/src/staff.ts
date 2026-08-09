@@ -449,9 +449,113 @@ export function createStaffService(db: Db, cfg: Config) {
     return staffDTO(await getStaffRow(id));
   }
 
+  // ── Password: change (authed self-service) + forgot/reset (public) (TRI-1000) ─────────────────
+  // The admin console previously shipped BOTH as front-end-only fakes — the "Change password" drawer
+  // just closed and toasted "Password updated", and "Forgot password?" only flipped to a "check your
+  // inbox" state — so no request ever reached the API and nothing actually changed (this is exactly the
+  // failure Samuel hit). These wire the real thing, mirroring the consumer realm (consumer.ts): argon2id
+  // hashing, single-use sha256-hashed tokens, an always-200 request to avoid account enumeration, and
+  // session revocation.
+  const PW_MIN = 10, PW_MAX = 200;
+  function checkNewPassword(v: unknown, field = 'newPassword'): string {
+    if (typeof v !== 'string') throw new ValidationError('password is required', field);
+    if (v.length < PW_MIN) throw new ValidationError(`password must be at least ${PW_MIN} characters`, field);
+    if (v.length > PW_MAX) throw new ValidationError('password is too long', field);
+    return v;
+  }
+  const firstNameOf = (name: string | null, email: string) =>
+    (name && name.trim().split(/\s+/)[0]) || email.split('@')[0];
+
+  // Change own password while signed in. Requires the current password. Keeps THIS session alive but
+  // revokes every OTHER live session for the account, so a leaked/old session can't outlive the change.
+  async function changeOwnPassword(
+    staffId: string,
+    body: unknown,
+    meta: { ip?: string | null; exceptSid?: string | null } = {},
+  ) {
+    if (!isPlainObject(body)) throw new ValidationError('body must be an object');
+    const cur = await getStaffRow(staffId);
+    if (!cur) throw notFound('staff member');
+    const current = typeof body.currentPassword === 'string' ? body.currentPassword : '';
+    if (!cur.password_hash || !(await verifyPassword(current, cur.password_hash))) {
+      throw new AdminError('invalid_credentials', 'Your current password is incorrect.', 401);
+    }
+    const next = checkNewPassword(body.newPassword);
+    await db.query(`UPDATE staff_user SET password_hash=$2, updated_at=now() WHERE id=$1`, [staffId, await hashPassword(next)]);
+    await db.query(
+      `UPDATE session SET revoked_at=now()
+        WHERE subject_type='staff' AND subject_id=$1 AND revoked_at IS NULL AND ($2::uuid IS NULL OR id <> $2::uuid)`,
+      [staffId, meta.exceptSid ?? null]);
+    await audit(db, { actorId: staffId, action: 'staff.password_change', targetType: 'staff_user', targetId: staffId, ip: meta.ip ?? null });
+    return { ok: true };
+  }
+
+  const resetUrlFor = (raw: string) => `${cfg.adminBaseUrl}/reset-password?token=${raw}`;
+
+  // Forgot password — request. Always returns { ok: true } (no account enumeration): unknown or
+  // non-active accounts silently send nothing. For a known active staffer we mint an opaque token,
+  // store only its sha256, and email the reset link (the consumer password_reset template — its copy is
+  // realm-neutral). A transport misconfig is swallowed so it can't 500 or leak account existence.
+  async function requestPasswordReset(body: unknown, meta: { ip?: string | null } = {}) {
+    if (!isPlainObject(body)) throw new ValidationError('body must be an object');
+    const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
+    if (!email) throw new ValidationError('email is required', 'email');
+    const u = (await db.query(`SELECT id, email, name, status FROM staff_user WHERE lower(email) = $1`, [email])).rows[0];
+    if (!u || u.status !== 'active') return { ok: true }; // silent no-op for unknown/inactive accounts
+
+    const raw = randomBytes(32).toString('base64url');
+    const ttl = cfg.consumer.resetTokenTtlMinutes;
+    const { rows } = await db.query(
+      `INSERT INTO staff_password_reset (staff_user_id, token_hash, expires_at, requested_ip)
+       VALUES ($1, $2, now() + ($3 * interval '1 minute'), $4) RETURNING id`,
+      [u.id, sha256(raw), ttl, meta.ip ?? null]);
+    const tokenId = rows[0].id;
+    try {
+      await sendEmail(db, cfg, {
+        to: u.email,
+        template: 'password_reset',
+        vars: { firstName: firstNameOf(u.name, u.email), resetUrl: resetUrlFor(raw), ttlMinutes: ttl },
+        relatedType: 'staff_password_reset',
+        relatedId: tokenId,
+      });
+    } catch (e) {
+      console.error(`[staff] password-reset email dispatch error for token ${tokenId}: ${(e as Error).message}`);
+    }
+    await audit(db, { actorId: u.id, action: 'staff.password_reset_requested', targetType: 'staff_user', targetId: u.id, after: { tokenId }, ip: meta.ip ?? null });
+    return { ok: true };
+  }
+
+  // Forgot password — consume. Validates the token (live + unused), sets the new password, burns the
+  // token (single-use, atomic), voids any other outstanding tokens for the account, then revokes ALL of
+  // the account's sessions (a reset means "I lost access" — sign out everywhere).
+  async function consumePasswordReset(body: unknown, meta: { ip?: string | null } = {}) {
+    if (!isPlainObject(body)) throw new ValidationError('body must be an object');
+    const token = typeof body.token === 'string' ? body.token.trim() : '';
+    if (!token) throw new ValidationError('reset token is required', 'token');
+    const next = checkNewPassword(body.password, 'password');
+    const row = (await db.query(
+      `SELECT id, staff_user_id, expires_at, consumed_at FROM staff_password_reset WHERE token_hash = $1`,
+      [sha256(token)])).rows[0];
+    if (!row || row.consumed_at || new Date(row.expires_at).getTime() <= Date.now()) {
+      throw new AdminError('invalid_token', 'This reset link is invalid or has expired.', 400);
+    }
+    const passwordHash = await hashPassword(next);
+    await db.tx(async (q) => {
+      const consumed = await q.query(
+        `UPDATE staff_password_reset SET consumed_at=now() WHERE id=$1 AND consumed_at IS NULL RETURNING id`, [row.id]);
+      if (consumed.rowCount === 0) throw new AdminError('invalid_token', 'This reset link has already been used.', 400);
+      await q.query(`UPDATE staff_user SET password_hash=$2, updated_at=now() WHERE id=$1`, [row.staff_user_id, passwordHash]);
+      await q.query(`UPDATE staff_password_reset SET consumed_at=now() WHERE staff_user_id=$1 AND consumed_at IS NULL`, [row.staff_user_id]);
+    });
+    await db.query(`UPDATE session SET revoked_at=now() WHERE subject_type='staff' AND subject_id=$1 AND revoked_at IS NULL`, [row.staff_user_id]);
+    await audit(db, { actorId: row.staff_user_id, action: 'staff.password_reset', targetType: 'staff_user', targetId: row.staff_user_id, ip: meta.ip ?? null });
+    return { ok: true };
+  }
+
   return {
     listStaff, inviteStaff, resendInvite, revokeInvite, previewInvite, acceptInvite, updateStaff, updateSelf, setStatus,
     enrollMfa, verifyMfaEnrollment, disableMfa, regenerateRecoveryCodes, verifyChallenge, mfaStatus,
+    changeOwnPassword, requestPasswordReset, consumePasswordReset,
   };
 }
 

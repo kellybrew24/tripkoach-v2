@@ -322,6 +322,10 @@
     mfaVerifyEnroll: function (code) { return req("POST", "/auth/mfa/verify", { code: code }); },
     mfaDisable: function (code) { return req("POST", "/auth/mfa/disable", { code: code }); },
     mfaRegenerateCodes: function () { return req("POST", "/auth/mfa/recovery-codes"); },
+    // password — change (authed self-service) + forgot/reset (public) (TRI-1000)
+    changePassword: function (currentPassword, newPassword) { return req("POST", "/me/password", { currentPassword: currentPassword, newPassword: newPassword }); },
+    requestPasswordReset: function (email) { return req("POST", "/auth/password-reset/request", { email: email }); },
+    consumePasswordReset: function (token, password) { return req("POST", "/auth/password-reset/consume", { token: token, password: password }); },
     // catalogue
     listTours: function () { return req("GET", "/tours"); },
     getTour: function (id) { return req("GET", "/tours/" + encodeURIComponent(id)); },

@@ -280,19 +280,87 @@ function MfaEnrollGate({ go }) {
   );
 }
 
+// TRI-1000 · Forgot password — request stage (from the sign-in screen). Previously this only flipped a
+// local `sent` flag without calling anything. Live → POST /api/admin/auth/password-reset/request, which
+// always returns 200 (no account enumeration), so we show the same "check your inbox" state regardless.
+// Flag off → keep the prototype behaviour (byte-identical).
 function ResetPassword({ go }) {
+  const LIVE = !!(window.TK_CONFIG && window.TK_CONFIG.USE_LIVE_API);
   const [sent, setSent] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+  const [email, setEmail] = React.useState("");
+  const [err, setErr] = React.useState(null);
+  const submit = (e) => {
+    e.preventDefault();
+    if (!LIVE || !window.TK_ADMIN_API || !window.TK_ADMIN_API.requestPasswordReset) { setSent(true); return; }
+    setBusy(true); setErr(null);
+    window.TK_ADMIN_API.requestPasswordReset(email.trim()).then(function () {
+      setBusy(false); setSent(true);
+    }, function (ex) {
+      setBusy(false); setErr((ex && ex.message) || "We couldn't send the reset link. Please try again.");
+    });
+  };
   return (
     <AuthFrame foot={<Button block variant="ghost" style={{ marginTop: "var(--space-4)" }} onClick={() => go("login")}>Back to sign-in</Button>}>
       <h2 className="tk-h2">Reset your password</h2>
       {sent ? (
-        <Alert tone="success" title="Check your inbox" style={{ marginTop: "var(--space-5)" }}>If an account exists for that email, we've sent a reset link. It expires in 30 minutes.</Alert>
+        <Alert tone="success" title="Check your inbox" style={{ marginTop: "var(--space-5)" }}>If an account exists for that email, we've sent a reset link. It expires in 60 minutes.</Alert>
       ) : (
         <>
           <p className="tk-body-sm tk-muted" style={{ marginTop: 4, marginBottom: "var(--space-6)" }}>Enter your work email and we'll send a reset link. For security, we won't say whether the account exists.</p>
-          <form onSubmit={(e) => { e.preventDefault(); setSent(true); }} className="tk-stack" style={{ gap: "var(--space-4)" }}>
-            <FormField id="r-email" label="Work email"><Input type="email" placeholder="you@tripkoach.com" iconStart="mail" /></FormField>
-            <Button block size="lg" type="submit">Send reset link</Button>
+          {err && <Alert tone="error" title="Couldn't send reset link" style={{ marginBottom: "var(--space-4)" }}>{err}</Alert>}
+          <form onSubmit={submit} className="tk-stack" style={{ gap: "var(--space-4)" }}>
+            <FormField id="r-email" label="Work email"><Input id="r-email" type="email" placeholder="you@tripkoach.com" iconStart="mail" value={email} onChange={(e) => setEmail(e.target.value)} /></FormField>
+            <Button block size="lg" type="submit" disabled={busy || (LIVE && !email.trim())}>{busy ? "Sending…" : "Send reset link"}</Button>
+          </form>
+        </>
+      )}
+    </AuthFrame>
+  );
+}
+
+// TRI-1000 · Forgot password — consume stage. Reached via the emailed link
+// (${ADMIN_BASE_URL}/reset-password?token=…). Sets a new password with the single-use token, then routes
+// back to sign-in. The token is read from the query string once on mount.
+function ResetPasswordConsume({ go }) {
+  const token = React.useMemo(() => {
+    try { return new URLSearchParams(window.location.search || "").get("token") || ""; } catch (e) { return ""; }
+  }, []);
+  const [pw, setPw] = React.useState("");
+  const [pw2, setPw2] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [done, setDone] = React.useState(false);
+  const [err, setErr] = React.useState(null);
+  const pwOk = pw.length >= 10 && pw === pw2;
+  const submit = (e) => {
+    e.preventDefault();
+    if (!token) { setErr("This reset link is invalid or has expired. Request a new one."); return; }
+    if (!window.TK_ADMIN_API || !window.TK_ADMIN_API.consumePasswordReset) { setErr("Password reset is unavailable right now. Please try again later."); return; }
+    setBusy(true); setErr(null);
+    window.TK_ADMIN_API.consumePasswordReset(token, pw).then(function () {
+      setBusy(false); setDone(true);
+    }, function (ex) {
+      setBusy(false);
+      setErr(ex && (ex.status === 400) ? "This reset link is invalid or has expired. Request a new one." : (ex && ex.message) || "We couldn't reset your password. Please try again.");
+    });
+  };
+  return (
+    <AuthFrame foot={<Button block variant="ghost" style={{ marginTop: "var(--space-4)" }} onClick={() => go("login")}>Back to sign-in</Button>}>
+      {done ? (
+        <>
+          <h2 className="tk-h2">Password updated</h2>
+          <p className="tk-body-sm tk-muted" style={{ marginTop: 4, marginBottom: "var(--space-6)" }}>You're all set. Sign in with your new password to continue.</p>
+          <Button block size="lg" onClick={() => go("login")}>Go to sign-in</Button>
+        </>
+      ) : (
+        <>
+          <h2 className="tk-h2">Set a new password</h2>
+          <p className="tk-body-sm tk-muted" style={{ marginTop: 4, marginBottom: "var(--space-6)" }}>Choose a strong password you don't use anywhere else.</p>
+          {err && <Alert tone="error" title="We couldn't reset your password" style={{ marginBottom: "var(--space-4)" }}>{err}</Alert>}
+          <form onSubmit={submit} className="tk-stack" style={{ gap: "var(--space-4)" }}>
+            <FormField id="rp-pw" label="New password" hint="At least 10 characters."><PasswordInput id="rp-pw" value={pw} onChange={(e) => setPw(e.target.value)} /></FormField>
+            <FormField id="rp-pw2" label="Confirm new password" error={pw2 && pw !== pw2 ? "Passwords don't match" : undefined}><PasswordInput id="rp-pw2" value={pw2} onChange={(e) => setPw2(e.target.value)} /></FormField>
+            <Button block size="lg" type="submit" disabled={!pwOk || busy}>{busy ? "Updating…" : "Update password"}</Button>
           </form>
         </>
       )}
@@ -312,4 +380,4 @@ function SessionExpired({ go }) {
     </div>
   );
 }
-Object.assign(window, { AdminLogin, MfaChallenge, MfaEnrollGate, ResetPassword, SessionExpired });
+Object.assign(window, { AdminLogin, MfaChallenge, MfaEnrollGate, ResetPassword, ResetPasswordConsume, SessionExpired });

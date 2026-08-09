@@ -793,6 +793,22 @@ function AccountProfileAdmin({ go, user }) {
   const [changePw, setChangePw] = React.useState(false);
   const [pw, setPw] = React.useState({ cur: "", next: "", conf: "" });
   const pwOk = pw.next.length >= 10 && pw.next === pw.conf && pw.cur.length > 0;
+  const [pwBusy, setPwBusy] = React.useState(false);
+  const [pwErr, setPwErr] = React.useState(null);
+  // TRI-1000: real change-password. This drawer previously just closed + toasted
+  // "Password updated" without ever calling the API (nothing changed — the exact
+  // failure Samuel hit). Live → POST /api/admin/me/password (wrong current → 401
+  // shown inline). Flag off → keep the demo behaviour (byte-identical prototype).
+  function submitPw() {
+    if (!LIVE || !window.TK_ADMIN_API || !window.TK_ADMIN_API.changePassword) { setChangePw(false); setToast("Password updated"); return; }
+    setPwBusy(true); setPwErr(null);
+    window.TK_ADMIN_API.changePassword(pw.cur, pw.next).then(function () {
+      setPwBusy(false); setChangePw(false); setToast("Password updated");
+    }, function (e) {
+      setPwBusy(false);
+      setPwErr(e && e.status === 401 ? "Your current password is incorrect." : (e && e.message) || "We couldn't update your password. Please try again.");
+    });
+  }
   const [showCodes, setShowCodes] = React.useState(false);
   const codes = ["7F2K-9QL4", "B3MX-1WP8", "D6RT-5YC2", "H9NA-4VE7", "K2QZ-8JU3", "M5LP-6XB9"];
   const u = user || { name: "Kwame Boateng", role: "Admin", rawRole: "admin", initials: "KB", email: "kwame@tripkoach.com", jobTitle: null };
@@ -843,7 +859,7 @@ function AccountProfileAdmin({ go, user }) {
         <h2 className="tk-h5" style={{ margin: 0 }}>Security</h2>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
           <span><strong style={{ fontSize: 14.5, color: "var(--text-strong)" }}>Password</strong><p className="tk-body-sm tk-muted" style={{ margin: "2px 0 0" }}>Last changed 2 months ago.</p></span>
-          <Button variant="secondary" size="sm" onClick={() => { setPw({ cur: "", next: "", conf: "" }); setChangePw(true); }}>Change password</Button>
+          <Button variant="secondary" size="sm" onClick={() => { setPw({ cur: "", next: "", conf: "" }); setPwErr(null); setChangePw(true); }}>Change password</Button>
         </div>
         {LIVE ? (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, paddingTop: 14, borderTop: "1px solid var(--border-subtle)" }}>
@@ -862,12 +878,13 @@ function AccountProfileAdmin({ go, user }) {
         )}
       </div></div>
 
-      <Drawer open={changePw} title="Change password" subtitle="Choose a strong password you don't use elsewhere" onClose={() => setChangePw(false)}
-        footer={<><Button variant="secondary" onClick={() => setChangePw(false)}>Cancel</Button><Button iconStart="check" disabled={!pwOk} onClick={() => { setChangePw(false); setToast("Password updated"); }} style={{ marginInlineStart: "auto" }}>Update password</Button></>}>
+      <Drawer open={changePw} title="Change password" subtitle="Choose a strong password you don't use elsewhere" onClose={() => { setChangePw(false); setPwErr(null); }}
+        footer={<><Button variant="secondary" onClick={() => { setChangePw(false); setPwErr(null); }}>Cancel</Button><Button iconStart="check" disabled={!pwOk || pwBusy} onClick={submitPw} style={{ marginInlineStart: "auto" }}>{pwBusy ? "Updating…" : "Update password"}</Button></>}>
+        {pwErr && <Alert tone="error" title="We couldn't update your password" style={{ marginBottom: "var(--space-4)" }}>{pwErr}</Alert>}
         <FormField id="pw-cur" label="Current password"><Input id="pw-cur" type="password" value={pw.cur} onChange={(e) => setPw(p => ({ ...p, cur: e.target.value }))} /></FormField>
         <FormField id="pw-next" label="New password" hint="At least 10 characters."><Input id="pw-next" type="password" value={pw.next} onChange={(e) => setPw(p => ({ ...p, next: e.target.value }))} /></FormField>
         <FormField id="pw-conf" label="Confirm new password" error={pw.conf && pw.next !== pw.conf ? "Passwords don't match" : undefined}><Input id="pw-conf" type="password" value={pw.conf} onChange={(e) => setPw(p => ({ ...p, conf: e.target.value }))} /></FormField>
-        <Alert tone="info" title="You'll stay signed in">Other devices will be signed out and need the new password.</Alert>
+        <Alert tone="info" title="You'll stay signed in on this device">Signing in on other devices will need the new password.</Alert>
       </Drawer>
       {LIVE ? (
         <>
