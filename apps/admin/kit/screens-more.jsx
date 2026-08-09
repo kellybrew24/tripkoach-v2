@@ -323,6 +323,43 @@ function CustomersAdmin({ go, state, setState }) {
 }
 
 /* ── Payments & reconciliation ─────────────────────────── */
+// TRI-1006: "Export for reconciliation" download. Live mode streams the finance-grade CSV
+// (payments + refunds, FX columns) from the real GET /reports/reconciliation.csv endpoint so
+// the browser download carries the admin cookie. Demo/fixture mode (flag off, no server) falls
+// back to a client-side CSV of the visible payment rows so the button still produces a file.
+function reconCsvCell(v) {
+  const s = v == null ? "" : String(v);
+  return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+function triggerBlobDownload(blob, filename) {
+  const url = (window.URL || window.webkitURL).createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => (window.URL || window.webkitURL).revokeObjectURL(url), 0);
+}
+function exportReconciliation(payments) {
+  const API = window.TK_ADMIN_API;
+  if (API && API.live && API.live() && API.reconciliationCsv) {
+    API.reconciliationCsv().then(({ blob, filename }) => {
+      triggerBlobDownload(blob, filename || "reconciliation.csv");
+      window.tkToast("Reconciliation export downloaded");
+    }).catch((e) => {
+      window.tkToast(e && e.message ? "Export failed — " + e.message : "Export failed");
+    });
+    return;
+  }
+  // Fixture fallback: build a CSV from the loaded payment rows.
+  try {
+    const cols = [["id", "Transaction"], ["ref", "Booking"], ["customer", "Customer"], ["method", "Method"], ["amount", "Amount (USD)"], ["status", "Status"], ["date", "Date"]];
+    const lines = [cols.map((c) => c[1]).join(",")];
+    (payments || []).forEach((r) => lines.push(cols.map((c) => reconCsvCell(r[c[0]])).join(",")));
+    triggerBlobDownload(new Blob([lines.join("\r\n") + "\r\n"], { type: "text/csv;charset=utf-8" }), "reconciliation.csv");
+    window.tkToast((payments || []).length + " transactions exported");
+  } catch (_) {
+    window.tkToast("Export failed");
+  }
+}
 function PaymentsAdmin({ go, state }) {
   const A = window.TK_ADMIN;
   const [tab, setTab] = React.useState("all");
@@ -338,6 +375,11 @@ function PaymentsAdmin({ go, state }) {
   };
   const totalPaid = A.payments.filter(p => p.status === "paid").reduce((s, p) => s + p.amount, 0);
   const outstanding = A.bookings.filter(b => b.payment === "unpaid").reduce((s, b) => s + b.total, 0);
+  // TRI-1006: derive Refunded total + Failed count from the live payment records (were hardcoded
+  // "$1,080" / "1"). Refunded = sum of refunded amounts; failed = count of failed attempts.
+  const refundedRows = A.payments.filter(p => p.status === "refunded");
+  const refundedTotal = refundedRows.reduce((s, p) => s + p.amount, 0);
+  const failedCount = A.payments.filter(p => p.status === "failed").length;
   let rows = A.payments.filter(p => tab === "all" || p.status === tab);
   const { StatCard } = NS;
   return (
@@ -346,12 +388,12 @@ function PaymentsAdmin({ go, state }) {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 16 }}>
         <StatCard label="Collected" value={"$" + totalPaid.toLocaleString()} icon="wallet" delta="+8%" deltaDir="up" hint="this month" />
         <StatCard label="Outstanding (pay later)" value={"$" + outstanding.toLocaleString()} icon="clock" deltaDir="flat" delta="4 bookings" />
-        <StatCard label="Refunded" value="$1,080" icon="receipt" deltaDir="flat" delta="1 this month" />
-        <StatCard label="Failed attempts" value="1" icon="triangle-alert" deltaDir="down" delta="needs review" />
+        <StatCard label="Refunded" value={"$" + refundedTotal.toLocaleString()} icon="receipt" deltaDir="flat" delta={refundedRows.length + (refundedRows.length === 1 ? " transaction" : " transactions")} />
+        <StatCard label="Failed attempts" value={String(failedCount)} icon="triangle-alert" deltaDir={failedCount > 0 ? "down" : "flat"} delta={failedCount > 0 ? "needs review" : "all clear"} />
       </div>
       <Tabs value={tab} onChange={setTab} tabs={[{ id: "all", label: "All" }, { id: "paid", label: "Paid" }, { id: "pending", label: "Pending" }, { id: "failed", label: "Failed" }, { id: "refunded", label: "Refunded" }]} />
       <div className="tk-tablewrap">
-        <div className="tk-tabletools"><strong style={{ fontSize: 14 }}>{rows.length} transactions</strong><Button size="sm" variant="secondary" iconStart="download" style={{ marginInlineStart: "auto" }} onClick={() => window.tkToast("Exporting transactions for reconciliation…")}>Export for reconciliation</Button></div>
+        <div className="tk-tabletools"><strong style={{ fontSize: 14 }}>{rows.length} transactions</strong><Button size="sm" variant="secondary" iconStart="download" style={{ marginInlineStart: "auto" }} onClick={() => exportReconciliation(A.payments)}>Export for reconciliation</Button></div>
         <DataTable density="compact"
           columns={[
             { key: "id", header: "Transaction", strong: true },

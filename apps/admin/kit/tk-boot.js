@@ -362,6 +362,27 @@
     // for a full refund of the original charge.
     refundPayment: function (id, body) { return req("POST", "/payments/" + encodeURIComponent(id) + "/refund", body || {}); },
     markPaid: function (id) { return req("POST", "/payments/" + encodeURIComponent(id) + "/mark-paid"); },
+    // TRI-1006: reconciliation export. GET /reports/reconciliation.csv is a real, cookie-authed
+    // (perm payments.refund) endpoint that streams a finance-grade CSV (payments + refunds, FX
+    // columns) with a Content-Disposition filename. Fetch it as a Blob so the browser download
+    // carries the admin session cookie; resolves { blob, filename }.
+    reconciliationCsv: function (params) {
+      var url = adminBase() + "/reports/reconciliation.csv";
+      if (params) {
+        var qs = Object.keys(params)
+          .filter(function (k) { var v = params[k]; return v !== undefined && v !== null && v !== ""; })
+          .map(function (k) { return encodeURIComponent(k) + "=" + encodeURIComponent(params[k]); })
+          .join("&");
+        if (qs) url += "?" + qs;
+      }
+      return fetch(url, { method: "GET", credentials: "include", headers: { Accept: "text/csv" } }).then(function (res) {
+        if (!res.ok) throw TkApiError(res.status, null, "HTTP " + res.status);
+        var cd = res.headers && res.headers.get && res.headers.get("content-disposition");
+        var m = cd && /filename="?([^"]+)"?/.exec(cd);
+        var filename = (m && m[1]) || "reconciliation.csv";
+        return res.blob().then(function (blob) { return { blob: blob, filename: filename }; });
+      });
+    },
     // promos / settings / staff
     listPromos: function () { return req("GET", "/promos"); },
     savePromo: function (v) { return v && v.id ? req("PATCH", "/promos/" + encodeURIComponent(v.id), v) : req("POST", "/promos", v); },
