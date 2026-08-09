@@ -421,7 +421,47 @@ function PromosAdmin({ go }) {
 function UsersAdmin({ go }) {
   const A = window.TK_ADMIN;
   const [invite, setInvite] = React.useState(false);
+  const [edit, setEdit] = React.useState(null);
   const [toast, setToast] = React.useState(null);
+  // TRI-996: screens read the mutable A.staff global directly, so a successful
+  // write must both mutate the shared record AND force a re-render (TRI-980
+  // pattern) — run only from the TK_ADMIN_ACT success callback, never on failure.
+  const [, forceRerender] = React.useReducer((x) => x + 1, 0);
+  const initialsOf = (name) => String(name || "").split(/\s+/).map(w => w.charAt(0)).join("").slice(0, 2).toUpperCase();
+  const applyStaff = (id, patch) => {
+    const s = (A.staff || []).find((x) => x.id === id);
+    if (s) { Object.assign(s, patch); if (patch.name !== undefined) s.initials = initialsOf(patch.name); }
+    forceRerender();
+  };
+  const copyEmail = (r) => {
+    try { navigator.clipboard && navigator.clipboard.writeText(r.email); } catch (_) {}
+    setToast(r.email + " copied");
+  };
+  const roleLabel = { admin: "Admin", operator: "Operator", viewer: "Read-only" };
+  const kebab = (r) => {
+    const items = [
+      { label: "Edit details", icon: "pencil", onClick: () => setEdit({ id: r.id, name: r.name, role: r.role, jobTitle: r.jobTitle || "", status: r.status, email: r.email }) },
+      { label: "Copy email address", icon: "mail", onClick: () => copyEmail(r) },
+      { divider: true },
+    ];
+    if (r.status === "invited")
+      items.push({ label: "Resend invite", icon: "refresh-cw", onClick: () => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.resendStaffInvite(r.id), () => setToast("Invite re-sent to " + r.email)) });
+    if (r.status === "disabled")
+      items.push({ label: "Re-enable account", icon: "circle-check-big", onClick: () => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.enableStaff(r.id), () => { applyStaff(r.id, { status: "active" }); setToast(r.name + " re-enabled"); }) });
+    else if (r.status !== "invited")
+      items.push({ label: "Disable account", icon: "log-out", danger: true, onClick: () => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.disableStaff(r.id), () => { applyStaff(r.id, { status: "disabled" }); setToast(r.name + " disabled — signed out everywhere"); }) });
+    return items;
+  };
+  const saveEdit = () => {
+    if (!edit) return;
+    const name = (document.getElementById("se-name") || {}).value;
+    const role = (document.getElementById("se-role") || {}).value || edit.role;
+    const jobTitle = (document.getElementById("se-title") || {}).value || "";
+    window.TK_ADMIN_ACT(
+      () => window.TK_ADMIN_API.updateStaff(edit.id, { name: name, role: role, jobTitle: jobTitle }),
+      () => { applyStaff(edit.id, { name: name, role: role, jobTitle: jobTitle }); setToast("Staff member updated"); setEdit(null); }
+    );
+  };
   const [perms, setPerms] = React.useState({
     "tours.view": { admin: true, operator: true, viewer: true }, "tours.edit": { admin: true, operator: true, viewer: false },
     "bookings.view": { admin: true, operator: true, viewer: true }, "bookings.manage": { admin: true, operator: true, viewer: false },
@@ -448,7 +488,7 @@ function UsersAdmin({ go }) {
             { key: "last", header: "Last active" },
           ]}
           rows={A.staff} getRowId={r => r.id}
-          rowActions={(r) => <IconButton icon="ellipsis" label={"Actions for " + r.name} variant="ghost" size="sm" onClick={() => window.tkToast("Manage " + r.name + " — edit role or remove")} />} />
+          rowActions={(r) => <PortalRowMenu label={"Actions for " + r.name} items={kebab(r)} />} />
       </div>
       <div>
         <h3 className="tk-h5" style={{ marginBottom: 4 }}>Role permissions</h3>
@@ -469,6 +509,16 @@ function UsersAdmin({ go }) {
         <FormField id="iv-email" label="Work email" required><Input type="email" placeholder="name@tripkoach.com" iconStart="mail" /></FormField>
         <FormField id="iv-name" label="Full name"><Input placeholder="Ama Owusu" /></FormField>
         <FormField id="iv-role" label="Role" help="You can change this later"><Select defaultValue="operator" options={[{ value: "admin", label: "Admin — full access" }, { value: "operator", label: "Operator — day-to-day ops" }, { value: "viewer", label: "Read-only — view but not change" }]} /></FormField>
+      </Drawer>
+      <Drawer open={!!edit} title="Edit staff member" subtitle={edit ? edit.email : ""} onClose={() => setEdit(null)}
+        footer={<><Button variant="secondary" onClick={() => setEdit(null)}>Cancel</Button><Button iconStart="check" onClick={saveEdit}>Save changes</Button></>}>
+        {edit && <>
+          <FormField id="se-name" label="Full name"><Input defaultValue={edit.name} placeholder="Ama Owusu" /></FormField>
+          <FormField id="se-role" label="Role" help="Changing to Operator or Read-only removes admin access. The last active admin can't be demoted.">
+            <Select defaultValue={edit.role} options={[{ value: "admin", label: "Admin — full access" }, { value: "operator", label: "Operator — day-to-day ops" }, { value: "viewer", label: "Read-only — view but not change" }]} /></FormField>
+          <FormField id="se-title" label="Job title" help="Shown on their profile — e.g. Operations Lead"><Input defaultValue={edit.jobTitle} placeholder="Operations Lead" /></FormField>
+          {edit.status === "invited" && <Alert tone="info" title="Invite pending">This person hasn't accepted their invite yet. Role and name changes apply now; use “Resend invite” from the row menu if they need a fresh link.</Alert>}
+        </>}
       </Drawer>
       {toast && <div style={{ position: "fixed", bottom: 20, insetInline: 0, display: "flex", justifyContent: "center", zIndex: 800 }}><Toast tone="success" onClose={() => setToast(null)}>{toast}</Toast></div>}
     </div>

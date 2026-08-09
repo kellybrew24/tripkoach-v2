@@ -204,6 +204,7 @@
     return {
       id: pick(u.id, u.staffId), name: u.name || "", email: u.email || "",
       role: u.role || "viewer", status: u.status || "active", initials: u.initials || initials(u.name),
+      jobTitle: pick(u.jobTitle, u.job_title) || "",
       last: pick(u.last, u.lastActive, u.last_active_at, "—"),
     };
   }
@@ -357,6 +358,12 @@
     saveSettings: function (v) { return req("PATCH", "/settings", v || {}); },
     listStaff: function () { return req("GET", "/staff"); },
     inviteStaff: function (v) { return req("POST", "/staff", v); },
+    // TRI-996: staff row actions — update role/name/job-title, resend invite, disable/enable.
+    // All guarded server-side by perm('users.manage'); the last-active-admin guard returns 409.
+    updateStaff: function (id, v) { return req("PATCH", "/staff/" + encodeURIComponent(id), v || {}); },
+    resendStaffInvite: function (id) { return req("POST", "/staff/" + encodeURIComponent(id) + "/resend-invite"); },
+    disableStaff: function (id) { return req("POST", "/staff/" + encodeURIComponent(id) + "/disable"); },
+    enableStaff: function (id) { return req("POST", "/staff/" + encodeURIComponent(id) + "/enable"); },
     // reviews moderation (TRI-893) — unpublish & restore both return a review to 'pending' (hidden)
     listReviews: function () { return req("GET", "/reviews"); },
     approveReview: function (id) { return req("POST", "/reviews/" + encodeURIComponent(id) + "/approve"); },
