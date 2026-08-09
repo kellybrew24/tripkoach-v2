@@ -433,6 +433,11 @@ function UsersAdmin({ go }) {
     if (s) { Object.assign(s, patch); if (patch.name !== undefined) s.initials = initialsOf(patch.name); }
     forceRerender();
   };
+  const removeStaff = (id) => {
+    const i = (A.staff || []).findIndex((x) => x.id === id);
+    if (i >= 0) A.staff.splice(i, 1);
+    forceRerender();
+  };
   const copyEmail = (r) => {
     try { navigator.clipboard && navigator.clipboard.writeText(r.email); } catch (_) {}
     setToast(r.email + " copied");
@@ -444,8 +449,10 @@ function UsersAdmin({ go }) {
       { label: "Copy email address", icon: "mail", onClick: () => copyEmail(r) },
       { divider: true },
     ];
-    if (r.status === "invited")
+    if (r.status === "invited") {
       items.push({ label: "Resend invite", icon: "refresh-cw", onClick: () => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.resendStaffInvite(r.id), () => setToast("Invite re-sent to " + r.email)) });
+      items.push({ label: "Revoke invite", icon: "trash-2", danger: true, onClick: () => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.revokeStaffInvite(r.id), () => { removeStaff(r.id); setToast("Invite to " + r.email + " revoked"); }) });
+    }
     if (r.status === "disabled")
       items.push({ label: "Re-enable account", icon: "circle-check-big", onClick: () => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.enableStaff(r.id), () => { applyStaff(r.id, { status: "active" }); setToast(r.name + " re-enabled"); }) });
     else if (r.status !== "invited")

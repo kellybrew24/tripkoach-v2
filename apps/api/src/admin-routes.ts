@@ -263,6 +263,7 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
     admin.post('/staff', perm('users.manage'), async (req, reply) => reply.code(201).send(await staffSvc.inviteStaff(body(req), actorOf(req))));
     admin.patch('/staff/:id', perm('users.manage'), async (req) => staffSvc.updateStaff((req.params as any).id, body(req), actorOf(req)));
     admin.post('/staff/:id/resend-invite', perm('users.manage'), async (req) => staffSvc.resendInvite((req.params as any).id, actorOf(req)));
+    admin.post('/staff/:id/revoke-invite', perm('users.manage'), async (req) => staffSvc.revokeInvite((req.params as any).id, actorOf(req)));
     admin.post('/staff/:id/disable', perm('users.manage'), async (req) => staffSvc.setStatus((req.params as any).id, 'disabled', actorOf(req)));
     admin.post('/staff/:id/enable', perm('users.manage'), async (req) => staffSvc.setStatus((req.params as any).id, 'active', actorOf(req)));
 

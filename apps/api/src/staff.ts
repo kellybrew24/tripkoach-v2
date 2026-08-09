@@ -189,6 +189,19 @@ export function createStaffService(db: Db, cfg: Config) {
     return { staff: staffDTO(staff), invite: inviteResponse(invite.inviteId, invite.expiresAt, invite.raw, emailResult.status) };
   }
 
+  // Cancel a pending invite outright (TRI-996). The account never accepted, so we
+  // remove the placeholder staff_user entirely — staff_invite rows cascade away
+  // (006/015 ON DELETE CASCADE) and no sessions/uploads can exist yet. Only
+  // 'invited' accounts are eligible; active/disabled must go through disable.
+  async function revokeInvite(id: string, actor: Actor) {
+    const cur = await getStaffRow(id);
+    if (!cur) throw notFound('staff member');
+    if (cur.status !== 'invited') throw conflict(`can only revoke a pending (invited) invite; ${cur.email} is ${cur.status} — disable the account instead`);
+    await db.query(`DELETE FROM staff_user WHERE id=$1`, [id]);
+    await audit(db, { actorId: actor.id, action: 'staff.invite_revoked', targetType: 'staff_user', targetId: id, before: { email: cur.email, role: cur.role, status: cur.status }, ip: actor.ip });
+    return { ok: true, id, email: cur.email };
+  }
+
   // ── Accept (PUBLIC — no session; the token IS the credential) ────────────────
   async function findLiveInvite(token: string) {
     if (typeof token !== 'string' || token.trim() === '') throw new ValidationError('"token" is required', 'token');
@@ -437,7 +450,7 @@ export function createStaffService(db: Db, cfg: Config) {
   }
 
   return {
-    listStaff, inviteStaff, resendInvite, previewInvite, acceptInvite, updateStaff, updateSelf, setStatus,
+    listStaff, inviteStaff, resendInvite, revokeInvite, previewInvite, acceptInvite, updateStaff, updateSelf, setStatus,
     enrollMfa, verifyMfaEnrollment, disableMfa, regenerateRecoveryCodes, verifyChallenge, mfaStatus,
   };
 }

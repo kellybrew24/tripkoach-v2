@@ -108,10 +108,21 @@ const APPS = {
     // (the sticky topbar + the page) at their natural height so the page keeps its full
     // content height and `.tk-shell__main` actually overflows and scrolls. Verified in
     // a real browser: 50-row table fully reachable, topbar stays pinned at top:0.
+    //
+    // TRI-996: pin the row-actions (⋯) column to the right edge so it never
+    // scrolls out of reach on narrow screens. The DS table already ships
+    // border-collapse:separate + a horizontally-scrollable .tk-table-scroll, so
+    // position:sticky on the kebab cells is enough. Body cells inherit the <tr>
+    // background (auto-tracks zebra/hover/selected rows) so scrolled content is
+    // occluded; the header cell keeps the DS header background. z-index order:
+    // header-kebab(3) > body-kebab(2) > DS sticky header(1) > normal cells.
     headCss: `html:has(.tk-shell),body:has(.tk-shell){height:100%;overflow:hidden}
 .tk-shell{height:100vh;overflow:hidden;grid-template-rows:minmax(0,1fr)}
 .tk-shell__main{overflow-y:auto;min-height:0}
-.tk-shell__main>*{flex-shrink:0}`,
+.tk-shell__main>*{flex-shrink:0}
+.tk-table th.tk-rowkebab,.tk-table td.tk-rowkebab{position:sticky;right:0;z-index:2;border-inline-start:1px solid var(--table-border)}
+.tk-table td.tk-rowkebab{background:inherit}
+.tk-table thead th.tk-rowkebab{z-index:3}`,
   },
 };
 

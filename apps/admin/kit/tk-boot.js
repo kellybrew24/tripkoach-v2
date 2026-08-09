@@ -362,6 +362,7 @@
     // All guarded server-side by perm('users.manage'); the last-active-admin guard returns 409.
     updateStaff: function (id, v) { return req("PATCH", "/staff/" + encodeURIComponent(id), v || {}); },
     resendStaffInvite: function (id) { return req("POST", "/staff/" + encodeURIComponent(id) + "/resend-invite"); },
+    revokeStaffInvite: function (id) { return req("POST", "/staff/" + encodeURIComponent(id) + "/revoke-invite"); },
     disableStaff: function (id) { return req("POST", "/staff/" + encodeURIComponent(id) + "/disable"); },
     enableStaff: function (id) { return req("POST", "/staff/" + encodeURIComponent(id) + "/enable"); },
     // reviews moderation (TRI-893) — unpublish & restore both return a review to 'pending' (hidden)
