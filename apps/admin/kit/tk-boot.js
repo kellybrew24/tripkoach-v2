@@ -402,6 +402,14 @@
     // TRI-972: customer activity/events timeline (bookings, cancellations, reschedules, refunds, reviews)
     getCustomerActivity: function (id) { return req("GET", "/customers/" + encodeURIComponent(id) + "/activity"); },
     listGuides: function () { return req("GET", "/guides"); },
+    // guides write path (TRI-1005) — POST/PATCH/DELETE /guides all exist server-side
+    // (guarded by tours.edit). createGuide → save, updateGuide/setGuideStatus → edit
+    // + on-leave/active toggle, deleteGuide → remove from the lead-guide picker.
+    getGuide: function (id) { return req("GET", "/guides/" + encodeURIComponent(id)); },
+    createGuide: function (v) { return req("POST", "/guides", v || {}); },
+    updateGuide: function (id, v) { return req("PATCH", "/guides/" + encodeURIComponent(id), v || {}); },
+    setGuideStatus: function (id, status) { return req("PATCH", "/guides/" + encodeURIComponent(id), { status: status }); },
+    deleteGuide: function (id) { return req("DELETE", "/guides/" + encodeURIComponent(id)); },
     // reporting (TRI-898): console-home aggregates + read-only audit log (A15/A16)
     getDashboard: function (range) { return req("GET", "/dashboard" + (range ? "?range=" + encodeURIComponent(range) : "")); },
     listAuditLog: function (params) {

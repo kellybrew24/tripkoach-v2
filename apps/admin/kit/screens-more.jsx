@@ -992,6 +992,68 @@ function GuidesAdmin({ go }) {
   const [edit, setEdit] = React.useState(null);
   const [remove, setRemove] = React.useState(null);
   const [toast, setToast] = React.useState(null);
+  // TRI-1005: the whole write path was toast-only (screens read the mutable A.guides
+  // global directly). Route Add/Save/Set-on-leave/Mark-active/Remove through
+  // TK_ADMIN_ACT → real POST/PATCH/DELETE /guides, mutate the shared record on
+  // success, and force a re-render (TRI-980/996 seam). Flag off → optimistic-only,
+  // byte-identical to the prototype.
+  const [, forceRerender] = React.useReducer((x) => x + 1, 0);
+  const initialsOf = (name) => String(name || "").split(/\s+/).filter(Boolean).map(w => w.charAt(0)).join("").slice(0, 2).toUpperCase();
+  const applyGuide = (id, patch) => {
+    const gg = (A.guides || []).find((x) => x.id === id);
+    if (gg) { Object.assign(gg, patch); if (patch.name !== undefined) gg.initials = initialsOf(patch.name); }
+    forceRerender();
+  };
+  const removeGuide = (id) => {
+    const i = (A.guides || []).findIndex((x) => x.id === id);
+    if (i >= 0) A.guides.splice(i, 1);
+    forceRerender();
+  };
+  const addGuide = (guide) => {
+    if (!Array.isArray(A.guides)) A.guides = [];
+    A.guides.push(guide);
+    forceRerender();
+  };
+  const saveGuide = () => {
+    const val = (id) => ((document.getElementById(id) || {}).value || "");
+    const toList = (s) => s.split(",").map((x) => x.trim()).filter(Boolean);
+    const name = val("g-name").trim();
+    if (!name) { setToast("Enter the guide's full name"); return; }
+    const editingId = g ? g.id : null;
+    const payload = {
+      name: name, email: val("g-email").trim(), phone: val("g-phone").trim(),
+      base: val("g-base").trim(), status: val("g-status") || "active",
+      regions: toList(val("g-regions")), languages: toList(val("g-langs")), bio: val("g-bio").trim(),
+    };
+    window.TK_ADMIN_ACT(
+      () => editingId ? window.TK_ADMIN_API.updateGuide(editingId, payload) : window.TK_ADMIN_API.createGuide(payload),
+      (res) => {
+        const shaped = {
+          id: (res && res.id) || editingId || ("g_" + name.toLowerCase().replace(/\s+/g, "_")),
+          name: name, initials: initialsOf(name), email: payload.email, phone: payload.phone,
+          base: payload.base, status: payload.status, regions: payload.regions, languages: payload.languages,
+          rating: g ? g.rating : (res && res.rating) || 0, trips: g ? g.trips : (res && res.trips) || 0, bio: payload.bio,
+        };
+        if (editingId) applyGuide(editingId, shaped); else addGuide(shaped);
+        setEdit(null);
+        setToast(editingId ? "Guide updated" : "Guide added");
+      }
+    );
+  };
+  const toggleLeave = (r) => {
+    const next = r.status === "leave" ? "active" : "leave";
+    window.TK_ADMIN_ACT(
+      () => window.TK_ADMIN_API.setGuideStatus(r.id, next),
+      () => { applyGuide(r.id, { status: next }); setToast(r.name + (next === "leave" ? " set to on leave" : " marked active")); }
+    );
+  };
+  const doRemove = () => {
+    const r = remove; if (!r) return;
+    window.TK_ADMIN_ACT(
+      () => window.TK_ADMIN_API.deleteGuide(r.id),
+      () => { removeGuide(r.id); setRemove(null); setToast(r.name + " removed"); }
+    );
+  };
   const guides = A.guides || [];
   const regions = [...new Set(guides.flatMap(g => g.regions))].sort();
   let rows = guides;
@@ -1030,18 +1092,18 @@ function GuidesAdmin({ go }) {
             <RowMenu label={"Actions for " + r.name} items={[
               { label: "Edit guide", icon: "pencil", onClick: () => setEdit(r) },
               { label: "View schedule", icon: "calendar-days", onClick: () => go("departures") },
-              { label: r.status === "leave" ? "Mark active" : "Set on leave", icon: r.status === "leave" ? "circle-check-big" : "clock", onClick: () => setToast(r.name + (r.status === "leave" ? " marked active" : " set to on leave")) },
+              { label: r.status === "leave" ? "Mark active" : "Set on leave", icon: r.status === "leave" ? "circle-check-big" : "clock", onClick: () => toggleLeave(r) },
               { label: "Remove guide", icon: "trash-2", danger: true, onClick: () => setRemove(r) },
             ]} />)}
           empty={<EmptyState icon="user" title="No guides match" body="Adjust the filters, or add a new guide." action={<Button iconStart="plus" onClick={() => setEdit("new")}>Add guide</Button>} />} />
       </div>
 
       <Drawer open={!!edit} title={isNew ? "Add guide" : (g ? g.name : "")} subtitle={isNew ? "Create a guide profile that departures can be assigned to" : (g ? "Based in " + g.base : "")} onClose={() => setEdit(null)}
-        footer={<><Button variant="secondary" onClick={() => setEdit(null)}>Cancel</Button><Button iconStart={isNew ? "plus" : "check"} style={{ marginInlineStart: "auto" }} onClick={() => { setEdit(null); setToast(isNew ? "Guide added" : "Guide updated"); }}>{isNew ? "Add guide" : "Save changes"}</Button></>}>
+        footer={<><Button variant="secondary" onClick={() => setEdit(null)}>Cancel</Button><Button iconStart={isNew ? "plus" : "check"} style={{ marginInlineStart: "auto" }} onClick={saveGuide}>{isNew ? "Add guide" : "Save changes"}</Button></>}>
         <FormField id="g-name" label="Full name" required><Input id="g-name" defaultValue={g ? g.name : ""} placeholder="e.g. Kwame Boateng" /></FormField>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-4)" }}>
           <FormField id="g-email" label="Email"><Input id="g-email" type="email" defaultValue={g ? g.email : ""} placeholder="name@tripkoach.com" /></FormField>
-          <FormField id="g-phone" label="Phone"><PhoneInput id="g-phone" /></FormField>
+          <FormField id="g-phone" label="Phone"><PhoneInput id="g-phone" defaultValue={g ? g.phone : ""} /></FormField>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-4)" }}>
           <FormField id="g-base" label="Home base"><Input id="g-base" defaultValue={g ? g.base : ""} placeholder="e.g. Accra" /></FormField>
@@ -1056,7 +1118,7 @@ function GuidesAdmin({ go }) {
       <Modal open={!!remove} tone="danger" title={remove ? "Remove " + remove.name + "?" : ""}
         description="They'll no longer appear in the lead-guide picker. Departures they already lead keep their assignment."
         onClose={() => setRemove(null)}
-        actions={<><Button variant="secondary" onClick={() => setRemove(null)}>Keep guide</Button><Button variant="danger" onClick={() => { const n = remove.name; setRemove(null); setToast(n + " removed"); }}>Remove guide</Button></>} />
+        actions={<><Button variant="secondary" onClick={() => setRemove(null)}>Keep guide</Button><Button variant="danger" onClick={doRemove}>Remove guide</Button></>} />
       {toast && <div style={{ position: "fixed", bottom: 20, insetInline: 0, display: "flex", justifyContent: "center", zIndex: 800 }}><Toast tone="success" onClose={() => setToast(null)}>{toast}</Toast></div>}
     </div>
   );
