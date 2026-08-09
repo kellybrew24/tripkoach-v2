@@ -13,7 +13,14 @@ function ToursAdmin({ go, state, setState }) {
   const [cat, setCat] = React.useState(null);
   const [menu, setMenu] = React.useState(null);
   const published = { "accra-city-tour": true, "discover-ghana-in-10-days": true, "a-christmas-like-no-other": true, "coastal-festival-trio": true, "coastal-history-trail": true, "aburi-akosombo-and-boti-falls": true, "volta-mountains-and-monkeys": true, "northern-savannah-safari": true, "upper-east-bolga-paga-and-sirigu": true, "luxury-wellness-tour": false, "edina-bakatue-festival-2026": false };
-  let rows = A.tours.map(t => ({ ...t, published: published[t.id] !== false, departures: (t.departures || []).length }));
+  // TRI-998: the live /tours projection ships departures as a COUNT (number); fixtures
+  // carry an array. Handle both, and surface the bookable "upcoming" count so a
+  // published tour with none can be flagged before customers hit the empty state.
+  let rows = A.tours.map(t => {
+    const depCount = typeof t.departures === "number" ? t.departures : (t.departures || []).length;
+    const upcoming = typeof t.upcomingDepartures === "number" ? t.upcomingDepartures : depCount;
+    return { ...t, published: published[t.id] !== false, departures: depCount, upcomingDepartures: upcoming };
+  });
   const regions = [...new Set(A.tours.map(t => t.region))].sort();
   const cats = [...new Set(A.tours.map(t => t.category))].sort();
   if (q) rows = rows.filter(t => (t.title + t.region).toLowerCase().includes(q.toLowerCase()));
@@ -57,7 +64,16 @@ function ToursAdmin({ go, state, setState }) {
             { key: "category", header: "Category" },
             { key: "published", header: "Status", render: r => r.published ? <Badge tone="soft" style={{ color: "var(--success-fg)", background: "var(--success-bg)" }}>Live</Badge> : <Badge tone="neutral">Draft</Badge> },
             { key: "price", header: "From", align: "end", sortable: true, render: r => <Price amount={r.price} currency="USD" size="sm" /> },
-            { key: "departures", header: "Departures", align: "end" },
+            // TRI-998: a published tour with no upcoming (bookable) departures shows a
+            // warning here — those customers hit a "No upcoming departures" empty state.
+            { key: "departures", header: "Departures", align: "end", render: r => (
+              r.published && r.upcomingDepartures === 0
+                ? <Badge tone="soft" style={{ color: "var(--warning-fg)", background: "var(--warning-bg)" }}
+                    title="Published, but no upcoming departures — customers see a “No upcoming departures” empty state. Add a departure.">
+                    <Icon name="triangle-alert" size={12} style={{ verticalAlign: "-1px", marginInlineEnd: 4 }} />No upcoming
+                  </Badge>
+                : r.departures
+            ) },
             { key: "rating", header: "Rating", align: "end", render: r => r.rating ? "★ " + r.rating : "—" },
           ]}
           rows={rows} getRowId={r => r.id}

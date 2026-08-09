@@ -240,7 +240,13 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     const { rows } = await db.query(
       `SELECT t.id, t.slug, t.title, r.name AS region, t.category, t.category_label, t.currency,
               t.base_price_minor, t.rating_cached, t.review_count_cached, t.published, t.image,
-              (SELECT COUNT(*) FROM departure d WHERE d.tour_id = t.id) AS departures
+              (SELECT COUNT(*) FROM departure d WHERE d.tour_id = t.id) AS departures,
+              -- TRI-998: bookable (scheduled/sold_out + today-or-future) count so the tours
+              -- list can flag a PUBLISHED tour that has 0 upcoming departures before customers
+              -- hit the "no upcoming departures" empty state on the public page.
+              (SELECT COUNT(*) FROM departure d WHERE d.tour_id = t.id
+                 AND d.status IN ('scheduled','sold_out')
+                 AND (d.depart_on IS NULL OR d.depart_on >= CURRENT_DATE)) AS upcoming_departures
          FROM tour t JOIN region r ON r.id = t.region_id
         ORDER BY t.title`);
     return rows.map((t) => ({
@@ -248,6 +254,7 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
       category: t.category_label, categoryEnum: t.category, currency: t.currency,
       price: fromMinor(t.base_price_minor), rating: t.rating_cached == null ? null : Number(t.rating_cached),
       reviews: Number(t.review_count_cached || 0), published: t.published, departures: Number(t.departures),
+      upcomingDepartures: Number(t.upcoming_departures),
       image: t.image ?? null, // TRI-928: cover thumbnail for the tours list
     }));
   }

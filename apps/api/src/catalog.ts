@@ -29,7 +29,19 @@ export interface TourCardDTO {
   id: string; title: string; region: string; duration: string; category: string;
   price: number; currency: string; rating: number | null; reviews: number;
   spotsLeft: number | null; tag: string | null; image: string | null;
+  // TRI-998: does this tour have at least one bookable (upcoming, not cancelled/
+  // completed/past) departure? The board default is to keep a tour with none
+  // discoverable, so browse still lists it — the card just carries the signal.
+  hasUpcomingDepartures: boolean;
 }
+
+// TRI-998: a departure is "bookable" — an upcoming, purchasable slot — only when it is
+// still scheduled or sold_out AND its date is today or later (an undated fixture departure
+// counts as upcoming). Cancelled/completed and past departures are excluded from the public
+// read path so the tour page can render a graceful "no upcoming departures" empty state
+// instead of a booking box over an empty picker with a live "Reserve my spot" button.
+const BOOKABLE_DEPARTURE_SQL =
+  `d.status IN ('scheduled','sold_out') AND (d.depart_on IS NULL OR d.depart_on >= CURRENT_DATE)`;
 export interface TourListDTO {
   items: TourCardDTO[]; page: number; pageSize: number; total: number; totalPages: number;
 }
@@ -97,7 +109,8 @@ export async function listTours(db: Db, query: ToursQuery): Promise<TourListDTO>
   params.push(offset); const offIdx = params.length;
   const { rows } = await db.query(
     `SELECT t.slug, t.title, r.name AS region, t.duration, t.category_label, t.currency,
-            t.base_price_minor, t.rating_cached, t.review_count_cached, t.spots_left_hint, t.tag, t.image
+            t.base_price_minor, t.rating_cached, t.review_count_cached, t.spots_left_hint, t.tag, t.image,
+            EXISTS (SELECT 1 FROM departure d WHERE d.tour_id = t.id AND ${BOOKABLE_DEPARTURE_SQL}) AS has_upcoming
      FROM tour t JOIN region r ON r.id = t.region_id
      WHERE ${whereSql}
      ORDER BY ${sort}
@@ -117,6 +130,7 @@ function toCard(r: any): TourCardDTO {
     reviews: Number(r.review_count_cached || 0),
     spotsLeft: r.spots_left_hint == null ? null : Number(r.spots_left_hint),
     tag: r.tag ?? null, image: r.image ?? null,
+    hasUpcomingDepartures: !!r.has_upcoming,
   };
 }
 
@@ -158,6 +172,10 @@ export async function getTourBySlug(db: Db, slug: string): Promise<any | null> {
     packages,
     defaultPackage: await defaultPackageSlug(db, t.default_package_id),
     departures,
+    // TRI-998: `departures` is already filtered to bookable slots, so an empty array
+    // means "no upcoming departures" — the FE swaps the picker + Reserve CTA for a
+    // graceful empty state and enquiry CTA rather than launching a broken checkout.
+    hasUpcomingDepartures: departures.length > 0,
     reviewStats: stats,
   };
 }
@@ -222,7 +240,7 @@ async function departuresForTour(db: Db, tourId: string) {
             p.slug AS package_slug, p.name AS package_name
      FROM departure d
      LEFT JOIN tour_package p ON p.id = d.package_id
-     WHERE d.tour_id = $1 ORDER BY d.depart_on NULLS LAST, d.created_at`, [tourId]);
+     WHERE d.tour_id = $1 AND ${BOOKABLE_DEPARTURE_SQL} ORDER BY d.depart_on NULLS LAST, d.created_at`, [tourId]);
   return rows.map(departureDTO);
 }
 

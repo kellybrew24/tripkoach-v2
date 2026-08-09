@@ -121,6 +121,10 @@
     // list projection returns only the cover). Editor seeds the MediaManager from this.
     out.images = (Array.isArray(t.images) && t.images.length) ? t.images.slice() : (out.image ? [out.image] : []);
     if (Array.isArray(t.departures)) out.departures = t.departures.map(mapDeparture);
+    else if (typeof t.departures === "number") out.departures = t.departures; // TRI-998: list projection ships a count
+    // TRI-998: bookable (upcoming) departures count from the list projection, so the
+    // tours table can warn on a PUBLISHED tour that has 0 upcoming departures.
+    if (t.upcomingDepartures != null) out.upcomingDepartures = Number(t.upcomingDepartures);
     return out;
   }
   function mapDeparture(d) {

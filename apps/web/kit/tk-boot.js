@@ -127,6 +127,10 @@
         ? null
         : major(d.price, d.priceMinor != null ? d.priceMinor : d.price_minor),
       spotsLeft: d.spotsLeft != null ? d.spotsLeft : d.spots_left,
+      // Lifecycle status (TRI-998): the API now only returns bookable departures
+      // (scheduled/sold_out + upcoming), but carry the field through so the picker
+      // can distinguish a sold-out slot from an open one rather than dropping it.
+      status: d.status || "scheduled",
       // Track / route this departure belongs to (TRI-992). Null when the tour has no
       // per-track packages; the tour page groups departures under these headings.
       packageSlug: d.packageSlug != null ? d.packageSlug : (d.package_slug != null ? d.package_slug : null),
@@ -183,7 +187,12 @@
     ]).then(function (d) {
       enrichTourDetail(tour, d[0]);
       var deps = list(d[1], "departures").map(mapDeparture);
-      if (deps.length) tour.departures = deps;
+      // TRI-998: when the availability call resolved, ALWAYS adopt its (bookable-only)
+      // list — even when empty — so a tour with no upcoming departures can never fall
+      // back to stale fixture departures (the old "d2" seed) and launch a broken
+      // checkout. Only keep any pre-existing departures if the sub-request failed.
+      if (d[1] != null) tour.departures = deps;
+      else if (deps.length) tour.departures = deps;
       var reviews = list(d[2], "reviews").map(function (r) { return mapReview(r, tour.id); });
       setReviewsFor(tour.id, reviews);
       // Backfill only what a degraded sub-request left missing; the API supplies

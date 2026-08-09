@@ -650,9 +650,18 @@ function TourWeb({ go, currency, slug }) {
   const [dep, setDep] = React.useState(() => {
     if (!(window.TK_CONFIG && window.TK_CONFIG.USE_LIVE_API)) return "d2";
     const deps = t0.departures || [];
-    return deps.some(x => x.id === "d2") ? "d2" : ((deps[1] || deps[0] || {}).id || "d2");
+    // TRI-998: no "d2" fixture fallback in live mode. When a tour has no bookable
+    // departures the selection stays null and the booking box renders an empty state
+    // instead of pushing a non-existent departure id into a broken checkout.
+    if (!deps.length) return null;
+    return deps.some(x => x.id === "d2") ? "d2" : ((deps[1] || deps[0]).id);
   });
   const d = t.departures.find(x => x.id === dep);
+  // TRI-998: a tour is bookable only when it has at least one upcoming departure. The
+  // API filters departures to bookable slots (scheduled/sold_out + future), so an empty
+  // list means "no upcoming departures". Fixtures always carry departures, so the
+  // flag-off prototype never hits the empty branch (byte-identical).
+  const hasDepartures = (t.departures || []).length > 0;
   return (
     <div className="tk-container" style={{ paddingBlock: "var(--space-6) var(--space-12)", maxWidth: 1200, display: "flex", flexDirection: "column", gap: "var(--space-5)" }}>
       <Breadcrumbs items={[{ label: "Tours", href: "#" }, { label: t.region, href: "#" }, { label: t.title }]} />
@@ -722,9 +731,21 @@ function TourWeb({ go, currency, slug }) {
               <Price amount={cvt(window.TK_PRICE.perPerson(t, 1), currency)} currency={currency} size="lg" unit="per person" />
               {t0.packages ? <span className="tk-caption">{t.packageName} package</span> : null}
             </div>
-            <GroupedDeparturePicker departures={t.departures} value={dep} onChange={setDep} currency={currency} packages={t0.packages} legend="Choose a departure" />
-            <Button size="lg" block onClick={() => { window.TK_SEL = { tourId: t0.id, apiTourId: t0._apiId, packageId: pkgId, packageName: t.packageName, departureId: dep }; go("checkout"); }}>Reserve my spot</Button>
-            <p className="tk-caption" style={{ display: "flex", gap: 6 }}><Icon name="wallet" size={14} />Nothing is charged today. Pay before departure.</p>
+            {hasDepartures ? (<>
+              <GroupedDeparturePicker departures={t.departures} value={dep} onChange={setDep} currency={currency} packages={t0.packages} legend="Choose a departure" />
+              <Button size="lg" block disabled={!dep} onClick={() => { window.TK_SEL = { tourId: t0.id, apiTourId: t0._apiId, packageId: pkgId, packageName: t.packageName, departureId: dep }; go("checkout"); }}>Reserve my spot</Button>
+              <p className="tk-caption" style={{ display: "flex", gap: 6 }}><Icon name="wallet" size={14} />Nothing is charged today. Pay before departure.</p>
+            </>) : (
+              // TRI-998: no upcoming departures — replace the picker + "Reserve my spot"
+              // with a graceful empty state + enquiry CTA. The tour stays discoverable
+              // (board default) so travellers can still register interest in a date.
+              <div className="tk-stack" style={{ gap: "var(--space-3)" }}>
+                <EmptyState icon="calendar-days" title="No upcoming departures"
+                  body="This experience has no scheduled dates right now. Tell us when you'd like to travel and a koach will set a departure up for you." />
+                <Button size="lg" block iconStart="message-circle" onClick={() => go("contact")}>Enquire about dates</Button>
+                <Button size="lg" block variant="ghost" iconStart="phone" onClick={() => window.open("https://wa.me/233533244042", "_blank")}>Message a koach on WhatsApp</Button>
+              </div>
+            )}
           </div></div>
           <Alert tone="info" title="Free cancellation">Cancel free until 7 days before departure.</Alert>
         </div>
