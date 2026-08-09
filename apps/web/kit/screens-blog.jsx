@@ -102,10 +102,29 @@ function BlogIndex({ go }) {
   );
 }
 
+// Dynamic "Keep reading": prefer posts sharing the current tag, then fall back
+// to a recent list rotated by the current post's position so each story shows a
+// distinct set (and never itself), even with a small catalogue.
+function relatedPosts(posts, current, n = 3) {
+  const rest = posts.filter(x => x.slug !== current.slug);
+  const sameTag = rest.filter(x => x.tag === current.tag);
+  const idx = posts.findIndex(x => x.slug === current.slug);
+  const rotated = idx >= 0 ? [...rest.slice(idx), ...rest.slice(0, idx)] : rest;
+  const seen = new Set();
+  const out = [];
+  for (const x of [...sameTag, ...rotated]) {
+    if (seen.has(x.slug)) continue;
+    seen.add(x.slug);
+    out.push(x);
+    if (out.length >= n) break;
+  }
+  return out;
+}
+
 function BlogPost({ go, slug }) {
   const posts = window.TK_BLOG;
   const p = posts.find(x => x.slug === slug) || posts[0];
-  const related = posts.filter(x => x.slug !== p.slug).slice(0, 3);
+  const related = relatedPosts(posts, p, 3);
   const url = "https://tripkoach.com/blog/" + p.slug + "/";
   const share = shareTargets(p.title, url);
   const [copied, setCopied] = React.useState(false);
