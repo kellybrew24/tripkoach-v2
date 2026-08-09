@@ -61,7 +61,8 @@ export async function resolveUserSession(db: Db, cfg: Config, sessionId: string)
        FROM session s
        JOIN user_account u ON u.id = s.subject_id
       WHERE s.id = $1 AND s.subject_type = 'user'
-        AND s.revoked_at IS NULL AND s.expires_at > now()`,
+        AND s.revoked_at IS NULL AND s.expires_at > now()
+        AND u.deleted_at IS NULL`,
     [sessionId],
   );
   const r = rows[0];

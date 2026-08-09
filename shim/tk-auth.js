@@ -201,6 +201,17 @@
       return api.post("/me/password", { currentPassword: currentPassword, newPassword: newPassword });
     },
 
+    // TRI-1012: permanently delete + anonymize my account. On success the server has scrubbed the
+    // PII, revoked every session and cleared the cookie — so we drop the cached /me locally too and
+    // the caller redirects to login. Rejects with err.status===409 (code "active_bookings") when the
+    // account still has upcoming trips to cancel; the screen surfaces that message.
+    deleteAccount: function () {
+      return api.del("/me").then(function (body) {
+        setMe(null);
+        return body || { ok: true };
+      });
+    },
+
     getNotifications: function () {
       return api.get("/me/notifications").then(function (body) {
         return (body && body.notifications) || body || {};

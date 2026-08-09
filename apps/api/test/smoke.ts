@@ -1507,6 +1507,45 @@ console.log('\n[consumer: password reset request + consume]');
   ok('reset revoked pre-existing sessions (audit recorded)', Number((await db.query(`SELECT COUNT(*) n FROM audit_log WHERE action='user.password_reset'`)).rows[0].n) >= 1, JSON.stringify(live.rows[0]));
 }
 
+console.log('\n[consumer: delete my account — TRI-1012]');
+{
+  const s = await ucall('POST', '/api/v1/auth/signup', { payload: { email: 'dele@example.com', password: 'Del3-Str0ng!', name: 'Dele Doomed', phone: '+233209999999', country: 'Ghana' } });
+  ok('signup for delete → 201', s.status === 201, JSON.stringify(s.body));
+  const cookie = s.cookie;
+  const uid = s.body.user.id;
+
+  // Active booking blocks deletion (the UI promises "cancel first" so refunds can be processed).
+  const dep = await makeDeparture(6);
+  const bk = await post('/api/v1/bookings', { tourSlug: 'accra-city-tour', departureId: dep, partySize: 1, agreedTerms: true,
+    travellers: [{ name: 'Dele Doomed', email: 'dele@example.com', phone: '+233209999999', isLead: true }] });
+  ok('active booking created', bk.status === 201, JSON.stringify(bk.body));
+  await db.query(`UPDATE booking SET user_id=$1 WHERE ref=$2`, [uid, bk.body.ref]); // own it (default status 'reserved' = active)
+  const blocked = await ucall('DELETE', '/api/v1/me', { cookie });
+  ok('delete blocked by active booking → 409 active_bookings', blocked.status === 409 && blocked.body.error.code === 'active_bookings', JSON.stringify(blocked.body));
+
+  // Cancel it, then deletion succeeds and reports the sessions it revoked.
+  await db.query(`UPDATE booking SET status='cancelled' WHERE ref=$1`, [bk.body.ref]);
+  const del = await ucall('DELETE', '/api/v1/me', { cookie });
+  ok('delete → 200 ok', del.status === 200 && del.body.ok === true && del.body.sessionsRevoked >= 1, JSON.stringify(del.body));
+
+  // Session killed → /me 401; old creds can no longer log in.
+  ok('deleted account /me → 401 (session revoked)', (await ucall('GET', '/api/v1/me', { cookie })).status === 401);
+  ok('deleted account login → 401', (await ucall('POST', '/api/v1/auth/login', { payload: { email: 'dele@example.com', password: 'Del3-Str0ng!' } })).status === 401);
+
+  // PII scrubbed + tombstoned in the DB; the booking row survives (history), user_id retained.
+  const row = (await db.query(`SELECT email, name, phone, country, password_hash, deleted_at FROM user_account WHERE id=$1`, [uid])).rows[0];
+  ok('row anonymized (name/phone/country/hash null; deleted_at set)',
+    row.name === null && row.phone === null && row.country === null && row.password_hash === null && row.deleted_at != null, JSON.stringify(row));
+  ok('email tombstoned', /^deleted\+.+@deleted\.tripkoach\.invalid$/.test(row.email), row.email);
+  ok('booking history retained (not orphaned)', (await db.query(`SELECT user_id FROM booking WHERE ref=$1`, [bk.body.ref])).rows[0].user_id === uid);
+  ok('notification prefs cleared', Number((await db.query(`SELECT COUNT(*) n FROM notification_preference WHERE user_id=$1`, [uid])).rows[0].n) === 0);
+
+  // The real address frees up for a fresh signup; the deletion is audited.
+  const again = await ucall('POST', '/api/v1/auth/signup', { payload: { email: 'dele@example.com', password: 'Fr3sh-Start!' } });
+  ok('email freed → re-signup 201 (new account id)', again.status === 201 && again.body.user.id !== uid, JSON.stringify({ id: again.body?.user?.id }));
+  ok('account_deleted audited', Number((await db.query(`SELECT COUNT(*) n FROM audit_log WHERE action='user.account_deleted' AND target_id=$1`, [uid])).rows[0].n) >= 1);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // TRI-941 · Customer email verification (email-first). Signup issues a single-use verify token + email;
 // /auth/verify-email consumes it and stamps email_verified_at (SOFT — never gates checkout). Resend is

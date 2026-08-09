@@ -99,6 +99,15 @@ export function registerConsumer(app: FastifyInstance, db: Db, cfg: Config, stor
     api.get('/me', authed, async (req: FastifyRequest) => ({ user: await svc.getProfile(req.account!.id) }));
     api.patch('/me', authed, async (req: FastifyRequest) => ({ user: await svc.updateProfile(req.account!.id, body(req), ipOf(req)) }));
     api.post('/me/password', authed, async (req: FastifyRequest) => svc.changePassword(req.account!.id, body(req), ipOf(req)));
+    // TRI-1012: delete my account — soft-delete/anonymize in the service, then kill this session +
+    // clear the cookie so the browser is signed out immediately. 409 if active bookings remain.
+    api.delete('/me', authed, async (req: FastifyRequest, reply: FastifyReply) => {
+      const out = await svc.deleteAccount(req.account!.id, ipOf(req));
+      const sid = req.cookies?.[cfg.consumer.cookieName];
+      if (sid) await revokeUserSession(db, sid);
+      clearUserCookie(reply, cfg);
+      return out;
+    });
 
     // ── Notification preferences (authed) ──
     api.get('/me/notifications', authed, async (req: FastifyRequest) => ({ notifications: await svc.getNotificationPrefs(req.account!.id) }));

@@ -247,8 +247,8 @@ export function createConsumerService(db: Db, cfg: Config) {
     const password = typeof rawBody.password === 'string' ? rawBody.password : '';
     if (!email || !password) throw validation('email and password are required');
 
-    const u = (await db.query(`SELECT * FROM user_account WHERE lower(email) = $1`, [email])).rows[0];
-    const ok = u && (await verifyPassword(password, u.password_hash));
+    const u = (await db.query(`SELECT * FROM user_account WHERE lower(email) = $1 AND deleted_at IS NULL`, [email])).rows[0];
+    const ok = u && u.password_hash && (await verifyPassword(password, u.password_hash));
     if (!ok) {
       await audit(db, { actorType: 'user', actorId: u?.id ?? null, action: 'user.login_failed', targetType: 'user_account', targetId: u?.id ?? null, after: { email }, ip: meta.ip ?? null });
       throw new ConsumerError('invalid_credentials', 'That email and password do not match.', 401);
@@ -312,6 +312,51 @@ export function createConsumerService(db: Db, cfg: Config) {
     await db.query(`UPDATE user_account SET password_hash = $2, updated_at = now() WHERE id = $1`, [userId, await hashPassword(next)]);
     await audit(db, { actorType: 'user', actorId: userId, action: 'user.password_change', targetType: 'user_account', targetId: userId, ip: meta.ip ?? null });
     return { ok: true };
+  }
+
+  // ── Delete my account (TRI-1012) ──
+  // Soft-delete + anonymize. We keep the user_account row (booking / customer / audit FKs point at it
+  // via ON DELETE SET NULL and hard-deleting would orphan that history), stamp deleted_at, scrub every
+  // PII column, rewrite the email to a unique unusable tombstone (so the real address frees up for a
+  // fresh signup), drop notification prefs, anonymize the ops-side customer mirror, and revoke every
+  // live session. resolveUserSession() gates on deleted_at, so the account can never authenticate again.
+  //
+  // Refuses while the caller has active (reserved/pending/confirmed) bookings — the UI promises
+  // "Active bookings must be cancelled first" so refunds can be processed before the record is scrubbed.
+  async function deleteAccount(userId: string, meta: { ip?: string | null } = {}) {
+    const cur = await loadUser(userId);
+    if (!cur) throw notFound('account');
+    if (cur.deleted_at) return { ok: true, sessionsRevoked: 0, alreadyDeleted: true }; // idempotent
+
+    const active = await db.query(
+      `SELECT count(*)::int AS n FROM booking
+        WHERE user_id = $1 AND status IN ('reserved','pending','confirmed')`, [userId]);
+    if ((active.rows[0]?.n ?? 0) > 0) {
+      throw new ConsumerError('active_bookings',
+        'Cancel your upcoming bookings before deleting your account so we can process any refunds.', 409);
+    }
+
+    await db.tx(async (q) => {
+      await q.query(
+        `UPDATE user_account SET
+           email = 'deleted+' || id::text || '@deleted.tripkoach.invalid',
+           password_hash = NULL, name = NULL, phone = NULL, country = NULL,
+           photo_url = NULL, emergency_name = NULL, emergency_phone = NULL, dietary_needs = NULL,
+           avatar_media_id = NULL, avatar_status = NULL, avatar_updated_at = NULL,
+           two_factor_enabled = false, email_verified_at = NULL,
+           deleted_at = now(), updated_at = now()
+         WHERE id = $1`, [userId]);
+      // Notification prefs hold no PII but are meaningless post-deletion — clear them.
+      await q.query(`DELETE FROM notification_preference WHERE user_id = $1`, [userId]);
+      // Anonymize the ops-side customer mirror (kept so booking history still resolves a name).
+      await q.query(
+        `UPDATE customer SET name = 'Deleted user', email = NULL, phone = NULL, updated_at = now()
+          WHERE user_id = $1`, [userId]);
+    });
+
+    const sessionsRevoked = await revokeAllUserSessions(db, userId);
+    await audit(db, { actorType: 'user', actorId: userId, action: 'user.account_deleted', targetType: 'user_account', targetId: userId, after: { sessionsRevoked }, ip: meta.ip ?? null });
+    return { ok: true, sessionsRevoked };
   }
 
   // ── Notification preferences (read/write) ──
@@ -519,7 +564,7 @@ export function createConsumerService(db: Db, cfg: Config) {
   }
 
   return {
-    signup, verifyLogin, getProfile, updateProfile, changePassword,
+    signup, verifyLogin, getProfile, updateProfile, changePassword, deleteAccount,
     getNotificationPrefs, updateNotificationPrefs, listMyBookings,
     requestPasswordReset, consumePasswordReset,
     verifyEmail, resendVerification, issueVerificationEmail,

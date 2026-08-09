@@ -173,7 +173,24 @@ function ProfileWeb({ go }) {
   const [dirty, setDirty] = React.useState(false);
   const [toast, setToast] = React.useState(null);
   const [delOpen, setDelOpen] = React.useState(false);
+  const [delBusy, setDelBusy] = React.useState(false);
   const touch = () => setDirty(true);
+  // TRI-1012: real account deletion. Flag off → the prototype behaviour (close + walk to login) is
+  // preserved; flag on → call DELETE /me (soft-delete/anonymize + session kill) BEFORE redirecting, and
+  // keep the modal open with an inline error (e.g. active bookings 409) if the server refuses.
+  async function deleteMyAccount() {
+    if (!live) { setDelOpen(false); go("login"); return; }
+    setDelBusy(true);
+    try {
+      await window.TK_AUTH.deleteAccount();
+      setDelOpen(false);
+      go("login");
+    } catch (e) {
+      window.tkToast(authErrMsg(e, "We couldn't delete your account. Please try again."));
+    } finally {
+      setDelBusy(false);
+    }
+  }
   // Live hydration (TRI-882): mount the form only once /me has loaded, so the
   // uncontrolled inputs pick up the real profile as their defaultValue. Flag off
   // → loaded is true from the start and the DS placeholder person renders as-is.
@@ -283,8 +300,8 @@ function ProfileWeb({ go }) {
         <p className="tk-body-sm tk-muted">Permanently remove your account and personal data. Active bookings must be cancelled first.</p>
         <Button variant="secondary" size="sm" style={{ alignSelf: "flex-start", marginTop: 6, color: "var(--danger-fg)", borderColor: "var(--danger-border)" }} onClick={() => setDelOpen(true)}>Delete my account</Button>
       </div></div>
-      <Modal open={delOpen} title="Delete your account?" description="This permanently removes your account and personal data. This can't be undone." onClose={() => setDelOpen(false)}
-        actions={<><Button variant="secondary" onClick={() => setDelOpen(false)}>Keep my account</Button><Button variant="danger" iconStart="trash-2" onClick={() => { setDelOpen(false); go("login"); }}>Delete account</Button></>}>
+      <Modal open={delOpen} title="Delete your account?" description="This permanently removes your account and personal data. This can't be undone." onClose={() => { if (!delBusy) setDelOpen(false); }}
+        actions={<><Button variant="secondary" disabled={delBusy} onClick={() => setDelOpen(false)}>Keep my account</Button><Button variant="danger" iconStart="trash-2" disabled={delBusy} onClick={deleteMyAccount}>{delBusy ? "Deleting…" : "Delete account"}</Button></>}>
         <Alert tone="warning" title="Active bookings must be cancelled first">If you have upcoming trips, cancel them before deleting so we can process any refunds.</Alert>
       </Modal>
       <div className="tk-stickybar" style={{ position: "sticky", bottom: 16, borderRadius: "var(--radius-card)", border: "1px solid var(--border-subtle)", boxShadow: "var(--elev-3)" }}>
