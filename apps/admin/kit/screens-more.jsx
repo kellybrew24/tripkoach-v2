@@ -200,9 +200,12 @@ function CustomersAdmin({ go, state, setState }) {
     { label: "View details", icon: "eye", onClick: () => setState({ detailRef: r.id }) },
     { label: "Email customer", icon: "mail", onClick: () => setToast("Opening email to " + r.name) },
     { label: "Resend last confirmation", icon: "ticket", onClick: () => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.resendCustomerLastConfirmation(r.id), (res) => setToast(window.TK_RESEND_MSG(res, "Confirmation resent to " + r.email))) },
-    { label: "Copy email address", icon: "receipt", onClick: () => setToast(r.email + " copied") },
+    { label: "Copy email address", icon: "receipt", onClick: () => { try { navigator.clipboard && navigator.clipboard.writeText(r.email); } catch (_) {} setToast(r.email + " copied"); } },
     { divider: true },
-    { label: "Export bookings (CSV)", icon: "download", onClick: () => setToast("Exporting " + r.name + "'s bookings") },
+    // TRI-1008: real CSV download of this customer's bookings via the existing client
+    // helper (exportBookingsCsv, screens-bookings.jsx — global after bundling), instead
+    // of a bare toast. custBookings(id) is the same A.bookings shape the Bookings export uses.
+    { label: "Export bookings (CSV)", icon: "download", onClick: () => { const rows = custBookings(r.id); if (!rows.length) { setToast("No bookings to export for " + r.name); return; } exportBookingsCsv(rows); } },
   ];
   // Detail view — prefer the fetched profile (live), fall back to the list row / fixtures.
   const detailBookings = detail && Array.isArray(detail.bookings) ? detail.bookings : null;
