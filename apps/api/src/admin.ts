@@ -1566,6 +1566,79 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     };
   }
 
+  // ── Customer activity feed (TRI-972) ──────────────────────────────────────
+  // A customer-scoped, human-readable timeline of what a person has done — their
+  // booking lifecycle: created, paid, cancelled, rescheduled, refunded, review
+  // submitted. This is NOT the staff audit log (that stays as-is); it's derived
+  // from the existing tables (booking, payment, review) plus the booking-scoped
+  // slice of audit_log for the staff-driven transitions (cancel/reschedule/confirm),
+  // all constrained to this one customer's bookings. No new event storage.
+  async function getCustomerActivity(id: string) {
+    // Resolve the person the same way getCustomer does: a registered account id
+    // first, else a guest booking-contact id. bookingWhere scopes to their bookings.
+    let acct = (await db.query(`SELECT id FROM user_account WHERE id::text = $1`, [id])).rows[0];
+    let bookingWhere: string;
+    if (acct) {
+      bookingWhere = `(b.user_id = $1 OR b.customer_id IN (SELECT c2.id FROM customer c2 WHERE c2.user_id = $1))`;
+    } else {
+      acct = (await db.query(`SELECT id FROM customer WHERE id::text = $1 AND user_id IS NULL`, [id])).rows[0];
+      bookingWhere = `b.customer_id = $1`;
+    }
+    if (!acct) throw notFound('customer');
+
+    // Refund rows (linked, refund_of set) only exist post-017; guard so pre-017 DBs
+    // still return the rest of the feed instead of erroring on a missing column.
+    const hasRefund = await hasRefundColumns(db);
+    const refundBranch = hasRefund ? `
+       UNION ALL
+       SELECT 'booking_refunded', p.created_at, cb.ref, cb.tour_title, ABS(p.amount_minor), p.currency, NULL, NULL::jsonb
+         FROM payment p JOIN cust_bookings cb ON cb.id = p.booking_id
+        WHERE p.refund_of IS NOT NULL` : '';
+
+    const { rows } = await db.query(
+      `WITH cust_bookings AS (
+         SELECT b.id, b.ref, b.created_at, b.total_minor, b.currency, t.title AS tour_title
+           FROM booking b JOIN tour t ON t.id = b.tour_id
+          WHERE ${bookingWhere}
+       )
+       SELECT * FROM (
+         SELECT 'booking_created' AS type, cb.created_at AS at, cb.ref AS ref, cb.tour_title AS tour,
+                cb.total_minor AS amount_minor, cb.currency AS currency, NULL::text AS actor, NULL::jsonb AS meta
+           FROM cust_bookings cb
+         UNION ALL
+         SELECT 'booking_paid', p.created_at, cb.ref, cb.tour_title, p.amount_minor, p.currency, NULL, NULL::jsonb
+           FROM payment p JOIN cust_bookings cb ON cb.id = p.booking_id
+          WHERE p.status = 'paid'${hasRefund ? ' AND p.refund_of IS NULL' : ''}${refundBranch}
+         UNION ALL
+         SELECT 'review_submitted', r.created_at, cb.ref, cb.tour_title, NULL::int, NULL::text, NULL,
+                jsonb_build_object('rating', r.rating, 'status', r.status)
+           FROM review r JOIN cust_bookings cb ON cb.id = r.booking_id
+         UNION ALL
+         SELECT CASE a.action WHEN 'booking.cancel' THEN 'booking_cancelled'
+                              WHEN 'booking.reschedule' THEN 'booking_rescheduled'
+                              WHEN 'booking.confirm' THEN 'booking_confirmed' END,
+                a.created_at, cb.ref, cb.tour_title, NULL::int, NULL::text,
+                COALESCE(su.name, su.email, 'Staff'), a.after
+           FROM audit_log a
+           JOIN cust_bookings cb ON cb.ref = a.target_id AND a.target_type = 'booking'
+           LEFT JOIN staff_user su ON su.id = a.actor_id
+          WHERE a.action IN ('booking.cancel','booking.reschedule','booking.confirm')
+       ) e ORDER BY e.at DESC, e.type`, [acct.id]);
+
+    return {
+      items: rows.map((r) => ({
+        type: r.type,
+        at: r.at,
+        ref: r.ref,
+        tour: r.tour ?? null,
+        actor: r.actor ?? null,
+        amount: r.amount_minor == null ? null : fromMinor(Number(r.amount_minor)),
+        currency: r.currency ?? null,
+        meta: r.meta ?? null,
+      })),
+    };
+  }
+
   // ── Audit-log read (A16) — paginated, read-only, for the AuditTimeline screen ─
   async function listAuditLog(opts: { action?: string; targetType?: string; targetId?: string; actorId?: string; page?: number; pageSize?: number } = {}) {
     const where: string[] = [];
@@ -1813,7 +1886,7 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     listGuides, getGuide, createGuide, updateGuide, deleteGuide,
     listPromos, getPromo, createPromo, updatePromo, deactivatePromo,
     getSettings, updateSettings,
-    listCustomers, getCustomer,
+    listCustomers, getCustomer, getCustomerActivity,
     listAuditLog,
     getDashboard,
     listBlog, getBlog, createBlog, updateBlog, setBlogPublished, deleteBlog,

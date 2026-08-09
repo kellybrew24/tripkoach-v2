@@ -8,6 +8,76 @@ function payBadge(p) {
   return <StatusBadge status={map[p]} size="sm" label={label} />;
 }
 
+/* ── Customer activity timeline (TRI-972) ──────────────────
+ * Human-readable, customer-scoped feed of booking lifecycle events
+ * (created / paid / confirmed / cancelled / rescheduled / refunded / review),
+ * newest first. Derived server-side from bookings + payments + reviews + the
+ * booking slice of the audit log — this is NOT the staff audit log. Each row
+ * links back to its booking. Only rendered in live mode (fixtures have no feed).
+ */
+const ACT_META = {
+  booking_created:     { label: "Booking created",     icon: "ticket",           tone: "neutral" },
+  booking_paid:        { label: "Payment received",    icon: "wallet",           tone: "success" },
+  booking_confirmed:   { label: "Booking confirmed",   icon: "circle-check-big", tone: "success" },
+  booking_cancelled:   { label: "Booking cancelled",   icon: "x",                tone: "danger"  },
+  booking_rescheduled: { label: "Booking rescheduled", icon: "repeat",           tone: "warning" },
+  booking_refunded:    { label: "Refund issued",       icon: "receipt",          tone: "warning" },
+  review_submitted:    { label: "Review submitted",    icon: "star",             tone: "info"    },
+};
+function actTone(tone) {
+  if (tone === "neutral") return { bg: "var(--bg-sunken)", fg: "var(--text-body)" };
+  return { bg: "var(--" + tone + "-bg)", fg: "var(--" + tone + "-fg)" };
+}
+function actWhen(at) {
+  const d = at ? new Date(at) : null;
+  if (!d || isNaN(d.getTime())) return "";
+  try {
+    return d.toLocaleString(undefined, { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" });
+  } catch (_) { return d.toISOString().slice(0, 16).replace("T", " "); }
+}
+function actDetail(ev) {
+  const bits = [];
+  if (ev.tour) bits.push(ev.tour);
+  if ((ev.type === "booking_paid" || ev.type === "booking_refunded" || ev.type === "booking_created") && typeof ev.amount === "number") {
+    bits.push((ev.currency ? ev.currency + " " : "$") + ev.amount.toLocaleString());
+  }
+  if (ev.type === "review_submitted" && ev.meta && ev.meta.rating != null) bits.push(ev.meta.rating + "★");
+  if (ev.type === "booking_rescheduled" && ev.meta && (ev.meta.toDate || ev.meta.to_date)) bits.push("→ " + (ev.meta.toDate || ev.meta.to_date));
+  if (ev.actor) bits.push("by " + ev.actor);
+  return bits.join(" · ");
+}
+function ActivityTimeline({ items, status, go }) {
+  if (status === "loading") return <div style={{ padding: 24, display: "grid", placeItems: "center" }}><Spinner /></div>;
+  if (status === "error") return <Alert tone="warning" title="Couldn't load activity">The activity timeline couldn't be fetched. Try reopening the customer.</Alert>;
+  if (!items || items.length === 0) return <p className="tk-caption">No activity yet.</p>;
+  return (
+    <div style={{ display: "flex", flexDirection: "column" }}>
+      {items.map((ev, i) => {
+        const m = ACT_META[ev.type] || { label: ev.type, icon: "circle", tone: "neutral" };
+        const t = actTone(m.tone);
+        const detail = actDetail(ev);
+        const last = i === items.length - 1;
+        return (
+          <div key={i} style={{ display: "flex", gap: 12, alignItems: "stretch" }}>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flex: "none" }}>
+              <span style={{ width: 30, height: 30, borderRadius: "50%", background: t.bg, color: t.fg, display: "grid", placeItems: "center" }}><Icon name={m.icon} size={15} /></span>
+              {!last && <span style={{ flex: 1, width: 2, background: "var(--border-subtle)", marginTop: 2 }} />}
+            </div>
+            <div style={{ paddingBottom: last ? 0 : 16, minWidth: 0, flex: 1 }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                <strong style={{ fontSize: 14, color: "var(--text-strong)" }}>{m.label}</strong>
+                {ev.ref && <a href="#" onClick={(e) => { e.preventDefault(); go("bookings", ev.ref); }} style={{ fontWeight: 600, fontSize: 12.5 }}>{ev.ref}</a>}
+              </div>
+              {detail && <div className="tk-caption" style={{ marginTop: 2 }}>{detail}</div>}
+              <div className="tk-caption tk-muted" style={{ marginTop: 2 }}>{actWhen(ev.at)}</div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /* ── Customers ─────────────────────────────────────────── */
 function CustomersAdmin({ go, state, setState }) {
   const A = window.TK_ADMIN;
@@ -22,9 +92,15 @@ function CustomersAdmin({ go, state, setState }) {
   // history come from GET /admin/customers/:id — fetched when the drawer opens.
   const [detail, setDetail] = React.useState(null);
   const [detailStatus, setDetailStatus] = React.useState("idle");
+  // TRI-972: Activity tab — customer-scoped booking-lifecycle timeline, lazily
+  // fetched from GET /admin/customers/:id/activity the first time the tab opens.
+  const [custTab, setCustTab] = React.useState("overview");
+  const [activity, setActivity] = React.useState(null);
+  const [activityStatus, setActivityStatus] = React.useState("idle");
   const open = A.customers.find(c => c.id === state.detailRef);
   React.useEffect(() => {
     setDetail(null);
+    setCustTab("overview"); setActivity(null); setActivityStatus("idle");
     if (!open || !LIVE || !window.TK_ADMIN_API) { setDetailStatus("idle"); return; }
     let live = true;
     setDetailStatus("loading");
@@ -34,6 +110,18 @@ function CustomersAdmin({ go, state, setState }) {
     );
     return () => { live = false; };
   }, [state.detailRef, LIVE]);
+  // Load the activity feed the first time the Activity tab is shown for this customer.
+  React.useEffect(() => {
+    if (custTab !== "activity" || !open || !LIVE || !window.TK_ADMIN_API || !window.TK_ADMIN_API.getCustomerActivity) return;
+    if (activityStatus !== "idle") return;
+    let live = true;
+    setActivityStatus("loading");
+    window.TK_ADMIN_API.getCustomerActivity(open.id).then(
+      (r) => { if (live) { setActivity((r && r.items) || []); setActivityStatus("ok"); } },
+      () => { if (live) setActivityStatus("error"); }
+    );
+    return () => { live = false; };
+  }, [custTab, state.detailRef, LIVE]);
   const custBookings = (id) => A.bookings.filter(b => b.customerId === id);
   const spend = (id) => custBookings(id).filter(b => b.payment === "paid").reduce((s, b) => s + b.total, 0);
   const countries = [...new Set(A.customers.map(c => c.country))].sort();
@@ -118,6 +206,9 @@ function CustomersAdmin({ go, state, setState }) {
               <div className="tk-caption">{open.country} · member since {open.joined}</div>
             </div>
           </div>
+          {/* TRI-972: Overview keeps the profile + booking history; Activity is the lifecycle timeline. */}
+          {LIVE && <Tabs value={custTab} onChange={setCustTab} tabs={[{ id: "overview", label: "Overview" }, { id: "activity", label: "Activity" }]} />}
+          {(!LIVE || custTab === "overview") && <>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10 }}>
             {[["Trips", tripsCount], ["Lifetime value", "$" + spendAmount.toLocaleString()], ["Pending", pendingCount]].map(([k, v]) => (
               <div key={k} className="tk-card" style={{ padding: "12px 14px" }}><div className="tk-caption">{k}</div><div style={{ fontWeight: 800, fontSize: 20, fontFamily: "var(--font-display)", letterSpacing: "-0.02em", color: "var(--text-strong)" }}>{v}</div></div>
@@ -153,6 +244,10 @@ function CustomersAdmin({ go, state, setState }) {
               {detailStatus !== "loading" && bookingList.length === 0 && <p className="tk-caption">No bookings yet.</p>}
             </div>
           </section>
+          </>}
+          {LIVE && custTab === "activity" && <section>
+            <ActivityTimeline items={activity} status={activityStatus} go={go} />
+          </section>}
         </>}
       </Drawer>
       {toast && <div style={{ position: "fixed", bottom: 20, insetInline: 0, display: "flex", justifyContent: "center", zIndex: 800 }}><Toast tone="success" onClose={() => setToast(null)}>{toast}</Toast></div>}

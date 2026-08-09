@@ -361,6 +361,8 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
       return svc.listCustomers({ q: qStr(q, 'q'), page: qNum(q, 'page'), pageSize: qNum(q, 'pageSize') });
     });
     admin.get('/customers/:id', perm('customers.view'), async (req) => svc.getCustomer((req.params as any).id));
+    // TRI-972: customer-scoped activity/events timeline (bookings, cancellations, reschedules, refunds, reviews).
+    admin.get('/customers/:id/activity', perm('customers.view'), async (req) => svc.getCustomerActivity((req.params as any).id));
 
     // ── Avatar moderation (TRI-943) — queue + actions, guarded by content.manage ─
     // Queue lists pending/hidden (auto-flagged) avatars with owner + media + last report reason. An admin

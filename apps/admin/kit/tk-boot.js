@@ -370,6 +370,8 @@
     // misc lists
     listCustomers: function () { return req("GET", "/customers"); },
     getCustomer: function (id) { return req("GET", "/customers/" + encodeURIComponent(id)); },
+    // TRI-972: customer activity/events timeline (bookings, cancellations, reschedules, refunds, reviews)
+    getCustomerActivity: function (id) { return req("GET", "/customers/" + encodeURIComponent(id) + "/activity"); },
     listGuides: function () { return req("GET", "/guides"); },
     // reporting (TRI-898): console-home aggregates + read-only audit log (A15/A16)
     getDashboard: function (range) { return req("GET", "/dashboard" + (range ? "?range=" + encodeURIComponent(range) : "")); },
