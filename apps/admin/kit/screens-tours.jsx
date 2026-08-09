@@ -107,6 +107,27 @@ function TourEdit({ go, state }) {
   const [cover, setCover] = React.useState(null);
   const uidRef = React.useRef(0);
   const nextId = () => "m" + (uidRef.current++);
+
+  // Tracks (TRI-989): route variants a traveller picks on the tour page. Persisted
+  // as `packages` on the tour. Controlled state (repeatable rows), seeded from the
+  // loaded detail alongside the gallery. Each track carries a local `_uid` for keys,
+  // its stored `slug` (blank for new tracks — server derives one from the name), and
+  // its own price tiers. `defaultTrack` holds the _uid of the preselected track.
+  const [tracks, setTracks] = React.useState([]);
+  const [defaultTrack, setDefaultTrack] = React.useState(null);
+  const tuidRef = React.useRef(0);
+  const nextTrackId = () => "t" + (tuidRef.current++);
+  const seedTracks = (pkgs, defSlug) => {
+    const rows = (Array.isArray(pkgs) ? pkgs : []).map(p => ({
+      _uid: nextTrackId(), slug: p.id || "", name: p.name || "", tag: p.tag || "",
+      duration: p.duration || "", blurb: p.blurb || "",
+      stops: (p.stops || []).join("\n"), includes: (p.includes || []).join("\n"),
+      tiers: (p.tiers && p.tiers.length ? p.tiers : [{ minPax: 1, price: "" }]).map(t => ({ minPax: t.minPax, price: t.price })),
+    }));
+    setTracks(rows);
+    const def = rows.find(r => r.slug && r.slug === defSlug) || null;
+    setDefaultTrack(def ? def._uid : (rows[0] ? rows[0]._uid : null));
+  };
   const seedMedia = (imgs, coverImg) => {
     const arr = (Array.isArray(imgs) && imgs.length ? imgs : (coverImg ? [coverImg] : [])).slice();
     const items = arr.map(src => ({ id: nextId(), src: src, alt: "" }));
@@ -115,17 +136,25 @@ function TourEdit({ go, state }) {
   };
   const touch = () => setDirty(true);
 
-  // Flag-off / new: seed the gallery synchronously from the initial record.
-  React.useEffect(() => { if (!(live && !isNew)) seedMedia(detail && detail.images, detail && detail.image); }, []);
-  // Live existing tour: fetch full detail, then hydrate fields + gallery.
+  // Flag-off / new: seed the gallery + tracks synchronously from the initial record.
+  React.useEffect(() => { if (!(live && !isNew)) { seedMedia(detail && detail.images, detail && detail.image); seedTracks(detail && detail.packages, detail && detail.defaultPackage); } }, []);
+  // Live existing tour: fetch full detail, then hydrate fields + gallery + tracks.
   React.useEffect(() => {
     if (isNew || !live) return;
     let alive = true;
     window.TK_ADMIN_API.getTour(apiId)
-      .then(d => { if (!alive || !d) return; setDetail(d); setPublished(!!d.published); if (d.region) setRegion(d.region); seedMedia(d.images, d.image); })
+      .then(d => { if (!alive || !d) return; setDetail(d); setPublished(!!d.published); if (d.region) setRegion(d.region); seedMedia(d.images, d.image); seedTracks(d.packages, d.defaultPackage); })
       .catch(() => { if (alive) { setDetail(listTour || blank); setLoadErr(true); } });
     return () => { alive = false; };
   }, [state.editId]);
+
+  // Track handlers (TRI-989). Editing tracks is a real change → mark dirty.
+  const addTrack = () => { setTracks(ts => ts.concat([{ _uid: nextTrackId(), slug: "", name: "", tag: "", duration: "", blurb: "", stops: "", includes: "", tiers: [{ minPax: 1, price: "" }] }])); touch(); };
+  const removeTrack = (uid) => { setTracks(ts => ts.filter(t => t._uid !== uid)); setDefaultTrack(d => d === uid ? null : d); touch(); };
+  const setTrackField = (uid, field, value) => { setTracks(ts => ts.map(t => t._uid === uid ? Object.assign({}, t, { [field]: value }) : t)); touch(); };
+  const addTrackTier = (uid) => { setTracks(ts => ts.map(t => t._uid === uid ? Object.assign({}, t, { tiers: t.tiers.concat([{ minPax: "", price: "" }]) }) : t)); touch(); };
+  const removeTrackTier = (uid, i) => { setTracks(ts => ts.map(t => t._uid === uid ? Object.assign({}, t, { tiers: t.tiers.filter((_, j) => j !== i) }) : t)); touch(); };
+  const setTrackTier = (uid, i, field, value) => { setTracks(ts => ts.map(t => t._uid === uid ? Object.assign({}, t, { tiers: t.tiers.map((tier, j) => j === i ? Object.assign({}, tier, { [field]: value }) : tier) }) : t)); touch(); };
 
   const commitRegion = () => { const v = newRegion.trim(); if (!v) return; window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.createRegion(v), () => { window.TK_ADD_REGION(v); setRegions(window.TK_DATA.regions.slice()); setRegion(v); setNewRegion(""); setAddingRegion(false); touch(); setToast("Region “" + v + "” added — now live in browse filters and the Regions page"); }); };
 
@@ -169,6 +198,29 @@ function TourEdit({ go, state }) {
     // Only persist images when we hold the authoritative gallery — a failed detail
     // load must not blank stored images with an empty array.
     if (!loadErr) { body.images = ordered; body.image = ordered[0] || ""; }
+    // Tracks (TRI-989) → packages[]. Same authoritative-load guard as images: a
+    // failed detail load must not wipe the tour's stored tracks. Drop unnamed
+    // tracks and blank tier rows; carry the existing slug so the default resolves.
+    if (!loadErr) {
+      const num = (v) => { const n = parseFloat(String(v)); return Number.isFinite(n) ? n : null; };
+      const packages = tracks
+        .filter(t => (t.name || "").trim())
+        .map(t => {
+          const tiers = (t.tiers || [])
+            .map(tr => ({ minPax: num(tr.minPax), price: num(tr.price) }))
+            .filter(tr => tr.minPax != null && tr.price != null);
+          const p = { name: t.name.trim(), tag: (t.tag || "").trim(), blurb: (t.blurb || "").trim(),
+            duration: (t.duration || "").trim(),
+            stops: (t.stops || "").split(/\r?\n/).map(s => s.trim()).filter(Boolean),
+            includes: (t.includes || "").split(/\r?\n/).map(s => s.trim()).filter(Boolean),
+            tiers };
+          if (t.slug) p.slug = t.slug;
+          return p;
+        });
+      body.packages = packages;
+      const def = tracks.find(t => t._uid === defaultTrack && (t.name || "").trim());
+      if (def) body.defaultPackage = def.slug || def.name.trim();
+    }
     const optimistic = () => { setDirty(false); setToast(isNew ? "Tour created" : "Tour saved"); };
     window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.saveTour(body), optimistic);
   };
@@ -242,6 +294,56 @@ function TourEdit({ go, state }) {
             </table>
           </div>
           <Button variant="secondary" size="sm" iconStart="plus" onClick={touch} style={{ alignSelf: "flex-start" }}>Add price tier</Button>
+        </Section>
+
+        <Section title="Tracks" hint="Optional route variants a traveller picks on the tour page (e.g. the Accra City Tour's three half-day routes). Leave empty for a single-itinerary tour.">
+          {tracks.length === 0 ? (
+            <p className="tk-caption" style={{ margin: "0 0 4px" }}>No tracks — this tour books as a single itinerary.</p>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              {tracks.map((tr, ti) => (
+                <div key={tr._uid} className="tk-card" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <strong style={{ flex: 1 }}>{(tr.name || "").trim() || "Track " + (ti + 1)}</strong>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }} className="tk-caption">
+                      <input type="radio" name="track-default" checked={defaultTrack === tr._uid} onChange={() => { setDefaultTrack(tr._uid); touch(); }} aria-label="Preselected track" />
+                      Default
+                    </label>
+                    <IconButton icon="trash-2" label="Remove track" variant="ghost" size="sm" onClick={() => removeTrack(tr._uid)} />
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                    <FormField id={"trk-name-" + tr._uid} label="Track name" required><Input value={tr.name} onChange={(e) => setTrackField(tr._uid, "name", e.target.value)} placeholder="Classic Capital Loop" /></FormField>
+                    <FormField id={"trk-tag-" + tr._uid} label="Tag" optional help="Short label under the name."><Input value={tr.tag} onChange={(e) => setTrackField(tr._uid, "tag", e.target.value)} placeholder="Heritage & Food · half day" /></FormField>
+                  </div>
+                  <FormField id={"trk-dur-" + tr._uid} label="Duration" optional><Input value={tr.duration} onChange={(e) => setTrackField(tr._uid, "duration", e.target.value)} placeholder="Half day · 3–4 hrs" /></FormField>
+                  <FormField id={"trk-blurb-" + tr._uid} label="Overview" optional><Textarea rows={2} value={tr.blurb} onChange={(e) => setTrackField(tr._uid, "blurb", e.target.value)} placeholder="What makes this route worth it?" /></FormField>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                    <FormField id={"trk-stops-" + tr._uid} label="Stops" optional help="One per line."><Textarea rows={4} value={tr.stops} onChange={(e) => setTrackField(tr._uid, "stops", e.target.value)} placeholder={"Hotel pickup\nBlack Star Gate\nMakola Market"} /></FormField>
+                    <FormField id={"trk-inc-" + tr._uid} label="Included" optional help="One per line."><Textarea rows={4} value={tr.includes} onChange={(e) => setTrackField(tr._uid, "includes", e.target.value)} placeholder={"Private transport\nProfessional guide"} /></FormField>
+                  </div>
+                  <div>
+                    <span className="tk-caption" style={{ fontWeight: 600 }}>Group pricing (per person, USD)</span>
+                    <div className="tk-tablewrap" style={{ marginTop: 6 }}>
+                      <table className="tk-table" data-density="compact">
+                        <thead><tr><th>Party size (min)</th><th style={{ textAlign: "end" }}>Price / person</th><th /></tr></thead>
+                        <tbody>
+                          {tr.tiers.map((tier, i) => (
+                            <tr key={i}>
+                              <td style={{ width: 200 }}><Input value={tier.minPax} onChange={(e) => setTrackTier(tr._uid, i, "minPax", e.target.value)} inputMode="numeric" style={{ width: 90 }} aria-label="Minimum travellers" /></td>
+                              <td style={{ textAlign: "end", width: 160 }}><Input value={tier.price} onChange={(e) => setTrackTier(tr._uid, i, "price", e.target.value)} inputMode="numeric" iconStart="wallet" aria-label="Price per person" /></td>
+                              <td className="tk-rowkebab"><IconButton icon="trash-2" label="Remove tier" variant="ghost" size="sm" onClick={() => removeTrackTier(tr._uid, i)} /></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <Button variant="ghost" size="sm" iconStart="plus" onClick={() => addTrackTier(tr._uid)} style={{ marginTop: 6 }}>Add price tier</Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <Button variant="secondary" size="sm" iconStart="plus" onClick={addTrack} style={{ alignSelf: "flex-start", marginTop: 12 }}>Add track</Button>
         </Section>
 
         <Section title="Visibility" hint="Drafts are hidden from the website until published.">

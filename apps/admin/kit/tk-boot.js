@@ -266,6 +266,8 @@
     if (Array.isArray(v.included)) b.included = v.included;
     if (Array.isArray(v.excluded)) b.excluded = v.excluded;
     if (Array.isArray(v.tiers)) b.tiers = v.tiers;
+    if (Array.isArray(v.packages)) b.packages = v.packages;   // TRI-989 per-tour tracks (route variants)
+    if (v.defaultPackage != null) b.defaultPackage = v.defaultPackage; // TRI-989 which track is preselected
     if (Array.isArray(v.images)) b.images = v.images;   // TRI-928 gallery (ordered, cover first)
     if (v.image != null) b.image = v.image;             // TRI-928 cover image
     if (v.price != null && v.price !== "") b.price = +v.price;
