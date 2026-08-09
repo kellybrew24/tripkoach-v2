@@ -6,7 +6,7 @@ import cookie from '@fastify/cookie';
 import type { Config } from './config.ts';
 import type { Db } from './db.ts';
 import { listRegions, listTours, getTourBySlug, getAvailability, getReviews } from './catalog.ts';
-import { createBookingService, BookingError, type CreateBookingInput } from './booking.ts';
+import { createBookingService, BookingError, type CreateBookingInput, type QuoteInput } from './booking.ts';
 import { createPaystackClient, type PaystackClient } from './paystack.ts';
 import { registerAdmin } from './admin-routes.ts';
 import { createNotificationService } from './notifications.ts';
@@ -162,6 +162,15 @@ export function buildServer(db: Db, cfg: Config, paystack?: PaystackClient, stor
         const account = sid ? await resolveUserSession(db, cfg, sid).catch(() => null) : null;
         const out = await bookings.create(req.body as CreateBookingInput, { userId: account?.id ?? null });
         return reply.code(201).send(out);
+      } catch (e) { return sendBookingError(reply, e); }
+    });
+
+    // TRI-1013: pre-payment price preview. Prices a booking + optional promo without creating one, so the
+    // checkout can show the discount BEFORE the customer pays. Invalid promos come back as the booking-error
+    // envelope (422) and the FE renders the "invalid" state.
+    api.post('/bookings/quote', async (req, reply) => {
+      try {
+        return await bookings.previewQuote(req.body as QuoteInput);
       } catch (e) { return sendBookingError(reply, e); }
     });
 

@@ -782,6 +782,12 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
   const [busy, setBusy] = React.useState(false);
   const [payState, setPayState] = React.useState("idle");
   const [err, setErr] = React.useState(null);
+  // Promo code (TRI-1013). The prototype rendered an inert <PromoCode state="idle" /> with no onApply and
+  // never threaded a code into the booking, so "Apply" did nothing and the charge never moved. Live now
+  // prices the code against POST /bookings/quote (a read-only preview — no seat held, no redemption claimed)
+  // so the discount shows BEFORE payment, and threads the applied code into POST /bookings, where the
+  // backend re-validates + re-applies it authoritatively at charge time. Flag off ⇒ inert (never rendered).
+  const [promo, setPromo] = React.useState({ state: "idle", code: "", discount: 0, error: null });
   // Lead traveller prefill from the signed-in account (TRI-920, re-ported in TRI-927).
   // The fields live in state (not the DOM) so they survive the step unmount between
   // Travellers → Review → Payment — previously the values were read from the DOM at
@@ -824,6 +830,34 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
   const total = unit * pax;
   const nextTier = depPriced ? null : window.TK_PRICE.nextTier(t, pax);
 
+  // Promo discount + net total (TRI-1013). Amounts are USD (currency of record), matching the backend quote;
+  // cvt()/money() convert for display. Backend re-applies the code at charge time, so the charge is always
+  // authoritative — this preview just keeps the UI honest before the customer pays.
+  const promoTourSlug = (window.TK_SEL && window.TK_SEL.tourId) || t0.id;
+  async function applyPromo(rawCode) {
+    const code = String(rawCode || "").trim().toUpperCase();
+    if (!code) { setPromo({ state: "invalid", code: "", discount: 0, error: "Enter a promo code." }); return; }
+    setPromo((p) => ({ ...p, state: "loading", error: null }));
+    try {
+      const q = await window.TK_BOOKING.quote({ tourSlug: promoTourSlug, departureId: d && d.id, partySize: pax, promoCode: code });
+      const disc = (q && q.promo && q.promo.discountUsd) || (q && q.discountUsd) || 0;
+      if (!(disc > 0)) { setPromo({ state: "invalid", code, discount: 0, error: "That code doesn't reduce this booking." }); return; }
+      setPromo({ state: "applied", code: (q.promo && q.promo.code) || code, discount: disc, error: null });
+    } catch (e) {
+      setPromo({ state: "invalid", code, discount: 0, error: (e && e.message) || "That code is not valid or has expired." });
+    }
+  }
+  const removePromo = () => setPromo({ state: "idle", code: "", discount: 0, error: null });
+  // Re-price an applied code when the party size or departure changes so the shown discount never goes stale.
+  const appliedCode = promo.state === "applied" ? promo.code : null;
+  React.useEffect(() => {
+    if (!live || !appliedCode) return;
+    applyPromo(appliedCode);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pax, depId]);
+  const discountUsd = (live && promo.state === "applied") ? Math.min(promo.discount, total) : 0;
+  const netTotal = Math.max(0, total - discountUsd);
+
   const readVal = (id) => { const el = document.getElementById(id); return el && typeof el.value === "string" ? el.value.trim() : ""; };
   const buildTravellers = (lead) => {
     const out = [{ name: lead.name || "Lead traveller", email: lead.email || undefined, phone: lead.phone || undefined, idNumber: lead.idNumber || undefined, lead: true }];
@@ -850,6 +884,9 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
         travellers: buildTravellers(lead),
         lead: lead,
         specialRequests: readVal("w-notes") || undefined,
+        // TRI-1013: thread the applied promo code into the booking so the discount is actually charged.
+        // The backend re-validates + re-applies it against the live subtotal (authoritative price of record).
+        promoCode: (promo.state === "applied" && promo.code) ? promo.code : undefined,
         agreedTerms: true,
         payMode: mode,
       });
@@ -938,18 +975,23 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
           </>}
           {step === 3 && <>
             <h1 className="tk-h2">How would you like to pay?</h1>
-            <PaymentForm mode={mode} onModeChange={setMode} payNowEnabled amountLabel={money(total, currency)} {...(live ? { state: payState } : {})} />
+            <PaymentForm mode={mode} onModeChange={setMode} payNowEnabled amountLabel={money(netTotal, currency)} {...(live ? { state: payState } : {})} />
             {live && err && <Alert tone="error" title="We couldn't complete that">{err}</Alert>}
           </>}
           <div className="tk-row" style={{ gap: 12, justifyContent: "space-between", paddingTop: "var(--space-4)", borderTop: "1px solid var(--border-subtle)" }}>
             <Button variant="secondary" iconStart="arrow-left" onClick={() => setStep(Math.max(0, step - 1))} disabled={step === 0}>Back</Button>
-            <Button size="lg" disabled={live ? busy : undefined} iconEnd={step === 3 && mode === "now" ? "external-link" : undefined} onClick={() => { if (step !== 3) { setStep(step + 1); return; } if (live) { onPay(); return; } window.__payMode = mode; go("confirm"); }}>{live && busy ? "Processing…" : (step === 3 ? (mode === "now" ? "Pay " + money(total, currency) + " with Paystack" : "Confirm booking") : "Continue")}</Button>
+            <Button size="lg" disabled={live ? busy : undefined} iconEnd={step === 3 && mode === "now" ? "external-link" : undefined} onClick={() => { if (step !== 3) { setStep(step + 1); return; } if (live) { onPay(); return; } window.__payMode = mode; go("confirm"); }}>{live && busy ? "Processing…" : (step === 3 ? (mode === "now" ? "Pay " + money(netTotal, currency) + " with Paystack" : "Confirm booking") : "Continue")}</Button>
           </div>
         </div>
-        <OrderSummary sticky lines={[{ label: money(unit, currency) + "/person × " + pax + " travellers", amount: cvt(total, currency) }]} total={cvt(total, currency)} currency={currency} payMode={mode}>
+        <OrderSummary sticky lines={[{ label: money(unit, currency) + "/person × " + pax + " travellers", amount: cvt(total, currency) }]} total={cvt(netTotal, currency)} currency={currency} payMode={mode}
+          discount={discountUsd > 0 ? { label: "Promo " + promo.code, amount: cvt(discountUsd, currency) } : undefined}>
           {t0.packages ? <p className="tk-help" style={{ display: "flex", gap: 6 }}><Icon name="ticket" size={14} />{t.packageName} package</p> : null}
           {nextTier && <p className="tk-help" style={{ display: "flex", gap: 6, color: "var(--success-fg)" }}><Icon name="users" size={14} />Add {nextTier.minPax - pax} more and everyone pays {money(nextTier.price, currency)}/person.</p>}
-          <PromoCode state="idle" />
+          {live
+            ? <PromoCode state={promo.state} code={promo.code} error={promo.error}
+                discountLabel={promo.state === "applied" ? ("−" + money(promo.discount, currency)) : undefined}
+                onApply={applyPromo} onRemove={removePromo} />
+            : <PromoCode state="idle" />}
         </OrderSummary>
       </div>
     </div>

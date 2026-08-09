@@ -75,6 +75,29 @@
     };
   }
 
+  // Normalise a price preview (POST /bookings/quote, TRI-1013) into the USD amounts the checkout reads.
+  // Backend returns MAJOR units under `quote`; minor-unit fallbacks keep the mapper tolerant.
+  function mapQuote(r) {
+    r = r || {};
+    var q = r.quote && typeof r.quote === "object" ? r.quote : r;
+    var promo = q.promo && typeof q.promo === "object" ? q.promo : null;
+    return {
+      currency: pick(q.currency) || "USD",
+      partySize: pick(q.partySize, q.party_size),
+      unitUsd: majorFromMinor(pick(q.unitPriceMinor, q.unit_price_minor), pick(q.unitPrice, q.unit_price)),
+      subtotalUsd: majorFromMinor(pick(q.subtotalMinor, q.subtotal_minor), pick(q.subtotal)),
+      discountUsd: majorFromMinor(pick(q.discountMinor, q.discount_minor), pick(q.discount)) || 0,
+      totalUsd: majorFromMinor(pick(q.totalMinor, q.total_minor), pick(q.total)),
+      promo: promo ? {
+        code: pick(promo.code),
+        type: pick(promo.type),
+        value: pick(promo.value),
+        discountUsd: majorFromMinor(pick(promo.discountMinor, promo.discount_minor), pick(promo.discount)) || 0,
+      } : null,
+      raw: r,
+    };
+  }
+
   function mapInit(r) {
     r = r || {};
     var body = r.data && typeof r.data === "object" ? r.data : r;
@@ -141,6 +164,12 @@
     saveCtx: saveCtx,
     loadCtx: loadCtx,
     lastRef: lastRef,
+
+    // Pre-payment price preview (TRI-1013): price a booking + optional promo WITHOUT creating one, so the
+    // discount is visible before payment. Rejects with a TkApiError (message set) when the promo is invalid.
+    quote: function (payload) {
+      return api.post("/bookings/quote", payload).then(mapQuote);
+    },
 
     // Create booking + seat hold; returns the normalised booking (carries ref + USD quote).
     create: function (payload) {

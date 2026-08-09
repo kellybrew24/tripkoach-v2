@@ -36,6 +36,16 @@ export interface CreateBookingInput {
   travellers: TravellerInput[];
 }
 
+// Pre-payment price preview input (TRI-1013): everything needed to price a booking + promo without
+// creating one. No traveller/terms fields — nothing is written and no seat is held.
+export interface QuoteInput {
+  tourSlug: string;
+  departureId: string;
+  packageSlug?: string | null;
+  partySize: number;
+  promoCode?: string | null;
+}
+
 // A validated, priced promo redemption. discountMinor is already capped to the subtotal (never negative).
 interface AppliedPromo {
   id: string;
@@ -61,6 +71,9 @@ function randomCode(n: number): string {
 
 export interface BookingService {
   create(input: CreateBookingInput, opts?: { userId?: string | null }): Promise<any>;
+  /** Pre-payment price preview (TRI-1013): prices the booking + optional promo WITHOUT creating a
+   *  booking or claiming a redemption. Throws BookingError (422) if the promo is invalid. */
+  previewQuote(input: QuoteInput): Promise<any>;
   getByRef(ref: string): Promise<any | null>;
   initPayment(ref: string, opts?: { channel?: string }): Promise<any>;
   verifyPayment(ref: string, reference?: string): Promise<any>;
@@ -155,11 +168,11 @@ export function createBookingService(
     return Number(tour.base_price_minor); // fall back to the "from" price
   }
 
-  // ── Promo redemption (C7). Validate a code against the booked tour + subtotal, then ATOMICALLY claim
-  // one usage against the usage_limit. Runs inside the booking transaction (after the seat reserve) so a
-  // rolled-back booking never leaks a redemption; the caller stores promo_code_id + discount on the row so
-  // the redemption can be released again if the hold is cancelled or expires (see expireHolds / admin cancel).
-  async function applyPromo(
+  // ── Promo validation (C7, TRI-1013). Check a code against the booked tour + subtotal and PRICE the
+  // discount — WITHOUT claiming a redemption. Read-only: safe for the pre-payment /bookings/quote preview
+  // and shared by applyPromo before it claims. The usage_limit is checked read-only here (used_count vs
+  // limit); the ATOMIC claim in applyPromo is still the real over-redemption gate under concurrency.
+  async function validatePromo(
     q: Db, rawCode: string, tour: any, subtotalMinor: number, currency: string,
   ): Promise<AppliedPromo> {
     const code = String(rawCode).trim().toUpperCase();
@@ -175,6 +188,10 @@ export function createBookingService(
     }
     if (p.valid_to && new Date(p.valid_to).getTime() < now) {
       throw new BookingError('promo_expired', 'That promo code has expired', 422);
+    }
+    // Read-only usage-limit check for the preview. The definitive gate is the atomic UPDATE in applyPromo.
+    if (p.usage_limit != null && Number(p.used_count) >= Number(p.usage_limit)) {
+      throw new BookingError('promo_limit_reached', 'That promo code has reached its usage limit', 422);
     }
 
     // Scope: all | category (matches tour category enum or its display label) | tour (matches slug or id).
@@ -205,18 +222,29 @@ export function createBookingService(
     }
     discountMinor = Math.max(0, Math.min(discountMinor, subtotalMinor)); // never drive the total negative
 
+    const value = p.type === 'fixed' ? fromMinor(Number(p.value)) : Number(p.value);
+    return { id: p.id, code, type: p.type, value, discountMinor };
+  }
+
+  // ── Promo redemption (C7). Validate (above) then ATOMICALLY claim one usage against the usage_limit.
+  // Runs inside the booking transaction (after the seat reserve) so a rolled-back booking never leaks a
+  // redemption; the caller stores promo_code_id + discount on the row so the redemption can be released
+  // again if the hold is cancelled or expires (see expireHolds / admin cancel).
+  async function applyPromo(
+    q: Db, rawCode: string, tour: any, subtotalMinor: number, currency: string,
+  ): Promise<AppliedPromo> {
+    const promo = await validatePromo(q, rawCode, tour, subtotalMinor, currency);
+
     // Atomically claim one redemption. Guard the usage_limit in the UPDATE so concurrent bookings can't
     // over-redeem — a 0-row result means the limit is exhausted.
     const claim = await q.query(
       `UPDATE promo_code SET used_count = used_count + 1, updated_at = now()
         WHERE id = $1 AND (usage_limit IS NULL OR used_count < usage_limit)
-      RETURNING used_count`, [p.id]);
+      RETURNING used_count`, [promo.id]);
     if (claim.rowCount === 0) {
       throw new BookingError('promo_limit_reached', 'That promo code has reached its usage limit', 422);
     }
-
-    const value = p.type === 'fixed' ? fromMinor(Number(p.value)) : Number(p.value);
-    return { id: p.id, code, type: p.type, value, discountMinor };
+    return promo;
   }
 
   // ── CREATE + RESERVE (single transaction) ──
@@ -689,5 +717,53 @@ export function createBookingService(
     });
   }
 
-  return { create, getByRef, initPayment, verifyPayment, handleWebhook, expireHolds, resolveChargeRate, resolveChargeRateDetail };
+  // ── PRICE PREVIEW (TRI-1013): the pre-payment quote the checkout shows when a guest applies a promo.
+  // Mirrors create()'s pricing exactly (same unitPriceMinor + validatePromo) but writes nothing and holds
+  // no seat — so the discount is visible BEFORE the customer pays. An invalid promo throws BookingError
+  // (422) with the same code/message create() would raise, which the FE surfaces as the "invalid" state.
+  async function previewQuote(input: QuoteInput): Promise<any> {
+    const partySize = Number(input.partySize);
+    if (!Number.isInteger(partySize) || partySize < 1) {
+      throw new BookingError('validation', 'partySize must be an integer >= 1', 422);
+    }
+    const tourRes = await db.query(
+      `SELECT id, slug, title, currency, base_price_minor, category, category_label
+         FROM tour WHERE slug = $1 AND published`, [input.tourSlug]);
+    const tour = tourRes.rows[0];
+    if (!tour) throw new BookingError('not_found', `tour "${input.tourSlug}" not found`, 404);
+
+    let packageId: string | null = null;
+    if (input.packageSlug) {
+      const pkg = await db.query(`SELECT id FROM tour_package WHERE tour_id = $1 AND slug = $2`,
+        [tour.id, input.packageSlug]);
+      if (!pkg.rows[0]) throw new BookingError('not_found', `package "${input.packageSlug}" not found`, 404);
+      packageId = pkg.rows[0].id;
+    }
+
+    const depRes = await db.query(
+      `SELECT id, tour_id, price_minor FROM departure WHERE id = $1`, [input.departureId]);
+    const dep = depRes.rows[0];
+    if (!dep || dep.tour_id !== tour.id) {
+      throw new BookingError('not_found', 'departure not found for this tour', 404);
+    }
+
+    const unit = await unitPriceMinor(db, tour, dep, packageId, partySize);
+    const subtotal = unit * partySize;
+    const currency = tour.currency || 'USD';
+    const promo = input.promoCode
+      ? await validatePromo(db, input.promoCode, tour, subtotal, currency)
+      : null;
+    const total = subtotal - (promo?.discountMinor ?? 0);
+    return {
+      quote: {
+        unitPrice: fromMinor(unit), subtotal: fromMinor(subtotal),
+        discount: fromMinor(promo?.discountMinor ?? 0), total: fromMinor(total),
+        currency, partySize,
+        promo: promo ? { code: promo.code, type: promo.type, value: promo.value, discount: fromMinor(promo.discountMinor) } : null,
+      },
+      tour: { slug: tour.slug, title: tour.title },
+    };
+  }
+
+  return { create, previewQuote, getByRef, initPayment, verifyPayment, handleWebhook, expireHolds, resolveChargeRate, resolveChargeRateDetail };
 }
