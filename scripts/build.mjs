@@ -138,10 +138,27 @@ function buildApp(name) {
   //     fight over #root. We consume it only for the `window.TripKoachDesignSystem_*`
   //     component namespace, so strip those preview-only auto-renders. Our own
   //     app.js performs the single real render. (design-system/ stays untouched.)
-  const bundle = readFileSync(join(DS, "_ds_bundle.js"), "utf8")
+  let bundle = readFileSync(join(DS, "_ds_bundle.js"), "utf8")
     .split("\n")
     .filter((l) => !/ReactDOM\.createRoot\(document\.getElementById\("root"\)\)\.render\(/.test(l))
     .join("\n");
+  // 1c. Dead control (TRI-973): the DS TopBar renders a global "search" input
+  //     that is wired to nothing (no onSearch prop, no state) — a preview-only
+  //     affordance. The board asked to remove it from the admin shell. Strip the
+  //     .tk-topbar__search subtree from the admin bundle COPY only. The topbar's
+  //     actions cluster keeps its right edge via `margin-inline-start:auto`, so
+  //     removing the flex spacer leaves the header layout unchanged. Same
+  //     precedent as the auto-render strip above; design-system/ stays pristine.
+  if (name === "admin") {
+    const before = bundle;
+    bundle = bundle.replace(
+      /\/\*#__PURE__\*\/React\.createElement\("div",\s*\{\s*className:\s*"tk-topbar__search"[\s\S]*?(?=\/\*#__PURE__\*\/React\.createElement\("div",\s*\{\s*className:\s*"tk-topbar__actions")/,
+      "",
+    );
+    if (bundle === before || bundle.includes('"tk-topbar__search"')) {
+      throw new Error("[build] TRI-973: failed to strip dead top-bar search from admin bundle");
+    }
+  }
   writeFileSync(join(dist, "_ds_bundle.js"), bundle);
   // 2. Self-hosted production React.
   for (const f of ["react.production.min.js", "react-dom.production.min.js"]) {
