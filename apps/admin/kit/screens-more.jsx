@@ -78,6 +78,69 @@ function ActivityTimeline({ items, status, go }) {
   );
 }
 
+/* ── Row-action menu that escapes table clipping (TRI-978 reopen) ──────────
+ * The DS <RowMenu> renders its dropdown with position:absolute inside the row.
+ * That dropdown is clipped by the table's overflow ancestors — `.tk-tablewrap`
+ * has `overflow:hidden`, and (since TRI-978 #1) the single content scroll region
+ * `.tk-shell__main` has `overflow-y:auto`. So clicking the three-dots on a
+ * customer opened a menu that was cut off / "hidden in a div" — the board's bug.
+ * A CSS tweak can't defeat multiple nested overflow ancestors, so we render the
+ * menu through a portal to <body> with position:fixed, anchored to the button's
+ * viewport rect (flipping up when there isn't room below). App-layer only — the
+ * design system / _ds_bundle stay pristine. */
+function PortalRowMenu({ label = "Row actions", items = [], width = 220 }) {
+  const [open, setOpen] = React.useState(false);
+  const [pos, setPos] = React.useState(null);
+  const btnRef = React.useRef(null);
+  React.useEffect(() => {
+    if (!open) return;
+    const el = btnRef.current;
+    if (el) {
+      const r = el.getBoundingClientRect();
+      const vw = window.innerWidth, vh = window.innerHeight;
+      const estH = Math.min(items.length * 44 + 12, 320);
+      let left = r.right - width;
+      if (left < 8) left = 8;
+      if (left + width > vw - 8) left = Math.max(8, vw - 8 - width);
+      let top = r.bottom + 4;
+      if (top + estH > vh - 8) top = Math.max(8, r.top - 4 - estH); // flip up near the viewport bottom
+      setPos({ left, top });
+    }
+    const close = () => setOpen(false);
+    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("click", close);
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("resize", close);
+    // The menu is anchored to a viewport rect; any scroll invalidates it — close.
+    window.addEventListener("scroll", close, true);
+    return () => {
+      document.removeEventListener("click", close);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, [open, items.length, width]);
+  return (
+    <span style={{ position: "relative", display: "inline-block" }} onClick={(e) => e.stopPropagation()}>
+      <button ref={btnRef} type="button" className="tk-iconbtn-plain" style={{ width: 32, height: 32 }}
+        aria-haspopup="menu" aria-expanded={open} aria-label={label} onClick={() => setOpen(o => !o)}>
+        <Icon name="ellipsis" size={18} />
+      </button>
+      {open && pos && ReactDOM.createPortal(
+        <div className="tk-menu" role="menu" onClick={(e) => e.stopPropagation()}
+          style={{ position: "fixed", top: pos.top, left: pos.left, width, zIndex: 900, maxHeight: 320, overflowY: "auto" }}>
+          {items.map((it, i) => it.divider
+            ? <div key={i} style={{ height: 1, background: "var(--border-subtle)", margin: "4px 0" }} />
+            : <button key={i} type="button" role="menuitem" className="tk-menu__item"
+                style={it.danger ? { color: "var(--danger-fg)" } : undefined}
+                onClick={() => { setOpen(false); it.onClick && it.onClick(); }}>
+                {it.icon && <Icon name={it.icon} size={16} />}{it.label}
+              </button>)}
+        </div>, document.body)}
+    </span>
+  );
+}
+
 /* ── Customers ─────────────────────────────────────────── */
 function CustomersAdmin({ go, state, setState }) {
   const A = window.TK_ADMIN;
@@ -185,7 +248,7 @@ function CustomersAdmin({ go, state, setState }) {
             { key: "joined", header: "Joined", sortable: true },
           ]}
           rows={rows} getRowId={r => r.id}
-          rowActions={(r) => <RowMenu label={"Actions for " + r.name} items={kebab(r)} />}
+          rowActions={(r) => <PortalRowMenu label={"Actions for " + r.name} items={kebab(r)} />}
           empty={<EmptyState icon="users" title="No customers found" body="Try a different search." />} />
       </div>
 
