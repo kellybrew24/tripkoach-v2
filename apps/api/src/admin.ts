@@ -8,7 +8,7 @@ import type { Config } from './config.ts';
 import type { PaystackClient } from './paystack.ts';
 import { fromMinor, toMinor, slugify, formatReviewDate, initials } from './util.ts';
 import { blocksToText, textToBlocks } from './content.ts';
-import { audit } from './auth.ts';
+import { audit, ALL_PERMISSIONS } from './auth.ts';
 import type { NotificationService } from './notifications.ts';
 
 export interface Actor { id: string; ip: string | null }
@@ -1408,6 +1408,76 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     };
   }
 
+  // ── Role → permission matrix (TRI-1011) ──────────────────────────────────────
+  // The editable roles. `admin` is deliberately excluded: it is all-locked-on in the app layer
+  // (permissionsFor short-circuits admin → every permission), so it is never persisted or editable here.
+  const EDITABLE_ROLES = ['operator', 'viewer'] as const;
+
+  // Return the full role × permission matrix the console renders. admin is synthesised as all-true+locked;
+  // operator/viewer are read live from role_permission so the UI reflects exactly what the guards enforce.
+  async function getRolePermissions() {
+    const { rows } = await db.query<{ role: string; permission: string; allowed: boolean }>(
+      `SELECT role, permission, allowed FROM role_permission WHERE role = ANY($1)`,
+      [EDITABLE_ROLES as unknown as string[]]);
+    const stored: Record<string, Record<string, boolean>> = { operator: {}, viewer: {} };
+    for (const r of rows) {
+      if (stored[r.role]) stored[r.role][r.permission] = !!r.allowed;
+    }
+    const matrix: Record<string, { admin: boolean; operator: boolean; viewer: boolean }> = {};
+    for (const p of ALL_PERMISSIONS) {
+      matrix[p] = {
+        admin: true, // always — admin is all-locked-on in the app layer
+        operator: stored.operator[p] ?? false,
+        viewer: stored.viewer[p] ?? false,
+      };
+    }
+    return {
+      permissions: [...ALL_PERMISSIONS],
+      lockedRoles: ['admin'],
+      editableRoles: [...EDITABLE_ROLES],
+      matrix,
+    };
+  }
+
+  // Persist edits to the operator/viewer rows. Accepts a partial matrix:
+  //   { matrix: { operator: { "payments.refund": true, ... }, viewer: { ... } } }
+  // Every (role, permission) is validated against the known vocabulary; admin is rejected (locked all-on);
+  // unknown roles/permissions are rejected rather than silently dropped. Upserts, audits, returns the
+  // fresh matrix. Enforcement is immediate: guards resolve permissionsFor() per request (no cached grants).
+  async function setRolePermissions(body: unknown, actor: Actor) {
+    if (!isPlainObject(body)) throw new ValidationError('body must be an object');
+    const matrix = body.matrix;
+    if (!isPlainObject(matrix)) throw new ValidationError('"matrix" must be an object', 'matrix');
+
+    const perms = new Set<string>(ALL_PERMISSIONS as unknown as string[]);
+    const upserts: { role: string; permission: string; allowed: boolean }[] = [];
+    for (const [role, grants] of Object.entries(matrix)) {
+      if (role === 'admin') throw new ValidationError('the admin role always has every permission and cannot be edited', 'matrix.admin');
+      if (!(EDITABLE_ROLES as readonly string[]).includes(role)) throw new ValidationError(`unknown role "${role}"`, 'matrix');
+      if (!isPlainObject(grants)) throw new ValidationError(`"matrix.${role}" must be an object`, `matrix.${role}`);
+      for (const [permission, allowed] of Object.entries(grants)) {
+        if (!perms.has(permission)) throw new ValidationError(`unknown permission "${permission}"`, `matrix.${role}`);
+        if (typeof allowed !== 'boolean') throw new ValidationError(`"matrix.${role}.${permission}" must be a boolean`, `matrix.${role}.${permission}`);
+        upserts.push({ role, permission, allowed });
+      }
+    }
+    if (!upserts.length) throw new ValidationError('no permission changes provided', 'matrix');
+
+    const before = await getRolePermissions();
+    for (const u of upserts) {
+      await db.query(
+        `INSERT INTO role_permission (role, permission, allowed) VALUES ($1, $2, $3)
+         ON CONFLICT (role, permission) DO UPDATE SET allowed = EXCLUDED.allowed`,
+        [u.role, u.permission, u.allowed]);
+    }
+    const after = await getRolePermissions();
+    await audit(db, {
+      actorId: actor.id, action: 'roles.permissions.update', targetType: 'role_permission', targetId: null,
+      before: before.matrix, after: after.matrix, ip: actor.ip,
+    });
+    return after;
+  }
+
   async function getSettings() {
     return settingsDTO();
   }
@@ -1974,6 +2044,7 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     listGuides, getGuide, createGuide, updateGuide, deleteGuide,
     listPromos, getPromo, createPromo, updatePromo, deactivatePromo,
     getSettings, updateSettings,
+    getRolePermissions, setRolePermissions,
     listCustomers, getCustomer, getCustomerActivity,
     listAuditLog,
     getDashboard,

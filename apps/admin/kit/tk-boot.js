@@ -376,6 +376,10 @@
     revokeStaffInvite: function (id) { return req("POST", "/staff/" + encodeURIComponent(id) + "/revoke-invite"); },
     disableStaff: function (id) { return req("POST", "/staff/" + encodeURIComponent(id) + "/disable"); },
     enableStaff: function (id) { return req("POST", "/staff/" + encodeURIComponent(id) + "/enable"); },
+    // TRI-1011: role→permission matrix. GET hydrates the RBAC toggles; PUT persists operator/viewer edits
+    // (admin is locked all-on server-side). Guards resolve permissions per request, so edits take effect live.
+    getRolePermissions: function () { return req("GET", "/roles/permissions"); },
+    saveRolePermissions: function (matrix) { return req("PUT", "/roles/permissions", { matrix: matrix || {} }); },
     // reviews moderation (TRI-893) — unpublish & restore both return a review to 'pending' (hidden)
     listReviews: function () { return req("GET", "/reviews"); },
     approveReview: function (id) { return req("POST", "/reviews/" + encodeURIComponent(id) + "/approve"); },

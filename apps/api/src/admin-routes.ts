@@ -279,6 +279,10 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
     admin.post('/staff/:id/disable', perm('users.manage'), async (req) => staffSvc.setStatus((req.params as any).id, 'disabled', actorOf(req)));
     admin.post('/staff/:id/enable', perm('users.manage'), async (req) => staffSvc.setStatus((req.params as any).id, 'active', actorOf(req)));
 
+    // ── Role → permission matrix (TRI-1011) — the RBAC the guards actually enforce. users.manage gates both.
+    admin.get('/roles/permissions', perm('users.manage'), async () => svc.getRolePermissions());
+    admin.put('/roles/permissions', perm('users.manage'), async (req) => svc.setRolePermissions(body(req), actorOf(req)));
+
     // ── Invite accept (PUBLIC — the opaque token is the credential; no session) ──
     admin.get('/staff/accept', async (req) => ({ invite: await staffSvc.previewInvite(qStr(query(req), 'token') ?? '') }));
     admin.post('/staff/accept', async (req) => staffSvc.acceptInvite(body(req)));

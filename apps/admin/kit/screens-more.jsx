@@ -469,16 +469,43 @@ function UsersAdmin({ go }) {
       () => { applyStaff(edit.id, { name: name, role: role, jobTitle: jobTitle }); setToast("Staff member updated"); setEdit(null); }
     );
   };
-  const [perms, setPerms] = React.useState({
+  // TRI-1011: the role→permission matrix is real RBAC — the same rows the API guards resolve per request.
+  // Hydrate from GET /admin/roles/permissions and persist each toggle to PUT /admin/roles/permissions, so
+  // what an admin sees here is exactly what Operators/Read-only staff can do. (These defaults are only the
+  // design-preview seed for the non-LIVE bundle; LIVE overwrites them from the server on mount.)
+  const DEFAULT_PERMS = {
     "tours.view": { admin: true, operator: true, viewer: true }, "tours.edit": { admin: true, operator: true, viewer: false },
     "bookings.view": { admin: true, operator: true, viewer: true }, "bookings.manage": { admin: true, operator: true, viewer: false },
     "bookings.cancel": { admin: true, operator: true, viewer: false }, "payments.refund": { admin: true, operator: false, viewer: false },
     "customers.view": { admin: true, operator: true, viewer: true }, "promos.manage": { admin: true, operator: true, viewer: false },
     "users.manage": { admin: true, operator: false, viewer: false }, "settings.manage": { admin: true, operator: false, viewer: false },
-  });
+  };
+  const LIVE = !!(window.TK_CONFIG && window.TK_CONFIG.USE_LIVE_API);
+  const [perms, setPerms] = React.useState(DEFAULT_PERMS);
+  const [permsBusy, setPermsBusy] = React.useState(false);
+  React.useEffect(() => {
+    if (!LIVE || !window.TK_ADMIN_API || !window.TK_ADMIN_API.getRolePermissions) return;
+    let live = true;
+    window.TK_ADMIN_API.getRolePermissions()
+      .then((res) => { if (live && res && res.matrix) setPerms(res.matrix); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, []);
   const roleBadge = (r) => ({ admin: <Badge tone="solid">Admin</Badge>, operator: <span className="tk-badge tk-badge--confirmed">Operator</span>, viewer: <Badge tone="neutral">Read-only</Badge> }[r]);
   const statusBadge = (s) => ({ active: <span className="tk-badge tk-badge--confirmed">Active</span>, invited: <span className="tk-badge tk-badge--pending">Invited</span>, disabled: <Badge tone="neutral">Disabled</Badge> }[s]);
-  const toggle = (perm, role) => setPerms(p => ({ ...p, [perm]: { ...p[perm], [role]: !p[perm][role] } }));
+  const toggle = (perm, role) => {
+    if (role === "admin") return; // admin is locked all-on; RoleMatrix disables its cells anyway
+    const next = !(perms[perm] && perms[perm][role]);
+    const prev = perms;
+    const optimistic = { ...perms, [perm]: { ...perms[perm], [role]: next } };
+    setPerms(optimistic); // optimistic; revert on failure
+    if (!LIVE || !window.TK_ADMIN_API || !window.TK_ADMIN_API.saveRolePermissions) return;
+    setPermsBusy(true);
+    window.TK_ADMIN_API.saveRolePermissions({ [role]: { [perm]: next } })
+      .then((res) => { if (res && res.matrix) setPerms(res.matrix); setToast(next ? "Permission granted — takes effect immediately" : "Permission revoked — takes effect immediately"); })
+      .catch((e) => { setPerms(prev); setToast((e && e.message) ? e.message : "Couldn't save permission change"); })
+      .then(() => setPermsBusy(false));
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -509,7 +536,7 @@ function UsersAdmin({ go }) {
             { id: "customers.view", label: "View customer data", hint: "Personal data" }, { id: "promos.manage", label: "Manage promo codes" },
             { id: "users.manage", label: "Manage staff & roles" }, { id: "settings.manage", label: "Change settings" },
           ]}
-          value={perms} onToggle={toggle} />
+          value={perms} onToggle={toggle} readOnly={permsBusy} />
       </div>
       <Drawer open={invite} title="Invite staff" subtitle="They'll get an email to set a password and enable two-factor." onClose={() => setInvite(false)}
         footer={<><Button variant="secondary" onClick={() => setInvite(false)}>Cancel</Button><Button iconStart="mail" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.inviteStaff({ email: (document.getElementById("iv-email") || {}).value, name: (document.getElementById("iv-name") || {}).value, role: (document.getElementById("iv-role") || {}).value || "operator" }), () => { setToast("Invite sent"); setInvite(false); })}>Send invite</Button></>}>

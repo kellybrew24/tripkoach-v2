@@ -1727,6 +1727,31 @@ console.log('\n[staff mgmt: invite → accept → login]');
   const adminRow = (await db.query(`SELECT id FROM staff_user WHERE email='admin@tripkoach.com'`)).rows[0];
   ok('staff: cannot demote the last active admin → 409', (await call('PATCH', `/api/admin/staff/${adminRow.id}`, { cookie: admin, payload: { role: 'operator' } })).status === 409);
   ok('staff: cannot disable the last active admin → 409', (await call('POST', `/api/admin/staff/${adminRow.id}/disable`, { cookie: admin })).status === 409);
+
+  // ── Role → permission matrix (TRI-1011): real RBAC, not a local-only toggle ────
+  const rp0 = await call('GET', '/api/admin/roles/permissions', { cookie: admin });
+  ok('rbac: GET matrix 200', rp0.status === 200 && !!rp0.body.matrix, JSON.stringify(rp0.body).slice(0, 120));
+  ok('rbac: admin column all-on + locked', rp0.body.matrix['payments.refund'].admin === true && rp0.body.lockedRoles?.includes('admin'));
+  ok('rbac: operator lacks payments.refund by default', rp0.body.matrix['payments.refund'].operator === false);
+  ok('rbac: viewer read-only (no tours.edit)', rp0.body.matrix['tours.edit'].viewer === false);
+  ok('rbac: viewer GET matrix → 403 (missing users.manage)', (await call('GET', '/api/admin/roles/permissions', { cookie: vcookie })).status === 403);
+
+  // Grant operator payments.refund; persist + enforce. viewer PUT is forbidden.
+  ok('rbac: viewer PUT matrix → 403', (await call('PUT', '/api/admin/roles/permissions', { cookie: vcookie, payload: { matrix: { operator: { 'payments.refund': true } } } })).status === 403);
+  const grant = await call('PUT', '/api/admin/roles/permissions', { cookie: admin, payload: { matrix: { operator: { 'payments.refund': true } } } });
+  ok('rbac: PUT grant → 200 + reflected', grant.status === 200 && grant.body.matrix['payments.refund'].operator === true, JSON.stringify(grant.status));
+  // Persisted (survives a fresh read) — proves it is not local-only React state.
+  ok('rbac: grant persisted across GET', (await call('GET', '/api/admin/roles/permissions', { cookie: admin })).body.matrix['payments.refund'].operator === true);
+  // Editing admin, unknown role, unknown permission, non-boolean → all rejected.
+  ok('rbac: editing admin role → 400', (await call('PUT', '/api/admin/roles/permissions', { cookie: admin, payload: { matrix: { admin: { 'tours.view': false } } } })).status === 400);
+  ok('rbac: unknown role → 400', (await call('PUT', '/api/admin/roles/permissions', { cookie: admin, payload: { matrix: { superuser: { 'tours.view': true } } } })).status === 400);
+  ok('rbac: unknown permission → 400', (await call('PUT', '/api/admin/roles/permissions', { cookie: admin, payload: { matrix: { operator: { 'god.mode': true } } } })).status === 400);
+  ok('rbac: non-boolean grant → 400', (await call('PUT', '/api/admin/roles/permissions', { cookie: admin, payload: { matrix: { operator: { 'tours.view': 'yes' } } } })).status === 400);
+  ok('rbac: empty matrix → 400', (await call('PUT', '/api/admin/roles/permissions', { cookie: admin, payload: { matrix: {} } })).status === 400);
+  // Revert the grant so later sections see the seeded baseline.
+  ok('rbac: revoke grant → 200', (await call('PUT', '/api/admin/roles/permissions', { cookie: admin, payload: { matrix: { operator: { 'payments.refund': false } } } })).body.matrix['payments.refund'].operator === false);
+  // The edit wrote an audit row.
+  ok('rbac: edit audited', (await call('GET', '/api/admin/audit-log?action=roles.permissions.update', { cookie: admin })).body.items?.length > 0);
 }
 
 console.log('\n[admin MFA: enroll → verify → login challenge → recovery]');
