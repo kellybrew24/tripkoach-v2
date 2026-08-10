@@ -114,7 +114,7 @@ const ADMIN_ROUTES = [
   ["payments", "/payments"], ["tours", "/tours"], ["blog", "/blog"], ["promos", "/promos"],
   ["users", "/staff"], ["audit", "/audit-log"], ["settings", "/settings"], ["admin-profile", "/profile"],
   ["admin-prefs", "/preferences"], ["login", "/login"], ["mfa", "/mfa"], ["mfa-enroll", "/mfa-enroll"],
-  ["reset", "/reset"], ["reset-consume", "/reset-password"], ["expired", "/expired"], ["forbidden", "/403"],
+  ["reset", "/reset"], ["reset-consume", "/reset-password"], ["accept-invite", "/accept-invite"], ["expired", "/expired"], ["forbidden", "/403"],
 ];
 const ADMIN_PATH_BY_SCREEN = Object.fromEntries(ADMIN_ROUTES.map(([s, p]) => [s, p]));
 function adminPathForScreen(screen, editId) {
@@ -141,10 +141,12 @@ function tkAuthed() { const s = tkSession(); return !LIVE || (s && !s.unauthenti
 function AdminApp() {
   const first = adminRouteFromPath(window.location.pathname);
   // When live and not signed in, start on the login screen regardless of URL — EXCEPT the emailed
-  // password-reset link (/reset-password?token=…, TRI-1000), which a locked-out operator must be able to
-  // open without a session to set a new password.
+  // password-reset link (/reset-password?token=…, TRI-1000) and the staff-invite accept link
+  // (/accept-invite?token=…, TRI-1032), which a not-yet-active invitee / locked-out operator must be
+  // able to open without a session to set their password.
+  const PRE_AUTH_TOKEN_SCREENS = ["reset-consume", "accept-invite"];
   const initialScreen = (LIVE && !tkAuthed())
-    ? (first.screen === "reset-consume" ? "reset-consume" : "login")
+    ? (PRE_AUTH_TOKEN_SCREENS.includes(first.screen) ? first.screen : "login")
     : first.screen;
   const [screen, setScreen] = React.useState(initialScreen);
   const [editId, setEditId] = React.useState(first.editId);
@@ -249,6 +251,7 @@ function AdminApp() {
   if (screen === "mfa-enroll") return <Frame demo={demo} setDemo={setDemo} screen={screen} go={go}><MfaEnrollGate go={go} state={state} /></Frame>;
   if (screen === "reset") return <Frame demo={demo} setDemo={setDemo} screen={screen} go={go}><ResetPassword go={go} /></Frame>;
   if (screen === "reset-consume") return <Frame demo={demo} setDemo={setDemo} screen={screen} go={go}><ResetPasswordConsume go={go} /></Frame>;
+  if (screen === "accept-invite") return <Frame demo={demo} setDemo={setDemo} screen={screen} go={go}><AcceptInvite go={go} /></Frame>;
   if (screen === "expired") return <Frame demo={demo} setDemo={setDemo} screen={screen} go={go}><SessionExpired go={go} /></Frame>;
 
   const meta = { ...(META[screen] || { title: screen }) };

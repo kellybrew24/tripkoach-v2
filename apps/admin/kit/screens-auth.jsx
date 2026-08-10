@@ -368,6 +368,94 @@ function ResetPasswordConsume({ go }) {
   );
 }
 
+// TRI-1032 · Accept invite — set-password stage. Reached via the emailed staff-invite link
+// (${ADMIN_BASE_URL}/accept-invite?token=…). Previews who the invite is for, then sets the initial
+// password with the single-use token (POST /api/admin/staff/accept), which activates the account.
+// On success the invitee signs in normally (and enrols MFA on first login if their role enforces it).
+// The token is read from the query string once on mount. This mirrors ResetPasswordConsume (TRI-1000) —
+// the FE was never built for the invite path, so the emailed link landed on the sign-in screen.
+function AcceptInvite({ go }) {
+  const LIVE = !!(window.TK_CONFIG && window.TK_CONFIG.USE_LIVE_API);
+  const token = React.useMemo(() => {
+    try { return new URLSearchParams(window.location.search || "").get("token") || ""; } catch (e) { return ""; }
+  }, []);
+  const [preview, setPreview] = React.useState(null); // {valid, email, name, role} | {valid:false, reason}
+  const [pw, setPw] = React.useState("");
+  const [pw2, setPw2] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [done, setDone] = React.useState(false);
+  const [err, setErr] = React.useState(null);
+  const pwOk = pw.length >= 10 && pw === pw2;
+
+  React.useEffect(() => {
+    if (!LIVE || !window.TK_ADMIN_API || !window.TK_ADMIN_API.previewInvite) { setPreview({ valid: true }); return; }
+    if (!token) { setPreview({ valid: false, reason: "not_found" }); return; }
+    window.TK_ADMIN_API.previewInvite(token).then(function (r) {
+      setPreview((r && r.invite) ? r.invite : (r || { valid: false, reason: "not_found" }));
+    }, function () { setPreview({ valid: false, reason: "not_found" }); });
+  }, [token]);
+
+  const submit = (e) => {
+    e.preventDefault();
+    if (!token) { setErr("This invite link is invalid or has expired. Ask an admin to resend it."); return; }
+    if (!window.TK_ADMIN_API || !window.TK_ADMIN_API.acceptInvite) { setErr("Setting your password is unavailable right now. Please try again later."); return; }
+    setBusy(true); setErr(null);
+    window.TK_ADMIN_API.acceptInvite(token, pw).then(function () {
+      setBusy(false); setDone(true);
+    }, function (ex) {
+      setBusy(false);
+      var expired = ex && (ex.status === 410 || (ex.code === "expired"));
+      setErr(expired ? "This invite link has expired. Ask an admin to resend it."
+        : (ex && (ex.status === 400 || ex.status === 409)) ? "This invite link is invalid or has already been used. Ask an admin to resend it."
+        : (ex && ex.message) || "We couldn't set your password. Please try again.");
+    });
+  };
+
+  const backFoot = <Button block variant="ghost" style={{ marginTop: "var(--space-4)" }} onClick={() => go("login")}>Back to sign-in</Button>;
+
+  if (!preview) {
+    return <AuthFrame foot={backFoot}><p className="tk-body-sm tk-muted" style={{ marginTop: 4 }}>Checking your invite…</p></AuthFrame>;
+  }
+  if (preview.valid === false) {
+    const msg = ({
+      expired: "This invite link has expired. Ask an admin to send you a fresh one.",
+      already_accepted: "This invite has already been used. Try signing in, or use “Forgot password?” to reset.",
+      not_pending: "This account is no longer awaiting acceptance. Try signing in instead.",
+    })[preview.reason] || "This invite link is invalid. Ask an admin to send you a fresh one.";
+    return (
+      <AuthFrame foot={backFoot}>
+        <h2 className="tk-h2">Invite link problem</h2>
+        <Alert tone="error" title="We couldn't open this invite" style={{ marginTop: "var(--space-5)" }}>{msg}</Alert>
+      </AuthFrame>
+    );
+  }
+  return (
+    <AuthFrame foot={backFoot}>
+      {done ? (
+        <>
+          <h2 className="tk-h2">You're all set</h2>
+          <p className="tk-body-sm tk-muted" style={{ marginTop: 4, marginBottom: "var(--space-6)" }}>Your password is set and your account is active. Sign in to get started.</p>
+          <Button block size="lg" onClick={() => go("login")}>Go to sign-in</Button>
+        </>
+      ) : (
+        <>
+          <h2 className="tk-h2">Set your password</h2>
+          <p className="tk-body-sm tk-muted" style={{ marginTop: 4, marginBottom: "var(--space-6)" }}>
+            {preview.email ? <>Welcome{preview.name ? ", " + preview.name.split(/\s+/)[0] : ""}. Choose a password for <strong>{preview.email}</strong> to finish setting up your TripKoach admin account.</>
+              : "Choose a strong password you don't use anywhere else to finish setting up your account."}
+          </p>
+          {err && <Alert tone="error" title="We couldn't set your password" style={{ marginBottom: "var(--space-4)" }}>{err}</Alert>}
+          <form onSubmit={submit} className="tk-stack" style={{ gap: "var(--space-4)" }}>
+            <FormField id="ai-pw" label="Password" hint="At least 10 characters."><PasswordInput id="ai-pw" value={pw} onChange={(e) => setPw(e.target.value)} /></FormField>
+            <FormField id="ai-pw2" label="Confirm password" error={pw2 && pw !== pw2 ? "Passwords don't match" : undefined}><PasswordInput id="ai-pw2" value={pw2} onChange={(e) => setPw2(e.target.value)} /></FormField>
+            <Button block size="lg" type="submit" disabled={!pwOk || busy}>{busy ? "Setting up…" : "Set password & continue"}</Button>
+          </form>
+        </>
+      )}
+    </AuthFrame>
+  );
+}
+
 function SessionExpired({ go }) {
   return (
     <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", background: "var(--shell-content-bg)", padding: 24 }}>
@@ -380,4 +468,4 @@ function SessionExpired({ go }) {
     </div>
   );
 }
-Object.assign(window, { AdminLogin, MfaChallenge, MfaEnrollGate, ResetPassword, ResetPasswordConsume, SessionExpired });
+Object.assign(window, { AdminLogin, MfaChallenge, MfaEnrollGate, ResetPassword, ResetPasswordConsume, AcceptInvite, SessionExpired });

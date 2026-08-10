@@ -329,6 +329,9 @@
     changePassword: function (currentPassword, newPassword) { return req("POST", "/me/password", { currentPassword: currentPassword, newPassword: newPassword }); },
     requestPasswordReset: function (email) { return req("POST", "/auth/password-reset/request", { email: email }); },
     consumePasswordReset: function (token, password) { return req("POST", "/auth/password-reset/consume", { token: token, password: password }); },
+    // staff invite accept (public — the opaque token IS the credential) (TRI-1032)
+    previewInvite: function (token) { return req("GET", "/staff/accept", undefined, { query: { token: token } }); },
+    acceptInvite: function (token, password) { return req("POST", "/staff/accept", { token: token, password: password }); },
     // catalogue
     listTours: function () { return req("GET", "/tours"); },
     getTour: function (id) { return req("GET", "/tours/" + encodeURIComponent(id)); },
