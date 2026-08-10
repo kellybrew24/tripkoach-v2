@@ -92,7 +92,12 @@ export function createNotificationService(
   const baseLog = defaultSendOpts.log ?? (() => {});
 
   function manageUrl(ref: string): string {
-    return `${cfg.notify.webBaseUrl}/bookings/${ref}`;
+    // Ref-addressable booking view is the SPA's SINGULAR /booking/:ref route
+    // (TRI-938, guest-public receipt). The plural /bookings/:ref does NOT match
+    // any client route and falls through to the home page — stranding guest-
+    // checkout customers, whose only path back to their receipt is this email
+    // link (TRI-1035). Plural /bookings is the auth-gated My-bookings LIST.
+    return `${cfg.notify.webBaseUrl}/booking/${ref}`;
   }
 
   // Load everything the templates + recipient resolution need in one round-trip-ish shot.

@@ -234,7 +234,7 @@ export function loadConfig(): Config {
       maxRetries: num(process.env.EMAIL_MAX_RETRIES) ?? 2,
     },
     notify: {
-      // Strip any trailing slash so `${webBaseUrl}/bookings/REF` never doubles up.
+      // Strip any trailing slash so `${webBaseUrl}/booking/REF` never doubles up.
       webBaseUrl: (process.env.WEB_BASE_URL || process.env.TRIPKOACH_WEB_BASE_URL || 'https://app.tripkoach.com').replace(/\/+$/, ''),
       reminderDaysBefore: num(process.env.REMINDER_DAYS_BEFORE) ?? 3,
     },
