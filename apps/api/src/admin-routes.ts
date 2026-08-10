@@ -213,8 +213,16 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
       return {
         staff: { id: s.id, email: s.email, name: s.name, role: s.role, jobTitle: s.jobTitle },
         permissions: [...s.permissions],
+        preferences: await staffSvc.getPreferences(s.id),
       };
     });
+
+    // TRI-1009: per-staff UI/notification preferences (the user-menu "Preferences" screen was a
+    // front-end-only fake). Any signed-in staffer reads/writes only their own row.
+    admin.get('/me/preferences', { preHandler: auth }, async (req: FastifyRequest) =>
+      ({ preferences: await staffSvc.getPreferences(req.staff!.id) }));
+    admin.patch('/me/preferences', { preHandler: auth }, async (req: FastifyRequest) =>
+      ({ preferences: await staffSvc.savePreferences(req.staff!.id, body(req)) }));
 
     // Change own password while signed in (requires current password). Excludes the caller's own
     // session id so the operator stays signed in on this device while other devices are revoked.

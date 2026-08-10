@@ -552,10 +552,92 @@ export function createStaffService(db: Db, cfg: Config) {
     return { ok: true };
   }
 
+  // ── Personal preferences (staff_preferences, migration 007) — TRI-1009 ─────────
+  // The user-menu "Preferences" screen was a front-end-only fake: every control just
+  // toasted "saved"/"Preference updated" and nothing persisted (no endpoint existed).
+  // The staff_preferences table has shipped since migration 007 but no code ever read
+  // or wrote it — these are the first. Appearance/locale live in dedicated columns;
+  // the personal "alerts to me" subscriptions live in `flags`. No row = all defaults.
+  const PREF_THEME = ['system', 'light', 'dark'];
+  const PREF_DENSITY = ['comfortable', 'compact'];
+  const PREF_TZ = ['gmt', 'wat'];
+  const PREF_START = ['dashboard', 'bookings'];
+  const PREF_ALERT_KEYS = ['newBooking', 'pendingOver24h', 'paymentFailed', 'departureNearlyFull', 'dailySummary'] as const;
+  const PREF_ALERT_DEFAULTS: Record<string, boolean> = {
+    newBooking: true, pendingOver24h: true, paymentFailed: true, departureNearlyFull: false, dailySummary: false,
+  };
+  const PREF_DEFAULTS = { theme: 'system', tableDensity: 'comfortable', timeZone: 'gmt', startPage: 'dashboard' };
+
+  function prefsDTO(row: Record<string, unknown> | undefined) {
+    const flags = row && isPlainObject(row.flags) ? (row.flags as Body) : {};
+    const alerts: Record<string, boolean> = {};
+    for (const k of PREF_ALERT_KEYS) alerts[k] = flags[k] !== undefined ? !!flags[k] : PREF_ALERT_DEFAULTS[k];
+    return {
+      theme: (row && (row.theme as string)) || PREF_DEFAULTS.theme,
+      tableDensity: (row && (row.table_density as string)) || PREF_DEFAULTS.tableDensity,
+      timeZone: (row && (row.time_zone as string)) || PREF_DEFAULTS.timeZone,
+      startPage: (row && (row.start_page as string)) || PREF_DEFAULTS.startPage,
+      alerts,
+    };
+  }
+
+  async function getPreferences(staffId: string) {
+    const row = (await db.query(
+      `SELECT theme, table_density, time_zone, start_page, flags FROM staff_preferences WHERE staff_user_id=$1`,
+      [staffId])).rows[0];
+    return prefsDTO(row);
+  }
+
+  async function savePreferences(staffId: string, body: unknown) {
+    if (!isPlainObject(body)) throw new ValidationError('body must be an object');
+    const oneOf = (field: string, allowed: string[]): string | undefined => {
+      const v = body[field];
+      if (v === undefined) return undefined;
+      if (typeof v !== 'string' || !allowed.includes(v)) {
+        throw new ValidationError(`"${field}" must be one of: ${allowed.join(', ')}`, field);
+      }
+      return v;
+    };
+    const theme = oneOf('theme', PREF_THEME);
+    const density = oneOf('tableDensity', PREF_DENSITY);
+    const tz = oneOf('timeZone', PREF_TZ);
+    const startPage = oneOf('startPage', PREF_START);
+
+    // Alert subscriptions patch-merge onto the stored flags so a partial payload keeps untouched keys.
+    let flags: string | null = null;
+    if (body.alerts !== undefined) {
+      if (!isPlainObject(body.alerts)) throw new ValidationError('"alerts" must be an object', 'alerts');
+      const patch = body.alerts as Body;
+      const cur = (await db.query(`SELECT flags FROM staff_preferences WHERE staff_user_id=$1`, [staffId])).rows[0];
+      const merged: Record<string, boolean> = { ...(cur && isPlainObject(cur.flags) ? (cur.flags as Record<string, boolean>) : {}) };
+      for (const k of PREF_ALERT_KEYS) if (patch[k] !== undefined) merged[k] = !!patch[k];
+      flags = JSON.stringify(merged);
+    }
+
+    if (theme === undefined && density === undefined && tz === undefined && startPage === undefined && flags === null) {
+      throw new ValidationError('no updatable preference fields provided');
+    }
+
+    // UPSERT. COALESCE($n, existing) leaves any column absent from this patch untouched.
+    await db.query(
+      `INSERT INTO staff_preferences (staff_user_id, theme, table_density, time_zone, start_page, flags, updated_at)
+       VALUES ($1, $2, $3, $4, $5, COALESCE($6::jsonb, '{}'::jsonb), now())
+       ON CONFLICT (staff_user_id) DO UPDATE SET
+         theme         = COALESCE($2, staff_preferences.theme),
+         table_density = COALESCE($3, staff_preferences.table_density),
+         time_zone     = COALESCE($4, staff_preferences.time_zone),
+         start_page    = COALESCE($5, staff_preferences.start_page),
+         flags         = COALESCE($6::jsonb, staff_preferences.flags),
+         updated_at    = now()`,
+      [staffId, theme ?? null, density ?? null, tz ?? null, startPage ?? null, flags]);
+    return getPreferences(staffId);
+  }
+
   return {
     listStaff, inviteStaff, resendInvite, revokeInvite, previewInvite, acceptInvite, updateStaff, updateSelf, setStatus,
     enrollMfa, verifyMfaEnrollment, disableMfa, regenerateRecoveryCodes, verifyChallenge, mfaStatus,
     changeOwnPassword, requestPasswordReset, consumePasswordReset,
+    getPreferences, savePreferences,
   };
 }
 

@@ -665,15 +665,22 @@ function SettingsAdmin({ go }) {
           </Section>
         </>}
         {tab === "notify" && <>
-          <Section title="Customer emails" hint="Automatic emails sent on booking events.">
-            <Switch id="n1" label="Booking confirmation email" checked readOnly />
-            <Switch id="n2" label="Payment reminder before deadline" checked readOnly />
-            <Switch id="n3" label="Departure reminder 48h before" checked readOnly />
-            <Switch id="n4" label="Post-trip review request" />
+          {/* TRI-1009: these are transactional/system emails with no per-toggle backend — the
+              notifier always sends them and there is no setting the sending code consults. They
+              were previously plain/read-only switches that no Save ever persisted, which read as
+              broken toggles. Mark them honestly as system-managed and always on (read-only), and
+              add a note so it's clear they aren't hand-editable here. (Post-trip review requests
+              are issued per departure from the Departures screen, not a global toggle.) */}
+          <Alert tone="info" title="These emails are system-managed">Booking, payment, departure and staff-alert emails are transactional and always on — they can't be switched off here. They're shown for reference so you know exactly what the system sends.</Alert>
+          <Section title="Customer emails" hint="Automatic emails sent on booking events. Always on.">
+            <Switch id="n1" label="Booking confirmation email" checked readOnly disabled />
+            <Switch id="n2" label="Payment reminder before deadline" checked readOnly disabled />
+            <Switch id="n3" label="Departure reminder 48h before" checked readOnly disabled />
+            <Switch id="n4" label="Post-trip review request" checked readOnly disabled />
           </Section>
-          <Section title="Staff alerts" hint="Where new bookings and failures are announced.">
-            <Switch id="n5" label="New booking to ops inbox" checked readOnly />
-            <Switch id="n6" label="Failed payment alert" checked readOnly />
+          <Section title="Staff alerts" hint="Where new bookings and failures are announced. Always on.">
+            <Switch id="n5" label="New booking to ops inbox" checked readOnly disabled />
+            <Switch id="n6" label="Failed payment alert" checked readOnly disabled />
           </Section>
         </>}
       </div>
@@ -996,12 +1003,65 @@ function AccountProfileAdmin({ go, user }) {
 }
 
 /* ── Staff preferences (from the user menu) ────────────── */
+// TRI-1009: the "Alerts to me" personal-subscription rows. Stable ids so we can read
+// their state on save and hydrate them from GET /me/preferences (they persist in the
+// staff_preferences.flags blob keyed by `key`).
+const PREF_ALERT_ROWS = [
+  { id: "pf-al-newBooking", key: "newBooking", label: "New booking", hint: "A booking is created on the website or app.", def: true },
+  { id: "pf-al-pendingOver24h", key: "pendingOver24h", label: "Pending over 24h", hint: "A booking has waited more than a day for confirmation.", def: true },
+  { id: "pf-al-paymentFailed", key: "paymentFailed", label: "Payment failed", hint: "A Paystack charge was declined.", def: true },
+  { id: "pf-al-departureNearlyFull", key: "departureNearlyFull", label: "Departure nearly full", hint: "A departure passes 90% capacity.", def: false },
+  { id: "pf-al-dailySummary", key: "dailySummary", label: "Daily summary email", hint: "Yesterday's numbers, sent at 07:00 GMT.", def: false },
+];
 function PreferencesAdmin({ go }) {
+  // TRI-1009: this screen was a front-end-only fake — every control toasted "saved"
+  // but nothing persisted and no endpoint existed. Now hydrate from GET /me/preferences
+  // and persist via PATCH /me/preferences (backed by the staff_preferences table, which
+  // has existed since migration 007 but had no reader/writer). Flag off → LIVE false,
+  // no fetch, controls keep their defaults and toggles/Save just toast, byte-identical
+  // to the DS prototype.
+  const LIVE = !!(window.TK_CONFIG && window.TK_CONFIG.USE_LIVE_API);
   const [toast, setToast] = React.useState(null);
-  const Row = ({ label, hint, defaultChecked }) => (
+  const [saving, setSaving] = React.useState(false);
+  const [prefs, setPrefs] = React.useState(null);
+  React.useEffect(() => {
+    if (!LIVE || !window.TK_ADMIN_API || !window.TK_ADMIN_API.getMyPreferences) return;
+    let alive = true;
+    window.TK_ADMIN_API.getMyPreferences().then((r) => { if (alive && r && r.preferences) setPrefs(r.preferences); }, () => {});
+    return () => { alive = false; };
+  }, []);
+  // Apply loaded values onto the uncontrolled controls once known (re-apply if refetched).
+  React.useEffect(() => {
+    if (!prefs) return;
+    const set = (id, v) => { const el = document.getElementById(id); if (el != null && v != null) el.value = v; };
+    set("pf-theme", prefs.theme); set("pf-density", prefs.tableDensity);
+    set("pf-tz", prefs.timeZone); set("pf-start", prefs.startPage);
+    const alerts = prefs.alerts || {};
+    PREF_ALERT_ROWS.forEach((a) => { const el = document.getElementById(a.id); if (el) el.checked = alerts[a.key] !== undefined ? !!alerts[a.key] : a.def; });
+  }, [prefs]);
+  // Flag-off prototype behaviour: each switch toast on change. Live: silent (Save is explicit).
+  const onSwitch = () => { if (!LIVE) setToast("Preference updated"); };
+  function savePrefs() {
+    if (!LIVE || !window.TK_ADMIN_API) { setToast("Preferences saved"); return; }
+    const val = (id) => { const el = document.getElementById(id); return el ? el.value : undefined; };
+    const alerts = {};
+    PREF_ALERT_ROWS.forEach((a) => { const el = document.getElementById(a.id); if (el) alerts[a.key] = !!el.checked; });
+    setSaving(true);
+    window.TK_ADMIN_API.saveMyPreferences({
+      theme: val("pf-theme"), tableDensity: val("pf-density"), timeZone: val("pf-tz"), startPage: val("pf-start"), alerts,
+    }).then((r) => {
+      setSaving(false);
+      if (r && r.preferences) { setPrefs(r.preferences); if (window.TK_ADMIN_APPLY_THEME) window.TK_ADMIN_APPLY_THEME(r.preferences.theme); }
+      setToast("Preferences saved");
+    }, (err) => {
+      setSaving(false);
+      setToast((err && err.message) ? err.message : "Couldn't save preferences. Please try again.");
+    });
+  }
+  const Row = ({ id, label, hint, defaultChecked }) => (
     <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, padding: "14px 0", borderTop: "1px solid var(--border-subtle)" }}>
       <span style={{ maxWidth: "46ch" }}><strong style={{ fontSize: 14, color: "var(--text-strong)" }}>{label}</strong><p className="tk-body-sm tk-muted" style={{ margin: "2px 0 0" }}>{hint}</p></span>
-      <Switch id={"pf-" + label.replace(/\W/g, "")} defaultChecked={defaultChecked} onChange={() => setToast("Preference updated")} />
+      <Switch id={id} defaultChecked={defaultChecked} onChange={onSwitch} />
     </div>
   );
   return (
@@ -1017,13 +1077,9 @@ function PreferencesAdmin({ go }) {
       </div></div>
       <div className="tk-card"><div className="tk-card__body" style={{ padding: "var(--space-2) var(--space-6) var(--space-4)" }}>
         <h2 className="tk-h6" style={{ margin: "var(--space-4) 0 0" }}>Alerts to me</h2>
-        <Row label="New booking" hint="A booking is created on the website or app." defaultChecked />
-        <Row label="Pending over 24h" hint="A booking has waited more than a day for confirmation." defaultChecked />
-        <Row label="Payment failed" hint="A Paystack charge was declined." defaultChecked />
-        <Row label="Departure nearly full" hint="A departure passes 90% capacity." defaultChecked={false} />
-        <Row label="Daily summary email" hint="Yesterday's numbers, sent at 07:00 GMT." defaultChecked={false} />
+        {PREF_ALERT_ROWS.map((a) => <Row key={a.id} id={a.id} label={a.label} hint={a.hint} defaultChecked={a.def} />)}
       </div></div>
-      <div className="tk-stickysave"><span className="tk-caption">Preferences apply to your account only.</span><Button iconStart="check" onClick={() => setToast("Preferences saved")} style={{ marginInlineStart: "auto" }}>Save preferences</Button></div>
+      <div className="tk-stickysave"><span className="tk-caption">Preferences apply to your account only.</span><Button iconStart="check" disabled={saving} onClick={savePrefs} style={{ marginInlineStart: "auto" }}>{saving ? "Saving…" : "Save preferences"}</Button></div>
       {toast && <div style={{ position: "fixed", bottom: 20, insetInline: 0, display: "flex", justifyContent: "center", zIndex: 800 }}><Toast tone="success" onClose={() => setToast(null)}>{toast}</Toast></div>}
     </div>
   );

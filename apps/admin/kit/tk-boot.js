@@ -316,6 +316,9 @@
     logout: function () { return req("POST", "/auth/logout"); },
     me: function () { return req("GET", "/me"); },
     patchMe: function (body) { return req("PATCH", "/me", body); },
+    // per-staff preferences (TRI-1009)
+    getMyPreferences: function () { return req("GET", "/me/preferences"); },
+    saveMyPreferences: function (body) { return req("PATCH", "/me/preferences", body || {}); },
     // self-service MFA management (TRI-899 → TRI-895 /auth/mfa/*)
     mfaStatus: function () { return req("GET", "/auth/mfa/status"); },
     mfaEnroll: function () { return req("POST", "/auth/mfa/enroll"); },
@@ -606,11 +609,26 @@
   // staff session ({staff, role, permissions}) or the sentinel {unauthenticated:true}
   // so app.jsx renders the login screen. Flag off → left null (fixtures/demo).
   window.TK_ADMIN_SESSION = null;
+  // TRI-1009: apply the staff member's saved theme to the whole console. "system"
+  // follows the OS; explicit light/dark wins. Uses the design system's own
+  // [data-theme="dark"] tokens (semantic.css / admin.css).
+  function applyTheme(theme) {
+    try {
+      var root = document.documentElement;
+      var t = theme;
+      if (t === "system") t = (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light";
+      if (t === "dark") root.setAttribute("data-theme", "dark"); else root.removeAttribute("data-theme");
+    } catch (e) {}
+  }
+  window.TK_ADMIN_APPLY_THEME = applyTheme;
   function sessionFromMe(me) {
+    var prefs = (me && me.preferences) || null;
+    if (prefs && prefs.theme) applyTheme(prefs.theme);
     return {
       staff: (me && (me.staff || me.user || me)) || {},
       role: (me && (me.role || (me.staff && me.staff.role))) || "admin",
       permissions: (me && (me.permissions || me.perms)) || null,
+      preferences: prefs,
     };
   }
   // Called by the login screen after a successful POST /auth/login: record the
