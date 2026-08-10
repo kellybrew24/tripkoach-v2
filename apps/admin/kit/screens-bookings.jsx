@@ -1,10 +1,29 @@
 const NS = window.TripKoachDesignSystem_c9e4af;
 const { DataTable, FilterBar, Drawer, AuditTimeline, StatusBadge, Badge, Button, IconButton, Icon, Price, Modal, Alert, SearchField, Tabs, FormField, Select, Textarea, Switch, EmptyState, Toast } = NS;
 
+const PAY_LABEL = { paid: "Paid", unpaid: "Unpaid", refunded: "Refunded", failed: "Failed" };
+const payLabel = (p) => PAY_LABEL[p] || p;
 function paymentBadge(p) {
   const map = { paid: "paid", unpaid: "pending", refunded: "refunded", failed: "failed" };
-  const label = { paid: "Paid", unpaid: "Unpaid", refunded: "Refunded", failed: "Failed" }[p] || p;
-  return <StatusBadge status={map[p] || "pending"} size="sm" label={label} />;
+  return <StatusBadge status={map[p] || "pending"} size="sm" label={payLabel(p)} />;
+}
+
+// TRI-1010: the Bookings FilterBar Date/Tour/Payment facets used to be no-op onClicks.
+// They're now real client-side filters over the already-hydrated A.bookings rows (same
+// menu-dropdown pattern as Customers). Departure dates arrive as display strings
+// ("Sat 22 Aug 2026") — new Date() parses those, so the date presets compare against today.
+function parseBookingDate(s) {
+  const d = s ? new Date(s) : null;
+  return d && !isNaN(d.getTime()) ? d : null;
+}
+function bookingDateFilters() {
+  const now = new Date(); now.setHours(0, 0, 0, 0);
+  const in30 = new Date(now); in30.setDate(in30.getDate() + 30);
+  return [
+    { id: "upcoming", label: "Upcoming", test: (d) => d && d >= now },
+    { id: "30", label: "Next 30 days", test: (d) => d && d >= now && d <= in30 },
+    { id: "past", label: "Past", test: (d) => d && d < now },
+  ];
 }
 
 // TRI-968: CSV export of the bookings list. Client-side (all rows are already hydrated into TK_ADMIN),
@@ -42,14 +61,41 @@ function BookingsAdmin({ go, state, setState }) {
   const [q, setQ] = React.useState("");
   const [sel, setSel] = React.useState([]);
   const [sort, setSort] = React.useState({ key: "created", dir: "desc" });
+  // TRI-1010: FilterBar facet state — which dropdown is open + the active date/tour/payment filters.
+  const [menu, setMenu] = React.useState(null);
+  const [dateF, setDateF] = React.useState(null);
+  const [tourF, setTourF] = React.useState(null);
+  const [payF, setPayF] = React.useState(null);
   const openRef = state.detailRef;
   const loading = state.bookingsView === "loading";
 
+  const dateFilters = bookingDateFilters();
+  const tours = [...new Set(A.bookings.map(b => b.tour).filter(Boolean))].sort();
+  const pays = ["paid", "unpaid", "refunded", "failed"].filter(p => A.bookings.some(b => b.payment === p));
+
   let rows = A.bookings.filter(b => tab === "all" || b.status === tab);
   if (q) rows = rows.filter(b => (b.ref + b.customer + b.tour).toLowerCase().includes(q.toLowerCase()));
+  if (dateF) { const f = dateFilters.find(x => x.id === dateF); if (f) rows = rows.filter(b => f.test(parseBookingDate(b.date))); }
+  if (tourF) rows = rows.filter(b => b.tour === tourF);
+  if (payF) rows = rows.filter(b => b.payment === payF);
 
   const counts = { all: A.bookings.length };
   ["pending", "confirmed", "cancelled"].forEach(s => counts[s] = A.bookings.filter(b => b.status === s).length);
+
+  const applied = [];
+  if (tab !== "all") applied.push({ id: "s", label: "Status: " + tab, onRemove: () => setTab("all") });
+  if (dateF) applied.push({ id: "d", label: "Date: " + (dateFilters.find(x => x.id === dateF) || {}).label, onRemove: () => setDateF(null) });
+  if (tourF) applied.push({ id: "t", label: "Tour: " + tourF, onRemove: () => setTourF(null) });
+  if (payF) applied.push({ id: "p", label: "Payment: " + payLabel(payF), onRemove: () => setPayF(null) });
+  const clearAll = () => { setTab("all"); setDateF(null); setTourF(null); setPayF(null); };
+  const menuItems = menu === "date"
+    ? dateFilters.map(f => ({ id: f.id, label: f.label, on: () => { setDateF(f.id); setMenu(null); }, sel: dateF === f.id }))
+    : menu === "tour"
+      ? tours.map(t => ({ id: t, label: t, on: () => { setTourF(t); setMenu(null); }, sel: tourF === t }))
+      : menu === "pay"
+        ? pays.map(p => ({ id: p, label: payLabel(p), on: () => { setPayF(p); setMenu(null); }, sel: payF === p }))
+        : [];
+  const menuLeft = { date: 12, tour: 150, pay: 250 }[menu] || 12;
 
   const booking = A.bookings.find(b => b.ref === openRef);
 
@@ -59,15 +105,23 @@ function BookingsAdmin({ go, state, setState }) {
         { id: "all", label: "All", count: counts.all }, { id: "pending", label: "Pending", count: counts.pending },
         { id: "confirmed", label: "Confirmed", count: counts.confirmed }, { id: "cancelled", label: "Cancelled", count: counts.cancelled }]} />
 
-      <div className="tk-tablewrap">
+      <div className="tk-tablewrap" style={{ position: "relative" }}>
         <FilterBar
-          facets={[{ id: "date", label: "Date range", icon: "calendar-days", onClick: () => {} }, { id: "tour", label: "Tour", onClick: () => {} }, { id: "pay", label: "Payment", onClick: () => {} }]}
-          applied={tab !== "all" ? [{ id: "s", label: "Status: " + tab, onRemove: () => setTab("all") }] : []}
-          onClear={() => setTab("all")}>
+          facets={[
+            { id: "date", icon: "calendar-days", label: dateF ? (dateFilters.find(x => x.id === dateF) || {}).label : "Date range", active: !!dateF || menu === "date", onClick: () => setMenu(menu === "date" ? null : "date") },
+            { id: "tour", label: tourF ? "Tour: " + tourF : "Tour", active: !!tourF || menu === "tour", onClick: () => setMenu(menu === "tour" ? null : "tour") },
+            { id: "pay", label: payF ? "Payment: " + payLabel(payF) : "Payment", active: !!payF || menu === "pay", onClick: () => setMenu(menu === "pay" ? null : "pay") }]}
+          applied={applied}
+          onClear={clearAll}>
           <div style={{ minWidth: 240 }}><SearchField value={q} onChange={(e) => setQ(e.target.value)} onClear={() => setQ("")} placeholder="Search reference, customer or tour" /></div>
           <Button size="sm" variant="secondary" iconStart="download" disabled={rows.length === 0}
             onClick={() => exportBookingsCsv(rows)}>Export</Button>
         </FilterBar>
+        {menu && menuItems.length > 0 && <><div onClick={() => setMenu(null)} style={{ position: "fixed", inset: 0, zIndex: 5 }} /><div style={{ position: "absolute", top: 52, insetInlineStart: menuLeft, zIndex: 6, minWidth: 200, maxHeight: 280, overflowY: "auto", background: "var(--bg-surface)", border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-lg)", padding: 6 }}>
+          {menuItems.map(o => (
+            <button key={o.id} type="button" onClick={o.on} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, width: "100%", textAlign: "start", padding: "8px 10px", border: 0, borderRadius: "var(--radius-sm)", background: o.sel ? "var(--brand-wash)" : "transparent", color: "var(--text-strong)", fontWeight: o.sel ? 700 : 500, fontSize: 13.5, cursor: "pointer" }}>{o.label}{o.sel && <Icon name="check" size={15} />}</button>
+          ))}
+        </div></>}
 
         {sel.length > 0 && (
           <div className="tk-bulkbar">

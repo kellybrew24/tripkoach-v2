@@ -81,8 +81,21 @@ function buildNotifications(role, go) {
   return out.slice(0, 12);
 }
 
+// TRI-1010: the dashboard greeting used to hardcode "Wednesday 22 August · Good afternoon"
+// (browser-confirmed wrong on any other day). Compute the real weekday+date and a
+// time-of-day greeting from the client clock instead.
+function dashGreeting(greet) {
+  const d = new Date();
+  const h = d.getHours();
+  const tod = h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
+  let date;
+  try { date = d.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" }); }
+  catch (_) { date = d.toDateString(); }
+  return date + " · " + tod + (greet ? ", " + greet : "");
+}
+
 const META = {
-  dashboard: { title: "Dashboard", sub: "Wednesday 22 August · Good afternoon, Kwame" },
+  dashboard: { title: "Dashboard", sub: "Your daily overview" },
   bookings: { title: "Bookings", sub: "Manage and confirm customer bookings" },
   departures: { title: "Departures & inventory", sub: "Scheduled departures across every tour" },
   customers: { title: "Customers", sub: "Accounts and booking history" },
@@ -255,7 +268,7 @@ function AdminApp() {
   if (screen === "expired") return <Frame demo={demo} setDemo={setDemo} screen={screen} go={go}><SessionExpired go={go} /></Frame>;
 
   const meta = { ...(META[screen] || { title: screen }) };
-  if (screen === "dashboard") meta.sub = "Wednesday 22 August · Good afternoon, " + user.greet;
+  if (screen === "dashboard") meta.sub = dashGreeting(user.greet);
   // Operators can't reach finance/org-admin screens
   const blocked = role === "operator" && ADMIN_ONLY.includes(screen);
   const forbidden = screen === "forbidden" || blocked;

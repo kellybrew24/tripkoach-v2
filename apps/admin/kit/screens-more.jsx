@@ -196,9 +196,15 @@ function CustomersAdmin({ go, state, setState }) {
   const applied = [];
   if (country) applied.push({ id: "country", label: "Country: " + country, onRemove: () => setCountry(null) });
   if (band) applied.push({ id: "band", label: "Value: " + bands.find(x => x.id === band).label, onRemove: () => setBand(null) });
+  // TRI-1010: "Email customer" used to just toast — open the staff member's mail client
+  // with a real mailto: to the customer's address (subject pre-filled with the trip context).
+  const emailCustomer = (r) => {
+    if (!r || !r.email) { setToast("No email on file for " + ((r && r.name) || "this customer")); return; }
+    try { window.location.href = "mailto:" + r.email + "?subject=" + encodeURIComponent("Your TripKoach booking"); } catch (_) {}
+  };
   const kebab = (r) => [
     { label: "View details", icon: "eye", onClick: () => setState({ detailRef: r.id }) },
-    { label: "Email customer", icon: "mail", onClick: () => setToast("Opening email to " + r.name) },
+    { label: "Email customer", icon: "mail", onClick: () => emailCustomer(r) },
     { label: "Resend last confirmation", icon: "ticket", onClick: () => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.resendCustomerLastConfirmation(r.id), (res) => setToast(window.TK_RESEND_MSG(res, "Confirmation resent to " + r.email))) },
     { label: "Copy email address", icon: "receipt", onClick: () => { try { navigator.clipboard && navigator.clipboard.writeText(r.email); } catch (_) {} setToast(r.email + " copied"); } },
     { divider: true },
@@ -256,7 +262,7 @@ function CustomersAdmin({ go, state, setState }) {
       </div>
 
       <Drawer open={!!open} title={open ? open.name : ""} subtitle={open ? open.email : ""} onClose={() => setState({ detailRef: null })}
-        footer={<><Button variant="secondary" iconStart="mail" onClick={() => setToast("Opening email…")}>Email customer</Button><Button variant="secondary" style={{ marginInlineStart: "auto" }} onClick={() => setState({ detailRef: null })}>Close</Button></>}>
+        footer={<><Button variant="secondary" iconStart="mail" onClick={() => emailCustomer(open)}>Email customer</Button><Button variant="secondary" style={{ marginInlineStart: "auto" }} onClick={() => setState({ detailRef: null })}>Close</Button></>}>
         {open && <>
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
             <span style={{ flex: "none", width: 56, height: 56, borderRadius: "50%", background: "var(--brand-wash)", color: "var(--brand-gold-deep)", display: "grid", placeItems: "center", fontWeight: 800, fontSize: 20 }}>{open.initials}</span>
@@ -410,7 +416,7 @@ function PaymentsAdmin({ go, state }) {
           rows={rows} getRowId={r => r.id}
           rowActions={(r) => r.status === "pending"
             ? <Button size="sm" variant="secondary" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.markPaid(r.id), () => { patchPayment(r, "paid"); window.tkToast("Marked " + r.id + " as paid"); })}>Mark paid</Button>
-            : r.status === "paid" ? <IconButton icon="receipt" label="Issue refund" variant="ghost" size="sm" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.refundPayment(r.id), () => { patchPayment(r, "refunded"); window.tkToast("Refund started for " + r.id); })} /> : <IconButton icon="ellipsis" label="Actions" variant="ghost" size="sm" onClick={() => window.tkToast("Retry requested for " + r.id)} />}
+            : r.status === "paid" ? <IconButton icon="receipt" label="Issue refund" variant="ghost" size="sm" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.refundPayment(r.id), () => { patchPayment(r, "refunded"); window.tkToast("Refund started for " + r.id); })} /> : null /* TRI-1010: dropped the dead "Retry" ellipsis — failed/refunded rows have no admin action (the customer re-pays through Paystack; there is no server retry). */}
           empty={<EmptyState icon="wallet" title="No transactions" body="Payments appear here once money starts moving." />} />
       </div>
     </div>
