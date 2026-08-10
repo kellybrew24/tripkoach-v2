@@ -559,6 +559,52 @@ resend it. If you weren't expecting this, you can ignore this email.
 
 TripKoach Ghana Ltd · Accra · Staff console — do not share this link.`,
   },
+
+  // TRI-1015 · Lead capture. Internal ops notification sent when a visitor submits the Contact or
+  // Airport-pickup "Send inquiry" form (src/enquiries.ts). Reply-To is set to the customer's address so
+  // a koach can reply straight from their inbox. {{details}} is a pre-formatted multi-line block
+  // (label: value per line) — the html renders it with white-space:pre-line so the newlines show.
+  enquiry_received: {
+    subject: 'New {{enquiryType}} — {{email}}',
+    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>New {{enquiryType}}</title>
+<style>
+body{margin:0;padding:24px 0;background:#F1EDE6;font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#2B2724}
+table{border-collapse:collapse}.w{width:600px;max-width:100%}
+.mut{color:#6F675E;font-size:13px;line-height:1.5}
+@media (max-width:620px){.w{width:100%!important}.pad{padding-left:20px!important;padding-right:20px!important}}
+</style></head>
+<body>
+<table role="presentation" align="center" class="w" style="background:#FFFFFF;border-radius:14px;overflow:hidden">
+  <tr><td style="background:#1E1C1A;padding:20px 28px;color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">New {{enquiryType}}</td></tr>
+  <tr><td class="pad" style="padding:28px 28px 8px">
+    <h1 style="margin:0 0 4px;font-size:22px;line-height:1.2;letter-spacing:-.02em;color:#1E1C1A">{{name}}</h1>
+    <p style="margin:0;font-size:15px;line-height:1.55"><a href="mailto:{{email}}" style="color:#1E6B33">{{email}}</a></p>
+  </td></tr>
+  <tr><td class="pad" style="padding:18px 28px 0">
+    <table role="presentation" width="100%" style="border:1px solid #E4DFD6;border-radius:10px">
+      <tr><td style="padding:11px 16px;border-bottom:1px solid #F1EDE6;font-size:14px"><span style="color:#6F675E">Subject</span><span style="float:right;font-weight:600;color:#1E1C1A;text-align:right">{{subject}}</span></td></tr>
+      <tr><td style="padding:11px 16px;border-bottom:1px solid #F1EDE6;font-size:14px"><span style="color:#6F675E">Phone</span><span style="float:right;font-weight:600;color:#1E1C1A;text-align:right">{{phone}}</span></td></tr>
+      <tr><td style="padding:14px 16px;font-size:14px"><div style="color:#6F675E;margin-bottom:6px">Details</div><div style="white-space:pre-line;color:#1E1C1A;line-height:1.6">{{details}}</div></td></tr>
+    </table>
+  </td></tr>
+  <tr><td class="pad" style="padding:16px 28px 0"><p class="mut" style="margin:0">Reply to this email to respond directly to the customer.</p></td></tr>
+  <tr><td style="background:#1E1C1A;padding:18px 28px;margin-top:20px"><p style="margin:0;color:#A8A096;font-size:12px;line-height:1.6">TripKoach Ghana Ltd · Accra · Automated lead notification.</p></td></tr>
+</table>
+</body></html>`,
+    text: `New {{enquiryType}}
+
+From: {{name}} <{{email}}>
+Subject: {{subject}}
+Phone: {{phone}}
+
+Details:
+{{details}}
+
+Reply to this email to respond directly to the customer.
+
+TripKoach Ghana Ltd · Accra · Automated lead notification.`,
+  },
 } satisfies Record<string, TemplateDef>;
 
 export type TemplateName = keyof typeof TEMPLATES;

@@ -378,6 +378,16 @@
     if (btn) btn.addEventListener("click", retry);
   }
 
+  // ---- TRI-1015 · lead capture (Contact + Airport-pickup forms) -------------
+  // Thin POST wrapper the screens call to submit an enquiry. Same-origin, cookie
+  // credentials via TK_API. Call sites gate on USE_LIVE_API, so with the flag off
+  // this is never invoked and the built app stays byte-identical to the prototype.
+  window.TK_ENQUIRY = {
+    submit: function (body) {
+      return api.post("/enquiries", body);
+    },
+  };
+
   // ---- the boot gate app.js calls -------------------------------------------
   window.TK_BOOT = function (render) {
     var cfg = window.TK_CONFIG || {};

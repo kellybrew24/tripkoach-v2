@@ -3,6 +3,52 @@ const { Button, Icon, Alert, Accordion, FormField, Input, Select, Textarea, Chec
 
 const IMG = (slug) => "https://cdn.tripkoach.com/img/tours/" + slug + "/hero-480.jpg";
 
+/* TRI-1015 · Lead capture. The Contact and Airport-pickup "Send inquiry" forms used to only
+ * window.tkToast() and DISCARD the visitor's details. They now POST /enquiries via
+ * window.TK_ENQUIRY (see tk-boot.js) so no customer inquiry is lost. When USE_LIVE_API is off
+ * the built app stays byte-identical to the prototype — it just toasts, exactly as before. */
+function tkFieldVal(id) {
+  const el = document.getElementById(id);
+  if (!el) return "";
+  if (el.type === "checkbox") return !!el.checked;
+  return (el.value || "").trim();
+}
+function tkSendEnquiry(body, ids, btn) {
+  const live = !!(window.TK_CONFIG && window.TK_CONFIG.USE_LIVE_API && window.TK_ENQUIRY);
+  const email = String(body.email || "").trim();
+  if (!email || email.indexOf("@") === -1) {
+    window.tkToast("Please add a valid email so we can reply");
+    return;
+  }
+  if (!body.consent) {
+    window.tkToast("Please tick the box so we can contact you about this inquiry");
+    return;
+  }
+  if (!live) {
+    // Fixture/prototype mode — preserve the original toast-only behaviour verbatim.
+    window.tkToast("Inquiry sent — we'll reply within a day");
+    return;
+  }
+  if (btn) btn.disabled = true;
+  window.TK_ENQUIRY.submit(body)
+    .then(
+      function () {
+        window.tkToast("Inquiry sent — we'll reply within a day");
+        // Clear the fields so a follow-up inquiry starts from a clean form.
+        (ids || []).forEach(function (id) {
+          const el = document.getElementById(id);
+          if (!el) return;
+          if (el.type === "checkbox") el.checked = false;
+          else el.value = "";
+        });
+      },
+      function (err) {
+        window.tkToast((err && err.message) || "Couldn't send your inquiry — please try again or WhatsApp us");
+      }
+    )
+    .then(function () { if (btn) btn.disabled = false; });
+}
+
 function PageHero({ overline, title, sub, children, dark = true, image }) {
   return (
     <section style={{ position: "relative", overflow: "hidden", background: dark ? "var(--n-900)" : "var(--brand-wash)", color: dark ? "var(--n-0)" : "var(--text-strong)", borderBottom: dark ? "none" : "1px solid var(--border-subtle)" }}>
@@ -179,7 +225,20 @@ function PickupPage({ go }) {
               <FormField id="p-email" label="Email" required><Input type="email" placeholder="you@example.com" /></FormField>
             </div>
             <Checkbox id="p-agree" label="I agree to be contacted about this inquiry." />
-            <Button block size="lg" onClick={() => window.tkToast("Inquiry sent — we'll reply within a day")}>Send inquiry</Button>
+            <Button block size="lg" onClick={(e) => tkSendEnquiry({
+              type: "pickup",
+              name: tkFieldVal("p-name"),
+              email: tkFieldVal("p-email"),
+              consent: tkFieldVal("p-agree"),
+              payload: {
+                arrivalDate: tkFieldVal("p-date"),
+                arrivalTime: tkFieldVal("p-time"),
+                flightNumber: tkFieldVal("p-flight"),
+                partySize: tkFieldVal("p-party"),
+                dropoff: tkFieldVal("p-drop"),
+                specialRequests: tkFieldVal("p-req"),
+              },
+            }, ["p-date", "p-time", "p-flight", "p-party", "p-drop", "p-req", "p-name", "p-email", "p-agree"], e.currentTarget)}>Send inquiry</Button>
             <p className="tk-caption" style={{ textAlign: "center" }}>We'll only use your details to reply about this trip — no marketing, no third parties.</p>
           </div></div>
         </div>
@@ -270,7 +329,15 @@ function ContactPage({ go }) {
           <FormField id="c-phone" label="Phone" optional><Input type="tel" placeholder="+233 24 123 4567" /></FormField>
           <FormField id="c-msg" label="Tell us a bit more" optional><Textarea rows={4} placeholder="Dates, group size, what you're into…" /></FormField>
           <Checkbox id="c-agree" label="I agree to be contacted about this inquiry." />
-          <Button block size="lg" onClick={() => window.tkToast("Inquiry sent — we'll reply within a day")}>Send inquiry</Button>
+          <Button block size="lg" onClick={(e) => tkSendEnquiry({
+            type: "contact",
+            subject: tkFieldVal("c-subject"),
+            name: tkFieldVal("c-name"),
+            email: tkFieldVal("c-email"),
+            phone: tkFieldVal("c-phone"),
+            message: tkFieldVal("c-msg"),
+            consent: tkFieldVal("c-agree"),
+          }, ["c-name", "c-email", "c-phone", "c-msg", "c-agree"], e.currentTarget)}>Send inquiry</Button>
           <p className="tk-caption" style={{ textAlign: "center" }}>We'll only use your details to reply — no marketing, no third parties.</p>
         </div></div>
         <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>

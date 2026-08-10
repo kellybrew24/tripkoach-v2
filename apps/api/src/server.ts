@@ -14,6 +14,7 @@ import { registerConsumer } from './consumer-routes.ts';
 import { resolveUserSession } from './consumer-auth.ts';
 import { createReviewsService, ReviewError } from './reviews.ts';
 import { listBlogPosts, getBlogPost } from './content.ts';
+import { submitEnquiry, type EnquiryInput } from './enquiries.ts';
 import type { Storage } from './storage.ts';
 
 /** Normalise a query value that may be absent, a single string ("a,b"), or an array into string[]. */
@@ -149,6 +150,15 @@ export function buildServer(db: Db, cfg: Config, paystack?: PaystackClient, stor
       try {
         const { token } = req.params as { token: string };
         return await reviews.submitReview(token, req.body);
+      } catch (e) { return sendBookingError(reply, e); }
+    });
+
+    // ── TRI-1015 · Public lead capture. The Contact + Airport-pickup "Send inquiry" forms POST here
+    //    instead of discarding the visitor's details. Persists into `enquiry` + notifies ops by email. ──
+    api.post('/enquiries', async (req, reply) => {
+      try {
+        const out = await submitEnquiry(db, cfg, (req.body ?? {}) as EnquiryInput, { log: (m) => app.log.info(m) });
+        return reply.code(201).send(out);
       } catch (e) { return sendBookingError(reply, e); }
     });
 
