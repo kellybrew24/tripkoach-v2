@@ -1191,9 +1191,11 @@ function ConfirmWebLive({ go, currency = "USD" }) {
           {failed
             ? <Button size="lg" onClick={() => go("checkout")}>Try paying again</Button>
             : <Button size="lg" onClick={() => go("bookings")}>View in my bookings</Button>}
+          {/* Only offer a receipt/download when we actually have a booking ref;
+              with no ref there's nothing to download, so drop the dead stub. */}
           {ref
             ? <Button variant="secondary" iconStart="download" onClick={() => go("booking", ref)}>View &amp; download receipt</Button>
-            : <Button variant="secondary" iconStart="download" onClick={() => window.tkToast("Preparing your booking PDF…")}>Download details</Button>}
+            : null}
         </>}>
         <div className="tk-card" style={{ width: "100%", textAlign: "start" }}><div className="tk-card__body" style={{ padding: "var(--space-5)" }}>
           <div className="tk-summary__line"><span>Tour</span><span>{tourTitle || "—"}</span></div>

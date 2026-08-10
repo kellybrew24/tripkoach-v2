@@ -11,7 +11,10 @@ const REGIONS = [
   { name: "Volta", count: 1, slug: "volta-mountains-and-monkeys", note: "Mountains & monkeys" },
   { name: "Northern", count: 1, slug: "northern-savannah-safari", note: "Mole & mosques" },
   { name: "Upper East", count: 1, slug: "upper-east-bolga-paga-and-sirigu", note: "Crocodiles & crafts" },
-  { name: "Savannah", count: 1, slug: "northern-savannah-safari", note: "Wide-open safari" },
+  // "Savannah" was a dead card: it duplicated Northern's slug (so it rendered
+  // Northern's photo) and no catalogue tour carries that region, so the live
+  // count-filter below already dropped it. Removed to kill the duplicate slug;
+  // when Savannah tours ship, re-add with a real representative slug.
 ];
 
 const TESTIMONIALS = [
@@ -29,6 +32,16 @@ function Section({ children, style }) {
 
 function HomeWeb({ go }) {
   const tours = window.TK_DATA.tours;
+  // Rating + review totals derived from the live catalogue — each tour carries
+  // its cached rating and review count (tk-boot mapTourSummary). Weight the
+  // average by review volume so a 200-review 4.8 outweighs an 18-review 4.9;
+  // fall back to plain brand copy when nothing is rated yet (fresh catalogue).
+  const rated = tours.filter(t => t.rating != null && Number(t.reviews) > 0);
+  const reviewTotal = rated.reduce((n, t) => n + Number(t.reviews), 0);
+  const avgRating = reviewTotal
+    ? rated.reduce((s, t) => s + Number(t.rating) * Number(t.reviews), 0) / reviewTotal
+    : null;
+  const ratingStr = avgRating != null ? avgRating.toFixed(1) : null;
   const curated = ["discover-ghana-in-10-days", "accra-city-tour", "a-christmas-like-no-other"]
     .map(id => tours.find(t => t.id === id)).filter(Boolean);
   // Live catalogues won't carry the fixture slugs, so fall back to the first
@@ -69,7 +82,7 @@ function HomeWeb({ go }) {
             <Button size="lg" iconEnd="arrow-right" onClick={() => go("browse")}>Explore tours</Button>
           </div>
           <div style={{ display: "flex", gap: "var(--space-6)", marginTop: "var(--space-7)", flexWrap: "wrap", fontSize: 14 }}>
-            {[["star", "4.9 average across 400+ reviews"], ["shield-check", "Verified local guides"], ["wifi", "Free 5GB eSIM on arrival"]].map(([ic, tx]) => (
+            {[["star", ratingStr ? ratingStr + " average across " + reviewTotal + " reviews" : "Loved by travelers across Ghana"], ["shield-check", "Verified local guides"], ["wifi", "Free 5GB eSIM on arrival"]].map(([ic, tx]) => (
               <span key={tx} style={{ display: "inline-flex", alignItems: "center", gap: 8, color: "rgba(255,255,255,.92)", fontWeight: 500 }}>
                 <Icon name={ic} size={17} style={{ color: "var(--gold-400)" }} />{tx}
               </span>
@@ -81,7 +94,7 @@ function HomeWeb({ go }) {
       {/* ── STAT STRIP ──────────────────────────────────── */}
       <section style={{ background: "var(--n-900)", color: "var(--n-0)", borderTop: "1px solid rgba(255,255,255,.08)" }}>
         <div className="tk-container" style={{ maxWidth: 1200, display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "var(--space-6)", paddingBlock: "var(--space-8)" }}>
-          {[[String(window.TK_DATA.tours.length), "guided tours"], [String(window.TK_REGION_COUNT()), "regions of Ghana"], ["4.9★", "average rating"], ["1", "koach in your pocket"]].map(([n, l]) => (
+          {[[String(tours.length), "guided tours"], [String(window.TK_REGION_COUNT()), "regions of Ghana"], [ratingStr ? ratingStr + "★" : "—", "average rating"], ["1", "koach in your pocket"]].map(([n, l]) => (
             <div key={l} style={{ textAlign: "center" }}>
               <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: "clamp(30px,3.4vw,46px)", letterSpacing: "-0.03em", color: "var(--gold-400)" }}>{n}</div>
               <div style={{ fontSize: 13.5, color: "rgba(255,255,255,.72)", marginTop: 4, letterSpacing: ".01em" }}>{l}</div>
@@ -132,7 +145,7 @@ function HomeWeb({ go }) {
               <span className="tk-overline" style={{ color: "var(--gold-700)" }}>Most booked</span>
               <h2 className="tk-h1" style={{ marginTop: 8 }}>Popular right now.</h2>
             </div>
-            <Button variant="secondary" iconEnd="arrow-right" onClick={() => go("browse")}>View all 11 tours</Button>
+            <Button variant="secondary" iconEnd="arrow-right" onClick={() => go("browse")}>View all {tours.length} tours</Button>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "var(--space-5)" }}>
             {popular.map(t => <div key={t.id} onClick={() => go("tour", t.id)} style={{ cursor: "pointer" }}><TourCard {...t} reviewCount={t.reviews} /></div>)}
@@ -201,6 +214,9 @@ function HomeWeb({ go }) {
               <span style={{ flex: 1, fontSize: 13.5, color: "rgba(255,255,255,.5)" }}>Message Koach…</span>
               <span style={{ width: 34, height: 34, borderRadius: "50%", background: "var(--gold-400)", color: "var(--n-950)", display: "grid", placeItems: "center" }}><Icon name="arrow-right" size={17} /></span>
             </div>
+            <span style={{ display: "block", marginTop: "var(--space-3)", fontSize: 12, color: "rgba(255,255,255,.5)", textAlign: "center" }}>
+              Illustrative preview — chat isn't live yet; tap “Plan a trip” to reach a real koach.
+            </span>
           </div>
         </Section>
       </div>
@@ -208,7 +224,8 @@ function HomeWeb({ go }) {
       {/* ── TESTIMONIALS ────────────────────────────────── */}
       <Section>
         <span className="tk-overline" style={{ color: "var(--gold-700)" }}>From the field</span>
-        <h2 className="tk-h1" style={{ marginTop: 8, marginBottom: "var(--space-8)", maxWidth: "20ch" }}>What travelers tell us when they get home.</h2>
+        <h2 className="tk-h1" style={{ marginTop: 8, marginBottom: 6, maxWidth: "20ch" }}>What travelers tell us when they get home.</h2>
+        <p className="tk-caption" style={{ color: "var(--text-muted)", marginTop: 0, marginBottom: "var(--space-8)" }}>Illustrative stories — every tour page carries its own verified traveler reviews.</p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "var(--space-5)" }}>
           {TESTIMONIALS.map(t => (
             <figure key={t.name} className="tk-card" style={{ margin: 0, padding: "var(--space-6)", display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
