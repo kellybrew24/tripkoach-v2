@@ -24,9 +24,7 @@ function cvtDeps(deps, cur) { return (deps || []).map(d => ({ ...d, price: cvt(d
 // "Standard" bucket. A tour with a single group (no tracks, or every departure on
 // one track) renders a plain picker with no selector — so a no-track tour shows no
 // empty section. `packages` (t0.packages) drives track ordering + display names.
-function GroupedDeparturePicker({ departures, value, onChange, currency, packages, legend }) {
-  // Hook must run unconditionally (departures may hydrate async), so declare first.
-  const [activeKey, setActiveKey] = React.useState(null);
+function GroupedDeparturePicker({ departures, value, onChange, currency, packages, legend, activePackageId, onPackageChange }) {
   const deps = departures || [];
   const groups = [];
   const bySlug = new Map();
@@ -39,15 +37,24 @@ function GroupedDeparturePicker({ departures, value, onChange, currency, package
   (packages || []).forEach(p => { const g = { key: p.id, name: p.name, items: [] }; bySlug.set(p.id, g); groups.push(g); });
   deps.forEach(d => push(d.packageSlug || "__standard", d.packageName || "Standard", d));
   const nonEmpty = groups.filter(g => g.items.length > 0);
+  // The shown track follows the parent's selected package (the pricing radio) so the
+  // route tab and the package radio never disagree (TRI-1035). If that package has no
+  // bookable departures (e.g. Route 1 sold out while Route 2 has dates), or a deep-linked
+  // pick lives in another track, fall back to that track and reconcile the parent to it.
+  const byValue = value ? nonEmpty.find(g => g.items.some(d => d.id === value)) : null;
+  const active = (activePackageId && nonEmpty.find(g => g.key === activePackageId)) || byValue || nonEmpty[0];
+  // Hook must run unconditionally (departures may hydrate async), so declare before any
+  // early return. Pull the parent's package selection onto the track we actually show.
+  React.useEffect(() => {
+    if (active && onPackageChange && active.key !== activePackageId && (packages || []).some(p => p.id === active.key)) {
+      onPackageChange(active.key);
+    }
+  }, [active && active.key, activePackageId]);
   if (nonEmpty.length <= 1) {
     return <DeparturePicker departures={cvtDeps(deps, currency)} value={value} onChange={onChange} currency={currency} legend={legend} />;
   }
-  // Default to the first track (Route 1). If the caller's selected departure lives
-  // in another track (e.g. a deep-linked pick), follow it so the shown tab matches.
-  const byValue = value ? nonEmpty.find(g => g.items.some(d => d.id === value)) : null;
-  const active = nonEmpty.find(g => g.key === activeKey) || byValue || nonEmpty[0];
   const selectTrack = (g) => {
-    setActiveKey(g.key);
+    if (onPackageChange) onPackageChange(g.key);
     // Move the selection into the newly chosen track so Reserve stays valid.
     if (onChange && !g.items.some(d => d.id === value)) onChange(g.items[0].id);
   };
@@ -733,8 +740,20 @@ function TourWeb({ go, currency, slug }) {
     // departures the selection stays null and the booking box renders an empty state
     // instead of pushing a non-existent departure id into a broken checkout.
     if (!deps.length) return null;
-    return deps.some(x => x.id === "d2") ? "d2" : ((deps[1] || deps[0]).id);
+    // TRI-1035: keep the initial departure inside the selected package so the route tab
+    // and the pricing radio agree on load. Fall back to the whole list for no-package tours
+    // (or a package with no dates yet — the picker reconciles the radio to a real track).
+    const inPkg = pkgId ? deps.filter(x => x.packageSlug === pkgId) : deps;
+    const pool = inPkg.length ? inPkg : deps;
+    return pool.some(x => x.id === "d2") ? "d2" : ((pool[1] || pool[0]).id);
   });
+  // TRI-1035: choosing a package (pricing radio OR route tab) is one action — move the
+  // selected departure into that package so Reserve stays valid and both controls agree.
+  const choosePackage = (id) => {
+    setPkgId(id);
+    const first = (t0.departures || []).find(x => x.packageSlug === id);
+    if (first) setDep(first.id);
+  };
   const d = t.departures.find(x => x.id === dep);
   // TRI-998: a tour is bookable only when it has at least one upcoming departure. The
   // API filters departures to bookable slots (scheduled/sold_out + future), so an empty
@@ -756,7 +775,7 @@ function TourWeb({ go, currency, slug }) {
               <div style={{ display: "grid", gridTemplateColumns: "repeat(" + t0.packages.length + ",1fr)", gap: "var(--space-3)" }} role="radiogroup" aria-label="Tour package">
                 {t0.packages.map(p => { const on = p.id === pkgId; const from = p.tiers[p.tiers.length - 1].price;
                   return (
-                    <button key={p.id} type="button" role="radio" aria-checked={on} onClick={() => setPkgId(p.id)} className="tk-card"
+                    <button key={p.id} type="button" role="radio" aria-checked={on} onClick={() => choosePackage(p.id)} className="tk-card"
                       style={{ textAlign: "start", cursor: "pointer", padding: 0, borderColor: on ? "var(--brand-ink)" : "var(--border-subtle)", borderWidth: on ? 2 : 1, borderStyle: "solid", boxShadow: on ? "var(--elev-2)" : "none", background: on ? "var(--brand-wash)" : "var(--bg-surface)" }}>
                       <div className="tk-card__body" style={{ gap: 6, padding: "var(--space-4)" }}>
                         <span style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}><strong style={{ fontSize: 15 }}>{p.name}</strong>{on && <Icon name="circle-check-big" size={18} style={{ color: "var(--brand-ink)" }} />}</span>
@@ -811,7 +830,7 @@ function TourWeb({ go, currency, slug }) {
               {t0.packages ? <span className="tk-caption">{t.packageName} package</span> : null}
             </div>
             {hasDepartures ? (<>
-              <GroupedDeparturePicker departures={t.departures} value={dep} onChange={setDep} currency={currency} packages={t0.packages} legend="Choose a departure" />
+              <GroupedDeparturePicker departures={t.departures} value={dep} onChange={setDep} currency={currency} packages={t0.packages} legend="Choose a departure" activePackageId={pkgId} onPackageChange={choosePackage} />
               <Button size="lg" block disabled={!dep} onClick={() => { window.TK_SEL = { tourId: t0.id, apiTourId: t0._apiId, packageId: pkgId, packageName: t.packageName, departureId: dep }; go("checkout"); }}>Reserve my spot</Button>
               <p className="tk-caption" style={{ display: "flex", gap: 6 }}><Icon name="wallet" size={14} />Nothing is charged today. Pay before departure.</p>
             </>) : (

@@ -337,6 +337,45 @@ export function createBookingService(
           [bk.id, t === lead, t.name, t.email ?? null, t.phone ?? null, t.idNumber ?? null]);
       }
 
+      // TRI-1035: a guest booking (no account) must still be reachable from the admin
+      // console. The schema keeps an ops-side `customer` row precisely so guest/offline
+      // bookers are representable (004_people.sql §2). Materialise / reuse one from the
+      // lead traveller and link it, so the guest shows up in Admin → Customers with real
+      // contact info and their repeat bookings roll up under one record. Authed bookings
+      // keep customer_id NULL — they surface via the user_account branch of the admin query.
+      if (!opts?.userId) {
+        const emailKey = (lead.email ?? '').trim().toLowerCase();
+        const phoneKey = (lead.phone ?? '').trim();
+        let customerId: string | null = null;
+        if (emailKey) {
+          const hit = await q.query<{ id: string }>(
+            `SELECT id FROM customer WHERE user_id IS NULL AND lower(email) = $1 ORDER BY created_at LIMIT 1`,
+            [emailKey]);
+          customerId = hit.rows[0]?.id ?? null;
+        } else if (phoneKey) {
+          const hit = await q.query<{ id: string }>(
+            `SELECT id FROM customer WHERE user_id IS NULL AND email IS NULL AND phone = $1 ORDER BY created_at LIMIT 1`,
+            [phoneKey]);
+          customerId = hit.rows[0]?.id ?? null;
+        }
+        if (customerId) {
+          // Keep the freshest name/phone on a returning guest without wiping known values.
+          await q.query(
+            `UPDATE customer
+                SET name = $2,
+                    phone = COALESCE($3, phone),
+                    updated_at = now()
+              WHERE id = $1`,
+            [customerId, lead.name, lead.phone ?? null]);
+        } else {
+          const ins = await q.query<{ id: string }>(
+            `INSERT INTO customer (user_id, name, email, phone) VALUES (NULL, $1, $2, $3) RETURNING id`,
+            [lead.name, lead.email ?? null, lead.phone ?? null]);
+          customerId = ins.rows[0].id;
+        }
+        await q.query(`UPDATE booking SET customer_id = $2 WHERE id = $1`, [bk.id, customerId]);
+      }
+
       return {
         ref: bk.ref,
         status: 'reserved',

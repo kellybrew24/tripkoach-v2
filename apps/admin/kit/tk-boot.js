@@ -170,6 +170,7 @@
       customerId: pick(b.customerId, b.customer_id),
       customer: pick(b.customer, b.customerName, b.customer_name, (b.customer && b.customer.name)),
       customerEmail: pick(b.customerEmail, b.customer_email, (b.customer && b.customer.email)),
+      customerPhone: pick(b.customerPhone, b.customer_phone, (b.customer && b.customer.phone)),
       tourId: tourId, tour: b.tour || t.title || tourId, region: b.region || t.region || "",
       departureId: pick(b.departureId, b.departure_id),
       date: fmtDate(pick(b.date, b.departureDate, b.departure_date)),

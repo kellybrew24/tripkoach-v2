@@ -228,6 +228,16 @@ function BookingDrawer({ booking, onClose }) {
           </div>
         </section>
         <section>
+          <h3 className="tk-h6" style={{ marginBottom: 8 }}>Contact</h3>
+          {/* TRI-1035: surface the booker's real contact so staff can reach out — this is the
+              only place a GUEST (no-account) booker's email/phone shows in the console. */}
+          <div className="tk-summary" style={{ padding: 0 }}>
+            <div className="tk-summary__line"><span>Name</span><span style={{ fontWeight: 600, color: "var(--text-strong)" }}>{booking.customer || "—"}</span></div>
+            <div className="tk-summary__line"><span>Email</span><span style={{ fontWeight: 600, color: "var(--text-strong)" }}>{booking.customerEmail ? <a href={"mailto:" + booking.customerEmail} style={{ color: "var(--brand-ink)" }}>{booking.customerEmail}</a> : "—"}</span></div>
+            <div className="tk-summary__line"><span>Phone</span><span style={{ fontWeight: 600, color: "var(--text-strong)" }}>{booking.customerPhone ? <a href={"tel:" + booking.customerPhone} style={{ color: "var(--brand-ink)" }}>{booking.customerPhone}</a> : "—"}</span></div>
+          </div>
+        </section>
+        <section>
           <h3 className="tk-h6" style={{ marginBottom: 8 }}>Price</h3>
           <div className="tk-summary" style={{ padding: 0 }}>
             <div className="tk-summary__line"><span>{"$" + booking.unit} × {booking.travellers}</span><span>{"$" + booking.total.toLocaleString()}</span></div>

@@ -602,6 +602,7 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     return {
       ref: r.ref, status: r.status, payment: r.payment_state,
       customer: r.customer_name ?? null, customerEmail: r.customer_email ?? null,
+      customerPhone: r.customer_phone ?? null,
       customerId: r.customer_id ?? null,
       tour: r.tour_title, tourId: r.tour_slug, region: r.region_name,
       departureId: r.departure_id, date: r.date_label, travellers: Number(r.party_size),
