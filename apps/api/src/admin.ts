@@ -927,7 +927,8 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     const partial = optMoney(b, 'amount'); // whole units of the CHARGED currency (GHS); omit → full refund
 
     const cur = (await db.query(
-      `SELECT id, ref, booking_id, amount_minor, currency, method, status, provider_ref, ghs_amount_minor
+      `SELECT id, ref, booking_id, amount_minor, currency, method, status, provider_ref,
+              usd_amount_minor, fx_rate_used, ghs_amount_minor
          FROM payment WHERE ref=$1`, [ref])).rows[0];
     if (!cur) throw notFound('payment');
     if (cur.status === 'refunded') throw conflict('payment is already refunded');
@@ -953,6 +954,17 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     }
 
     const refundedMinor = result.amountMinor || amountMinor || Number(cur.ghs_amount_minor ?? cur.amount_minor);
+    // TRI-1033: carry USD-of-record + GHS + rate onto the negative refund ledger row (initPayment set them on
+    // the original; the refund insert used to leave them NULL, so the admin Payments view had no USD figure for
+    // refunds and either mislabelled the GHS number as USD or blanked it). Scale the USD proportionally for a
+    // partial refund; a full refund returns the whole USD-of-record. Columns exist by mig 008/010, which precede
+    // the mig-013 refund columns already required above.
+    const origGhsMinor = Number(cur.ghs_amount_minor ?? (cur.currency === 'GHS' ? cur.amount_minor : 0)) || 0;
+    const origUsdMinor = cur.usd_amount_minor == null ? null : Number(cur.usd_amount_minor);
+    const refundUsdMinor = origUsdMinor == null ? null
+      : -Math.abs(origGhsMinor > 0 ? Math.round(origUsdMinor * (Math.abs(refundedMinor) / origGhsMinor)) : origUsdMinor);
+    const refundGhsMinor = -Math.abs(refundedMinor);
+    const refundFxRate = cur.fx_rate_used == null ? null : Number(cur.fx_rate_used);
     // A Paystack refund is 'processed' immediately in some cases, 'pending' in others (settled async via
     // the refund.processed webhook). Either way the money is committed to being returned, so we flip the
     // original to 'refunded' now; the webhook then reconciles idempotently (no double row, no double flip).
@@ -960,12 +972,13 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
       await insertUniquePayRef(q, 'RFN', async (rfnRef) => {
         await q.query(
           `INSERT INTO payment (ref, booking_id, amount_minor, currency, method, status,
-                                provider_ref, raw, refund_of, refund_provider_id)
-           VALUES ($1,$2,$3,$4,$5,'refunded',$6,$7,$8,$9)
+                                provider_ref, raw, refund_of, refund_provider_id,
+                                usd_amount_minor, fx_rate_used, ghs_amount_minor)
+           VALUES ($1,$2,$3,$4,$5,'refunded',$6,$7,$8,$9,$10,$11,$12)
            ON CONFLICT (refund_provider_id) WHERE refund_provider_id IS NOT NULL DO NOTHING`,
           [rfnRef, cur.booking_id, -Math.abs(refundedMinor), chargedCurrency, cur.method,
            result.id, JSON.stringify({ refund: result.raw, reason, paystackStatus: result.status }),
-           cur.id, result.id]);
+           cur.id, result.id, refundUsdMinor, refundFxRate, refundGhsMinor]);
       });
       await q.query(`UPDATE payment SET status='refunded' WHERE id=$1`, [cur.id]);
       await q.query(

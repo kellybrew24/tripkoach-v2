@@ -92,6 +92,13 @@
     return DAYS[d.getUTCDay()] + " " + d.getUTCDate() + " " + MONS[d.getUTCMonth()] + " " + d.getUTCFullYear();
   }
   function pick() { for (var i = 0; i < arguments.length; i++) if (arguments[i] !== undefined && arguments[i] !== null) return arguments[i]; return undefined; }
+  // Money that stays NULL when genuinely absent (vs major()'s 0). `maj` is already in whole units; the two
+  // minor candidates are cents. Used for optional FX figures so callers can distinguish "missing" from "0".
+  function moneyOrNull(maj, minorA, minorB) {
+    if (maj != null && !isNaN(+maj)) return +maj;
+    var m = pick(minorA, minorB);
+    return m != null && !isNaN(+m) ? Math.round(+m) / 100 : null;
+  }
 
   // ---- mappers: admin API → kit fixture shape -------------------------------
   function mapTier(t) { return { minPax: pick(t.minPax, t.min_pax), price: major(t.price, pick(t.priceMinor, t.price_minor)) }; }
@@ -183,10 +190,14 @@
       id: pick(p.id, p.ref, p.reference),
       ref: pick(p.bookingRef, p.booking_ref, p.ref),
       customer: pick(p.customer, p.customerName, p.customer_name),
-      amount: major(pick(p.amount, p.usdAmount, p.total), pick(p.amountMinor, p.usdAmountMinor, p.usd_amount_minor)),
+      // `amount` is the figure IN THE ROW'S CURRENCY (GHS for a Paystack charge — the real money moved);
+      // never mislabel it. TRI-1033: `usd`/`ghs` must stay NULL when the row carries no real figure so the
+      // screen can tell "no USD-of-record" (legacy/refund rows) apart from "$0" and avoid printing a GHS
+      // number under a $ sign. Only the true USD-of-record / GHS-charge sources feed them (no amount fallback).
+      amount: major(pick(p.amount, p.total), pick(p.amountMinor, p.amount_minor)),
       currency: p.currency || "USD",
-      usd: major(pick(p.usdAmount, p.amount), pick(p.usdAmountMinor, p.usd_amount_minor)),
-      ghs: major(pick(p.ghsAmount, p.ghs_amount), pick(p.ghsAmountMinor, p.ghs_amount_minor)),
+      usd: moneyOrNull(p.usdAmount, p.usdAmountMinor, p.usd_amount_minor),
+      ghs: moneyOrNull(p.ghsAmount, p.ghsAmountMinor, p.ghs_amount_minor),
       fx: pick(p.fxRateUsed, p.fx_rate_used),
       method: p.method || (p.provider ? p.provider + (p.channel ? " · " + p.channel : "") : "Paystack"),
       status: p.status || "paid",

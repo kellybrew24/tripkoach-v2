@@ -382,12 +382,18 @@ function PaymentsAdmin({ go, state }) {
     const bk = (A.bookings || []).find(b => b.ref === row.ref);
     if (bk) bk.payment = status === "paid" ? "paid" : status === "refunded" ? "refunded" : bk.payment;
   };
-  const totalPaid = A.payments.filter(p => p.status === "paid").reduce((s, p) => s + p.amount, 0);
+  // TRI-1033: every stat + row is stated in USD-of-record so this page reconciles with the Bookings page
+  // (which shows USD). A Paystack charge row's `amount` is GHS (the real money moved, ~15.6× the USD), so
+  // summing it under a "$" was the currency mismatch the reporter saw. `usdOf` prefers the true USD-of-record
+  // and only falls back to `amount` for genuine non-GHS rows — GHS rows without a USD figure contribute 0
+  // rather than leaking a GHS magnitude into a USD total.
+  const usdOf = (p) => p.usd != null ? p.usd : (p.currency === "GHS" ? 0 : p.amount);
+  const totalPaid = A.payments.filter(p => p.status === "paid").reduce((s, p) => s + usdOf(p), 0);
   const outstanding = A.bookings.filter(b => b.payment === "unpaid").reduce((s, b) => s + b.total, 0);
-  // TRI-1006: derive Refunded total + Failed count from the live payment records (were hardcoded
-  // "$1,080" / "1"). Refunded = sum of refunded amounts; failed = count of failed attempts.
-  const refundedRows = A.payments.filter(p => p.status === "refunded");
-  const refundedTotal = refundedRows.reduce((s, p) => s + p.amount, 0);
+  // TRI-1006/1033: Refunded = money actually returned = the negative refund ledger rows (one per refund).
+  // Summing status==="refunded" instead double-counted the flipped original + its negative row (netting ~0).
+  const refundRows = A.payments.filter(p => p.amount < 0);
+  const refundedTotal = refundRows.reduce((s, p) => s + Math.abs(usdOf(p)), 0);
   const failedCount = A.payments.filter(p => p.status === "failed").length;
   let rows = A.payments.filter(p => tab === "all" || p.status === tab);
   const { StatCard } = NS;
@@ -397,7 +403,7 @@ function PaymentsAdmin({ go, state }) {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 16 }}>
         <StatCard label="Collected" value={"$" + totalPaid.toLocaleString()} icon="wallet" delta="+8%" deltaDir="up" hint="this month" />
         <StatCard label="Outstanding (pay later)" value={"$" + outstanding.toLocaleString()} icon="clock" deltaDir="flat" delta="4 bookings" />
-        <StatCard label="Refunded" value={"$" + refundedTotal.toLocaleString()} icon="receipt" deltaDir="flat" delta={refundedRows.length + (refundedRows.length === 1 ? " transaction" : " transactions")} />
+        <StatCard label="Refunded" value={"$" + refundedTotal.toLocaleString()} icon="receipt" deltaDir="flat" delta={refundRows.length + (refundRows.length === 1 ? " transaction" : " transactions")} />
         <StatCard label="Failed attempts" value={String(failedCount)} icon="triangle-alert" deltaDir={failedCount > 0 ? "down" : "flat"} delta={failedCount > 0 ? "needs review" : "all clear"} />
       </div>
       <Tabs value={tab} onChange={setTab} tabs={[{ id: "all", label: "All" }, { id: "paid", label: "Paid" }, { id: "pending", label: "Pending" }, { id: "failed", label: "Failed" }, { id: "refunded", label: "Refunded" }]} />
@@ -409,7 +415,14 @@ function PaymentsAdmin({ go, state }) {
             { key: "ref", header: "Booking", render: r => <a href="#" onClick={(e) => { e.preventDefault(); go("bookings", r.ref); }} style={{ fontWeight: 600 }}>{r.ref}</a> },
             { key: "customer", header: "Customer" },
             { key: "method", header: "Method" },
-            { key: "amount", header: "Amount", align: "end", render: r => <Price amount={r.amount} currency="USD" size="sm" /> },
+            { key: "amount", header: "Amount", align: "end", render: r => {
+              // TRI-1033: show the USD-of-record (matches the Bookings page) with the real GHS charge as an
+              // "≈" note so finance sees the actual money moved. When there is no USD figure (legacy/older
+              // refund rows), fall back to the row's true currency rather than mislabel a GHS number as USD.
+              const hasUsd = r.usd != null;
+              return <Price amount={hasUsd ? r.usd : r.amount} currency={hasUsd ? "USD" : (r.currency || "USD")}
+                approxAmount={hasUsd && r.currency === "GHS" && r.ghs != null ? r.ghs : null} approxCurrency="GHS" size="sm" />;
+            } },
             { key: "status", header: "Status", render: r => payBadge(r.status) },
             { key: "date", header: "Date" },
           ]}
