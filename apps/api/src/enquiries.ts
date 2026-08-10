@@ -15,8 +15,10 @@ import type { Config } from './config.ts';
 import { sendEmail } from './email.ts';
 import { BookingError } from './booking.ts';
 
-// Mirrors the CHECK constraint on enquiry.type (migration 007).
-export type EnquiryType = 'contact' | 'pickup' | 'esim' | 'club' | 'shop';
+// Mirrors the CHECK constraint on enquiry.type (migration 007; 'interest' added in 026).
+export type EnquiryType = 'contact' | 'pickup' | 'esim' | 'club' | 'shop' | 'interest';
+// Only these are accepted from the generic /enquiries form. 'interest' is written exclusively by the
+// dedicated tour-interest route below (never trusted from the open enquiry payload).
 const ENQUIRY_TYPES: readonly EnquiryType[] = ['contact', 'pickup', 'esim', 'club', 'shop'];
 
 // Human labels for the ops notification. Keyed by type + by the structured payload fields the FE sends.
@@ -26,6 +28,7 @@ const TYPE_LABEL: Record<EnquiryType, string> = {
   esim: 'eSIM enquiry',
   club: 'Tourism Club enquiry',
   shop: 'marketplace enquiry',
+  interest: 'tour date interest',
 };
 const FIELD_LABEL: Record<string, string> = {
   arrivalDate: 'Arrival date',
@@ -149,4 +152,100 @@ export async function submitEnquiry(
   }
 
   return { id };
+}
+
+// ── TRI-1018 / TRI-999 · Tour date-interest capture ─────────────────────────────────────────────────
+// The empty-departures booking box ("No upcoming departures") collects an email-only signal that a
+// traveller wants a departure scheduled for a specific tour. Persists as an 'interest' enquiry row and
+// notifies ops so a koach can set a date up. Idempotent: re-submitting the same email/intent for the same
+// tour returns the existing lead without inserting a duplicate or re-notifying (the empty-state form can
+// be re-tapped without spamming ops).
+
+export type InterestIntent = 'notify' | 'waitlist';
+const INTEREST_INTENTS: readonly InterestIntent[] = ['notify', 'waitlist'];
+
+export interface InterestInput {
+  intent?: string;
+  email?: string | null;
+  packageId?: string | null;
+}
+
+export interface InterestResult {
+  id: string;
+  /** true when this call created a new lead; false when it matched an existing one (idempotent hit). */
+  created: boolean;
+}
+
+/**
+ * Register interest in future dates for `tourIdOrSlug`. Throws BookingError(404) for an unknown tour and
+ * BookingError(422) for a bad intent/email. A notification failure never fails the capture.
+ */
+export async function submitTourInterest(
+  db: Db, cfg: Config, tourIdOrSlug: string, input: InterestInput, opts: { log?: (m: string) => void } = {},
+): Promise<InterestResult> {
+  const intent = String(input.intent ?? 'notify').trim() as InterestIntent;
+  if (!INTEREST_INTENTS.includes(intent)) {
+    throw new BookingError('validation', `Unknown interest intent "${input.intent ?? ''}"`, 422);
+  }
+  const email = clean(input.email, 320);
+  if (!email || !EMAIL_RE.test(email)) {
+    throw new BookingError('validation', 'A valid email address is required so we can reach you', 422);
+  }
+
+  // Resolve the tour by slug OR uuid (the FE passes the API tour id). Unknown ⇒ 404 rather than a silent
+  // orphaned lead. tour.title is the display name (there is no `name` column).
+  const tour = await db.query<{ id: string; title: string; slug: string }>(
+    `SELECT id, title, slug FROM tour WHERE slug = $1 OR id::text = $1 LIMIT 1`, [tourIdOrSlug]);
+  const row = tour.rows[0];
+  if (!row) throw new BookingError('not_found', 'Tour not found', 404);
+
+  const packageId = clean(input.packageId, 100);
+
+  // Idempotency: an existing 'interest' row for the same (tour, email, intent) short-circuits. Keeps the
+  // empty-state form safe to re-tap and stops repeat ops emails for the same standing interest.
+  const existing = await db.query<{ id: string }>(
+    `SELECT id FROM enquiry
+      WHERE type = 'interest'
+        AND lower(email) = lower($1)
+        AND payload->>'tourId' = $2
+        AND payload->>'intent' = $3
+      ORDER BY created_at DESC LIMIT 1`,
+    [email, row.id, intent]);
+  if (existing.rows[0]) {
+    opts.log?.(`[interest] duplicate ${intent} for ${row.slug} <${email}> → ${existing.rows[0].id}`);
+    return { id: existing.rows[0].id, created: false };
+  }
+
+  const payload: Record<string, string> = { tourId: row.id, tourSlug: row.slug, tourName: row.title, intent };
+  if (packageId) payload.packageId = packageId;
+  const label = intent === 'waitlist' ? 'Waitlist' : 'Notify when dates open';
+
+  const ins = await db.query<{ id: string }>(
+    `INSERT INTO enquiry (type, subject, name, email, phone, payload, consent)
+     VALUES ('interest', $1, NULL, $2, NULL, $3, true) RETURNING id`,
+    [`${label} — ${row.title}`, email, JSON.stringify(payload)]);
+  const id = ins.rows[0].id;
+
+  try {
+    const to = await resolveNotifyRecipient(db, cfg);
+    await sendEmail(db, cfg, {
+      to,
+      replyTo: email,
+      template: 'enquiry_received',
+      vars: {
+        enquiryType: TYPE_LABEL.interest,
+        name: '—',
+        email,
+        phone: '—',
+        subject: `${label} — ${row.title}`,
+        details: formatDetails({ Tour: row.title, Request: label, ...(packageId ? { Package: packageId } : {}) }),
+      },
+      relatedType: 'enquiry',
+      relatedId: id,
+    }, { log: opts.log });
+  } catch (e) {
+    opts.log?.(`[interest] ops notification failed for ${id}: ${(e as Error).message}`);
+  }
+
+  return { id, created: true };
 }

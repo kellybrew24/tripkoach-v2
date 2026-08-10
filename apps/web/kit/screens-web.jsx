@@ -674,6 +674,48 @@ function pkgTour(t, pkgId) {
   if (!p) return t;
   return { ...t, tiers: p.tiers, price: p.tiers[p.tiers.length - 1].price, included: (p.includes || t.included), stops: p.stops, packageName: p.name, packageId: p.id, duration: p.duration || t.duration };
 }
+// TRI-1018 / TRI-999 · empty-departures date-interest capture. Live only when the flag is on AND the
+// enquiry client is present — flag off ⇒ this gate is false and the form falls back to a toast, keeping
+// the built prototype byte-identical.
+const LIVE_INTEREST = () => !!(window.TK_CONFIG && window.TK_CONFIG.USE_LIVE_API && window.TK_ENQUIRY && window.TK_ENQUIRY.interest);
+
+// Inline email-only "Notify me when dates open" form shown inside the booking box when a tour has no
+// upcoming departures (TRI-999 spec: EmptyState + FormField + Input + Button, no new visual language).
+// Persists via POST /tours/:id/interest so ops can schedule a departure; flag-off just toasts thanks.
+function DateInterestForm({ tourId, packageId }) {
+  const [email, setEmail] = React.useState("");
+  const [phase, setPhase] = React.useState("idle"); // idle | submitting | done | error
+  const [err, setErr] = React.useState(null);
+  const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+  async function submit() {
+    if (!emailOk || phase === "submitting") return;
+    if (!LIVE_INTEREST()) { setPhase("done"); window.tkToast && window.tkToast("Thanks! We'll email you when dates open."); return; }
+    setPhase("submitting"); setErr(null);
+    try {
+      await window.TK_ENQUIRY.interest(tourId, { intent: "notify", email: email.trim(), packageId: packageId || undefined });
+      setPhase("done");
+    } catch (e) {
+      setErr((e && e.message) || "Something went wrong. Please try again.");
+      setPhase("error");
+    }
+  }
+  if (phase === "done") return (
+    <Alert tone="success" title="You're on the list">We'll email you the moment a date opens for this experience.</Alert>
+  );
+  return (
+    <div className="tk-stack" style={{ gap: "var(--space-3)" }}>
+      <FormField id="ti-email" label="Email" error={phase === "error" ? err : undefined}>
+        <Input id="ti-email" type="email" placeholder="you@example.com" value={email}
+          onChange={(e) => { setEmail(e.target.value); if (phase === "error") setPhase("idle"); }}
+          onKeyDown={(e) => { if (e.key === "Enter") submit(); }} />
+      </FormField>
+      <Button size="lg" block iconStart="bell" disabled={!emailOk} loading={phase === "submitting"} onClick={submit}>
+        Notify me when dates open
+      </Button>
+    </div>
+  );
+}
+
 function TourWeb({ go, currency, slug }) {
   // Slug-addressable tour detail (TRI-888/C2). A slug is only ever passed in live
   // mode; without one — the fixture prototype and every flag-off build — this
@@ -773,13 +815,14 @@ function TourWeb({ go, currency, slug }) {
               <Button size="lg" block disabled={!dep} onClick={() => { window.TK_SEL = { tourId: t0.id, apiTourId: t0._apiId, packageId: pkgId, packageName: t.packageName, departureId: dep }; go("checkout"); }}>Reserve my spot</Button>
               <p className="tk-caption" style={{ display: "flex", gap: 6 }}><Icon name="wallet" size={14} />Nothing is charged today. Pay before departure.</p>
             </>) : (
-              // TRI-998: no upcoming departures — replace the picker + "Reserve my spot"
-              // with a graceful empty state + enquiry CTA. The tour stays discoverable
-              // (board default) so travellers can still register interest in a date.
+              // TRI-998/TRI-999/TRI-1018: no upcoming departures — replace the picker + "Reserve my spot"
+              // with a graceful empty state + a REAL email-interest capture (POST /tours/:id/interest),
+              // not a route to the generic contact form. The tour stays discoverable (board default) so
+              // travellers can register interest and ops can schedule a departure for them.
               <div className="tk-stack" style={{ gap: "var(--space-3)" }}>
                 <EmptyState icon="calendar-days" title="No upcoming departures"
-                  body="This experience has no scheduled dates right now. Tell us when you'd like to travel and a koach will set a departure up for you." />
-                <Button size="lg" block iconStart="message-circle" onClick={() => go("contact")}>Enquire about dates</Button>
+                  body="This experience has no scheduled dates right now. Leave your email and a koach will set a departure up for you." />
+                <DateInterestForm tourId={t0._apiId || t0.id} packageId={pkgId} />
                 <Button size="lg" block variant="ghost" iconStart="phone" onClick={() => window.open("https://wa.me/233533244042", "_blank")}>Message a koach on WhatsApp</Button>
               </div>
             )}

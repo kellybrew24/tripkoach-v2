@@ -443,9 +443,12 @@ function AccountSettingsWeb({ go }) {
           <span><strong style={{ fontSize: 14.5, color: "var(--text-strong)" }}>Password</strong><p className="tk-body-sm tk-muted" style={{ margin: "2px 0 0" }}>Last changed 3 months ago.</p></span>
           <Button variant="secondary" size="sm" onClick={() => { setPw({ cur: "", next: "", conf: "" }); setPwOpen(true); }}>Change password</Button>
         </div>
+        {/* TRI-1018: consumer 2FA is a real build in flight (dedicated issue) — reuse of the admin TOTP
+            spine. Until the enrollment + login-challenge flow ships, the toggle must NOT pretend to save
+            (it used to just mark the form dirty). Show an honest "Coming soon" state instead of a fake. */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, paddingTop: 14, borderTop: "1px solid var(--border-subtle)" }}>
-          <span><strong style={{ fontSize: 14.5, color: "var(--text-strong)" }}>Two-factor authentication <Badge tone="neutral">Off</Badge></strong><p className="tk-body-sm tk-muted" style={{ margin: "2px 0 0" }}>Add a second step when signing in.</p></span>
-          <Button variant="secondary" size="sm" onClick={touch}>Turn on</Button>
+          <span><strong style={{ fontSize: 14.5, color: "var(--text-strong)" }}>Two-factor authentication <Badge tone="neutral">Coming soon</Badge></strong><p className="tk-body-sm tk-muted" style={{ margin: "2px 0 0" }}>Authenticator-app sign-in is on the way. We'll email you when you can turn it on.</p></span>
+          <Button variant="secondary" size="sm" disabled>Turn on</Button>
         </div>
       </div></div>
       <div className="tk-stickybar" style={{ position: "sticky", bottom: 16, borderRadius: "var(--radius-card)", border: "1px solid var(--border-subtle)", boxShadow: "var(--elev-3)" }}>

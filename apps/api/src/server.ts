@@ -14,7 +14,7 @@ import { registerConsumer } from './consumer-routes.ts';
 import { resolveUserSession } from './consumer-auth.ts';
 import { createReviewsService, ReviewError } from './reviews.ts';
 import { listBlogPosts, getBlogPost } from './content.ts';
-import { submitEnquiry, type EnquiryInput } from './enquiries.ts';
+import { submitEnquiry, submitTourInterest, type EnquiryInput, type InterestInput } from './enquiries.ts';
 import type { Storage } from './storage.ts';
 
 /** Normalise a query value that may be absent, a single string ("a,b"), or an array into string[]. */
@@ -159,6 +159,17 @@ export function buildServer(db: Db, cfg: Config, paystack?: PaystackClient, stor
       try {
         const out = await submitEnquiry(db, cfg, (req.body ?? {}) as EnquiryInput, { log: (m) => app.log.info(m) });
         return reply.code(201).send(out);
+      } catch (e) { return sendBookingError(reply, e); }
+    });
+
+    // ── TRI-1018 / TRI-999 · Empty-departures date-interest capture. The "No upcoming departures" booking
+    //    box POSTs an email here to register interest in a future date for this tour (persists as an
+    //    'interest' enquiry + notifies ops). Idempotent per (tour, email, intent). ──
+    api.post('/tours/:id/interest', async (req, reply) => {
+      try {
+        const { id } = req.params as { id: string };
+        const out = await submitTourInterest(db, cfg, id, (req.body ?? {}) as InterestInput, { log: (m) => app.log.info(m) });
+        return reply.code(out.created ? 201 : 200).send(out);
       } catch (e) { return sendBookingError(reply, e); }
     });
 

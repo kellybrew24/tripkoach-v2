@@ -386,6 +386,12 @@
     submit: function (body) {
       return api.post("/enquiries", body);
     },
+    // TRI-1018 / TRI-999 · register email interest in a tour's future dates from the
+    // empty-departures booking box. tourId is the API tour id (t0._apiId). Idempotent
+    // server-side. Gated on USE_LIVE_API at the call site, like submit() above.
+    interest: function (tourId, body) {
+      return api.post("/tours/" + encodeURIComponent(tourId) + "/interest", body);
+    },
   };
 
   // ---- the boot gate app.js calls -------------------------------------------
