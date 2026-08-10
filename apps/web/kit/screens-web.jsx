@@ -581,10 +581,10 @@ function FilterPanel({ tours, filters, toggle, onClear }) {
           </div>
         </div>
       ))}
-      <div className="tk-stack" style={{ gap: "var(--space-3)" }}>
-        <h3 className="tk-h6">Departing</h3>
-        <Select options={[{ value: "any", label: "Any date" }, { value: "m", label: "This month" }, { value: "n", label: "Next month" }]} />
-      </div>
+      {/* No "Departing" date filter here: the browse catalogue summary carries no
+          per-tour departure dates (those are hydrated only on the tour page), so a
+          date select could not honestly filter. Date selection lives on the tour
+          page's departure picker instead. */}
       {anyActive ? <Button variant="ghost" size="sm" style={{ alignSelf: "flex-start" }} onClick={onClear}>Clear all filters</Button> : null}
     </aside>
   );
@@ -607,12 +607,22 @@ function BrowseWeb({ go, currency, view, initialRegion }) {
   }, [initialRegion]);
   const toggle = (key, val) => setFilters(f => ({ ...f, [key]: f[key].includes(val) ? f[key].filter(x => x !== val) : [...f[key], val] }));
   const clear = () => setFilters({ region: [], price: [], duration: [], category: [] });
-  const shown = tours.filter(t => matchesFilters(t, filters) && (!query || (t.title + t.region + t.category).toLowerCase().includes(query.toLowerCase())));
+  const [sort, setSort] = React.useState("pop");
+  const matched = tours.filter(t => matchesFilters(t, filters) && (!query || (t.title + t.region + t.category).toLowerCase().includes(query.toLowerCase())));
+  // Client sort over the summary fields the catalogue actually carries. "Departing
+  // soon" is intentionally absent — browse has no per-tour departure dates to sort by.
+  const num = (v) => (typeof v === "number" && !isNaN(v) ? v : 0);
+  const SORTERS = {
+    pop: (a, b) => num(b.reviews) - num(a.reviews) || num(b.rating) - num(a.rating),
+    rate: (a, b) => num(b.rating) - num(a.rating) || num(b.reviews) - num(a.reviews),
+    pl: (a, b) => num(a.price) - num(b.price),
+    ph: (a, b) => num(b.price) - num(a.price),
+  };
+  const shown = [...matched].sort(SORTERS[sort] || SORTERS.pop);
   return (
     <>
       <section style={{ position: "relative", borderBottom: "1px solid var(--border-subtle)", overflow: "hidden", background: "var(--brand-wash)" }}>
-        {/* PLACEHOLDER hero image — swap this URL for the real browse hero when ready */}
-        <img src="https://picsum.photos/seed/tripkoach-browse-hero/1600/700" alt="" aria-hidden="true"
+        <img src="https://cdn.tripkoach.com/img/tours/discover-ghana-in-10-days/hero-1440.jpg" alt="" aria-hidden="true"
           style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
         <div style={{ position: "absolute", inset: 0, background: "linear-gradient(90deg, rgba(20,19,18,.82) 0%, rgba(20,19,18,.62) 45%, rgba(20,19,18,.28) 100%)" }} />
         <div className="tk-container" style={{ position: "relative", paddingBlock: "var(--space-12)", display: "flex", flexDirection: "column", gap: "var(--space-5)", maxWidth: 1200 }}>
@@ -623,9 +633,10 @@ function BrowseWeb({ go, currency, view, initialRegion }) {
           <p className="tk-body-lg" style={{ maxWidth: "52ch", color: "rgba(255,255,255,.9)" }}>
             Guided day trips and multi-day journeys with local guides. Reserve your spot now and pay before you travel.
           </p>
-          <div style={{ display: "flex", gap: 12, maxWidth: 640 }}>
+          {/* Filtering is live-on-type via the field below; a separate "Search"
+              button would be redundant, so it's removed rather than left inert. */}
+          <div style={{ maxWidth: 640 }}>
             <SearchField value={query} onChange={(e) => setQuery(e.target.value)} onClear={() => setQuery("")} />
-            <Button size="lg" onClick={() => window.tkToast(shown.length + " tours match")}>Search</Button>
           </div>
         </div>
       </section>
@@ -635,8 +646,8 @@ function BrowseWeb({ go, currency, view, initialRegion }) {
         <div className="tk-stack" style={{ gap: "var(--space-5)" }}>
           <div className="tk-row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
             <h2 className="tk-h3">{shown.length} {shown.length === 1 ? "tour" : "tours"} across Ghana</h2>
-            <Select aria-label="Sort" style={{ width: 200 }}
-              options={[{ value: "pop", label: "Sort: Most popular" }, { value: "p", label: "Sort: Price low to high" }, { value: "s", label: "Sort: Departing soon" }]} />
+            <Select aria-label="Sort" style={{ width: 200 }} value={sort} onChange={(e) => setSort(e.target.value)}
+              options={[{ value: "pop", label: "Sort: Most popular" }, { value: "rate", label: "Sort: Top rated" }, { value: "pl", label: "Sort: Price low to high" }, { value: "ph", label: "Sort: Price high to low" }]} />
           </div>
           {view === "loading" ? (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: "var(--space-5)" }} aria-busy="true">
