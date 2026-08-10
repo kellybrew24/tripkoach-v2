@@ -10,8 +10,10 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Db } from './db.ts';
 import type { Config } from './config.ts';
 import { createConsumerService, ConsumerError } from './consumer.ts';
+import { createConsumerMfaService } from './consumer-mfa.ts';
 import {
   createUserSession, revokeUserSession, setUserCookie, clearUserCookie, makeRequireUser, resolveUserSession,
+  resolvePendingUserSession, clearUserMfaPending,
 } from './consumer-auth.ts';
 import { createMediaService, MediaError } from './media.ts';
 import { createStorage, type Storage } from './storage.ts';
@@ -19,6 +21,7 @@ import { createAvatarService, AvatarError, AVATAR_MAX_BYTES } from './avatar.ts'
 
 export function registerConsumer(app: FastifyInstance, db: Db, cfg: Config, storage?: Storage): void {
   const svc = createConsumerService(db, cfg);
+  const mfaSvc = createConsumerMfaService(db, cfg);
   // TRI-943: avatar upload rides the shared TRI-918 R2 media pipeline. Storage is 'enabled' only when the
   // R2 credentials are present; unconfigured → the upload route answers 503 (same posture as admin media).
   const mediaSvc = createMediaService(db, cfg, storage ?? createStorage(cfg.media));
@@ -62,11 +65,39 @@ export function registerConsumer(app: FastifyInstance, db: Db, cfg: Config, stor
     api.post('/auth/register', signup); // FE kits reference both names — alias to one handler
 
     // ── Login ──
+    // A 2FA-enabled account (TRI-1029) does not get a full session here: verifyLogin returns
+    // { mfaRequired, pendingUserId } after the password check, and we mint a half-auth (mfa_pending)
+    // session + set the cookie so POST /auth/mfa can find and complete it. The client sees only
+    // { mfaRequired: true } and prompts for the authenticator code.
     api.post('/auth/login', async (req: FastifyRequest, reply: FastifyReply) => {
       const out = await svc.verifyLogin(body(req), ipOf(req));
+      if ((out as any).mfaRequired) {
+        const sid = await createUserSession(db, cfg, (out as any).pendingUserId, { ip: req.ip, userAgent: req.headers['user-agent'], mfaPending: true });
+        setUserCookie(reply, cfg, sid);
+        return { mfaRequired: true };
+      }
       const sid = await createUserSession(db, cfg, out.user.id, { ip: req.ip, userAgent: req.headers['user-agent'] });
       setUserCookie(reply, cfg, sid);
       return out;
+    });
+
+    // ── MFA login challenge (TRI-1029) — completes a half-auth (mfa_pending) session ──
+    // Reads the pending session from the cookie, verifies the authenticator/recovery code, clears the
+    // pending flag, and returns the same { user, linkedBookings } a normal login would. 401 if there's no
+    // pending challenge or the code is wrong (the pending session is left intact so the user can retry).
+    api.post('/auth/mfa', async (req: FastifyRequest, reply: FastifyReply) => {
+      const sid = req.cookies?.[cfg.consumer.cookieName];
+      const pending = sid ? await resolvePendingUserSession(db, sid) : null;
+      if (!pending) {
+        return reply.code(401).send({ error: { code: 'no_challenge', message: 'No pending sign-in to verify. Please sign in again.' } });
+      }
+      const b = (body(req) ?? {}) as { code?: unknown };
+      const ok = await mfaSvc.verifyChallenge(pending.userId, String(b.code ?? ''));
+      if (!ok) {
+        return reply.code(401).send({ error: { code: 'invalid_code', message: 'That code did not match. Try again, or use a recovery code.' } });
+      }
+      await clearUserMfaPending(db, cfg, pending.sessionId);
+      return svc.completeMfaLogin(pending.userId, ipOf(req));
     });
 
     // ── Logout ──
@@ -99,6 +130,17 @@ export function registerConsumer(app: FastifyInstance, db: Db, cfg: Config, stor
     api.get('/me', authed, async (req: FastifyRequest) => ({ user: await svc.getProfile(req.account!.id) }));
     api.patch('/me', authed, async (req: FastifyRequest) => ({ user: await svc.updateProfile(req.account!.id, body(req), ipOf(req)) }));
     api.post('/me/password', authed, async (req: FastifyRequest) => svc.changePassword(req.account!.id, body(req), ipOf(req)));
+
+    // ── Two-factor (TOTP) self-service (authed, TRI-1029) ──
+    // status → { enabled }; enroll issues a secret + otpauth URI (the FE renders the QR client-side, never
+    // sending the secret to a third party); verify confirms the first code + returns one-time recovery
+    // codes; disable requires a current code; recovery-codes regenerates the set.
+    const mfaCode = (req: FastifyRequest) => ((body(req) ?? {}) as { code?: unknown }).code;
+    api.get('/auth/mfa/status', authed, async (req: FastifyRequest) => mfaSvc.status(req.account!.id));
+    api.post('/auth/mfa/enroll', authed, async (req: FastifyRequest) => mfaSvc.enroll(req.account!.id, req.ip ?? null));
+    api.post('/auth/mfa/verify', authed, async (req: FastifyRequest) => mfaSvc.verifyEnroll(req.account!.id, mfaCode(req), req.ip ?? null));
+    api.post('/auth/mfa/disable', authed, async (req: FastifyRequest) => mfaSvc.disable(req.account!.id, mfaCode(req), req.ip ?? null));
+    api.post('/auth/mfa/recovery-codes', authed, async (req: FastifyRequest) => mfaSvc.regenerateRecoveryCodes(req.account!.id, req.ip ?? null));
     // TRI-1012: delete my account — soft-delete/anonymize in the service, then kill this session +
     // clear the cookie so the browser is signed out immediately. 409 if active bookings remain.
     api.delete('/me', authed, async (req: FastifyRequest, reply: FastifyReply) => {

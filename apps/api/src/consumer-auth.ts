@@ -27,18 +27,44 @@ declare module 'fastify' {
 }
 
 // ── Sessions (subject_type='user') ───────────────────────────────────────────
-/** Create a server-side consumer session; returns its id (the opaque cookie bearer). */
+/** Create a server-side consumer session; returns its id (the opaque cookie bearer).
+ *  `mfaPending` mints a half-auth session (TRI-1029): it resolves to NO context (resolveUserSession
+ *  skips it) until the /auth/mfa login challenge clears the flag — the second-factor gate. */
 export async function createUserSession(
   db: Db, cfg: Config, userId: string,
-  meta: { ip?: string; userAgent?: string; trustedDevice?: boolean } = {},
+  meta: { ip?: string; userAgent?: string; trustedDevice?: boolean; mfaPending?: boolean } = {},
 ): Promise<string> {
   const { rows } = await db.query<{ id: string }>(
-    `INSERT INTO session (subject_type, subject_id, expires_at, trusted_device, ip, user_agent)
-     VALUES ('user', $1, now() + ($2 * interval '1 minute'), $3, $4, $5)
+    `INSERT INTO session (subject_type, subject_id, expires_at, trusted_device, ip, user_agent, mfa_pending)
+     VALUES ('user', $1, now() + ($2 * interval '1 minute'), $3, $4, $5, $6)
      RETURNING id`,
-    [userId, cfg.consumer.sessionIdleMinutes, !!meta.trustedDevice, meta.ip ?? null, meta.userAgent ?? null],
+    [userId, cfg.consumer.sessionIdleMinutes, !!meta.trustedDevice, meta.ip ?? null, meta.userAgent ?? null, !!meta.mfaPending],
   );
   return rows[0].id;
+}
+
+/** Resolve a live but MFA-PENDING consumer session → the pending user's id (for the /auth/mfa challenge).
+ *  null unless the session is live, unrevoked, and still awaiting its second factor. */
+export async function resolvePendingUserSession(db: Db, sessionId: string): Promise<{ sessionId: string; userId: string } | null> {
+  if (!sessionId) return null;
+  const { rows } = await db.query<any>(
+    `SELECT s.id AS session_id, s.subject_id AS user_id
+       FROM session s JOIN user_account u ON u.id = s.subject_id
+      WHERE s.id = $1 AND s.subject_type = 'user' AND s.mfa_pending = true
+        AND s.revoked_at IS NULL AND s.expires_at > now() AND u.deleted_at IS NULL`,
+    [sessionId],
+  );
+  const r = rows[0];
+  return r ? { sessionId: r.session_id, userId: r.user_id } : null;
+}
+
+/** Clear the MFA-pending flag on a session (called after a successful login challenge) + slide the window. */
+export async function clearUserMfaPending(db: Db, cfg: Config, sessionId: string): Promise<void> {
+  await db.query(
+    `UPDATE session SET mfa_pending = false, last_seen_at = now(),
+            expires_at = now() + ($2 * interval '1 minute') WHERE id = $1`,
+    [sessionId, cfg.consumer.sessionIdleMinutes],
+  );
 }
 
 export async function revokeUserSession(db: Db, sessionId: string): Promise<void> {
@@ -62,6 +88,7 @@ export async function resolveUserSession(db: Db, cfg: Config, sessionId: string)
        JOIN user_account u ON u.id = s.subject_id
       WHERE s.id = $1 AND s.subject_type = 'user'
         AND s.revoked_at IS NULL AND s.expires_at > now()
+        AND s.mfa_pending = false
         AND u.deleted_at IS NULL`,
     [sessionId],
   );

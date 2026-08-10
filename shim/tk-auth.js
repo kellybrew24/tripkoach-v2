@@ -152,8 +152,21 @@
       });
     },
 
+    // Resolves { user, linkedBookings } on a completed login, OR { mfaRequired: true } when the account
+    // has two-factor on (TRI-1029) — the caller then collects an authenticator code and calls loginMfa().
+    // The server has already set an mfa_pending session cookie in that case.
     login: function (email, password) {
       return api.post("/auth/login", { email: email, password: password }).then(function (body) {
+        if (body && body.mfaRequired) return { mfaRequired: true };
+        setMe(mapUser(body));
+        return { user: meCache, linkedBookings: pick(body && body.linkedBookings, 0) || 0 };
+      });
+    },
+
+    // Complete a 2FA-gated login with the authenticator (or recovery) code. Resolves { user,… } on
+    // success; rejects with err.status===401 for a wrong/expired code (retry) or no pending challenge.
+    loginMfa: function (code) {
+      return api.post("/auth/mfa", { code: String(code || "").trim() }).then(function (body) {
         setMe(mapUser(body));
         return { user: meCache, linkedBookings: pick(body && body.linkedBookings, 0) || 0 };
       });
@@ -204,6 +217,42 @@
 
     changePassword: function (currentPassword, newPassword) {
       return api.post("/me/password", { currentPassword: currentPassword, newPassword: newPassword });
+    },
+
+    // ── Two-factor (TOTP) self-service (TRI-1029) ──
+    // Status of the current account's 2FA. Resolves { enabled }.
+    mfaStatus: function () {
+      return api.get("/auth/mfa/status").then(function (body) { return { enabled: !!(body && body.enabled) }; });
+    },
+    // Begin enrollment. Resolves { secret, otpauthUri, issuer } — the FE renders the QR from otpauthUri
+    // entirely client-side (the secret NEVER goes to a third-party image service).
+    mfaEnroll: function () {
+      return api.post("/auth/mfa/enroll", {}).then(function (body) {
+        body = body || {};
+        return { secret: body.secret || "", otpauthUri: body.otpauthUri || "", issuer: body.issuer || "TripKoach" };
+      });
+    },
+    // Confirm enrollment with the first authenticator code. Resolves { enabled, recoveryCodes:[…] }.
+    // Rejects with err.status===400 (field "code") on a wrong code.
+    mfaVerify: function (code) {
+      return api.post("/auth/mfa/verify", { code: String(code || "").trim() }).then(function (body) {
+        body = body || {};
+        if (meCache) meCache.twoFactorEnabled = true;
+        return { enabled: !!body.enabled, recoveryCodes: Array.isArray(body.recoveryCodes) ? body.recoveryCodes : [] };
+      });
+    },
+    // Turn 2FA off. Requires a current authenticator or recovery code. Resolves { enabled:false }.
+    mfaDisable: function (code) {
+      return api.post("/auth/mfa/disable", { code: String(code || "").trim() }).then(function (body) {
+        if (meCache) meCache.twoFactorEnabled = false;
+        return { enabled: !!(body && body.enabled) };
+      });
+    },
+    // Regenerate the one-time recovery codes (invalidates the old set). Resolves { recoveryCodes:[…] }.
+    mfaRecoveryCodes: function () {
+      return api.post("/auth/mfa/recovery-codes", {}).then(function (body) {
+        return { recoveryCodes: (body && Array.isArray(body.recoveryCodes)) ? body.recoveryCodes : [] };
+      });
     },
 
     // TRI-1012: permanently delete + anonymize my account. On success the server has scrubbed the

@@ -41,8 +41,10 @@ const SHARED_SHIM = ["config.js", "tk-api.js"];
 const APPS = {
   web: {
     kit: join(ROOT, "apps/web/kit"),
-    // Load order mirrors ui_kits/web/index.html exactly.
-    screens: ["screens-home.jsx", "screens-pages.jsx", "screens-blog.jsx", "screens-account.jsx", "screens-web.jsx"],
+    // Load order mirrors ui_kits/web/index.html exactly. qr.jsx (TRI-1029) defines the self-contained
+    // MFA QR encoder + <MfaQr> (shared with admin) and must load before screens-account.jsx, which
+    // renders it in the consumer two-factor enrollment modal.
+    screens: ["qr.jsx", "screens-home.jsx", "screens-pages.jsx", "screens-blog.jsx", "screens-account.jsx", "screens-web.jsx"],
     app: "app.jsx",
     // Web-only shims. Loaded after tk-api.js (they use TK_API) and before app.js.
     // Admin never books, holds consumer accounts, or redeems review invites, so

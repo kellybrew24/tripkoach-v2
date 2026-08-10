@@ -372,6 +372,68 @@ function NotificationsWeb({ go }) {
   );
 }
 
+// TRI-1029 — the two-factor enroll/disable modal. One component, three panels keyed off tfa.mode/step:
+//   enroll·setup → scan the QR (or key in the secret) + confirm the first code
+//   enroll·codes → the one-time recovery codes (shown ONCE)
+//   disable·confirm → prove a current code to turn 2FA off
+// The QR is drawn client-side from the otpauth URI (MfaQr, qr.jsx) — the secret never leaves the browser
+// for a third-party image service.
+function TwoFactorModal({ tfa, setCode, onClose, onVerify, onDisable, onDone }) {
+  if (!tfa) return null;
+  const codeField = (
+    <FormField id="tfa-code" label={tfa.mode === "disable" ? "Authenticator or recovery code" : "6-digit code"}>
+      <Input inputMode="numeric" autoComplete="one-time-code" placeholder="123 456" value={tfa.code}
+        onChange={(e) => setCode(e.target.value)} iconStart="lock" />
+    </FormField>
+  );
+  if (tfa.mode === "disable") {
+    return (
+      <Modal open title="Turn off two-factor" description="Enter a current code from your authenticator app (or a recovery code) to confirm." onClose={onClose}
+        actions={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button variant="danger" disabled={tfa.busy || !String(tfa.code || "").trim()} onClick={onDisable}>{tfa.busy ? "Turning off…" : "Turn off"}</Button></>}>
+        <div className="tk-stack" style={{ gap: "var(--space-4)" }}>
+          {tfa.err && <Alert tone="error" title="We couldn't turn it off">{tfa.err}</Alert>}
+          {codeField}
+        </div>
+      </Modal>
+    );
+  }
+  if (tfa.step === "codes") {
+    return (
+      <Modal open title="Save your recovery codes" description="Store these somewhere safe. Each code works once if you lose your authenticator — this is the only time we'll show them." onClose={onDone}
+        actions={<Button iconStart="check" onClick={onDone}>I've saved them</Button>}>
+        <div className="tk-stack" style={{ gap: "var(--space-4)" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 14, padding: "var(--space-4)", background: "var(--bg-subtle)", borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)" }}>
+            {(tfa.recoveryCodes || []).map((c, i) => <span key={i} style={{ letterSpacing: "0.04em" }}>{c}</span>)}
+          </div>
+          <p className="tk-caption tk-muted" style={{ margin: 0 }}>Lost these and your authenticator? Contact support to recover your account.</p>
+        </div>
+      </Modal>
+    );
+  }
+  // enroll · setup
+  return (
+    <Modal open title="Set up two-factor" description="Scan the QR code with your authenticator app, then enter the 6-digit code it shows." onClose={onClose}
+      actions={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button iconStart="check" disabled={tfa.busy || !tfa.secret || !/^\d{6}$/.test(String(tfa.code || "").replace(/\s+/g, ""))} onClick={onVerify}>{tfa.busy ? "Verifying…" : "Verify & turn on"}</Button></>}>
+      <div className="tk-stack" style={{ gap: "var(--space-4)" }}>
+        {tfa.err && <Alert tone="error" title="Setup problem">{tfa.err}</Alert>}
+        {!tfa.secret && tfa.busy && <p className="tk-body-sm tk-muted" style={{ margin: 0 }}>Preparing your setup code…</p>}
+        {tfa.secret && (
+          <>
+            <div style={{ display: "flex", justifyContent: "center" }}>
+              {tfa.otpauthUri ? <MfaQr text={tfa.otpauthUri} px={176} /> : null}
+            </div>
+            <div>
+              <p className="tk-caption tk-muted" style={{ margin: "0 0 4px" }}>Can't scan? Enter this key manually:</p>
+              <code style={{ display: "block", wordBreak: "break-all", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 13, letterSpacing: "0.06em", padding: "8px 10px", background: "var(--bg-subtle)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border-subtle)" }}>{tfa.secret}</code>
+            </div>
+            {codeField}
+          </>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
 function AccountSettingsWeb({ go }) {
   const [toast, setToast] = React.useState(null);
   const [dirty, setDirty] = React.useState(false);
@@ -389,6 +451,41 @@ function AccountSettingsWeb({ go }) {
   const [busy, setBusy] = React.useState(false);
   const [pwBusy, setPwBusy] = React.useState(false);
   const [pwErr, setPwErr] = React.useState(null);
+  // TRI-1029: real consumer two-factor (TOTP). `tfa` drives the enroll/disable modal; `tfaOn` mirrors the
+  // account's current state (hydrated from /me, flipped on verify/disable). One flow, two modes.
+  const [tfaOn, setTfaOn] = React.useState(!!(cached && cached.twoFactorEnabled));
+  const [tfa, setTfa] = React.useState(null); // null | { mode, step, secret, otpauthUri, code, busy, err, recoveryCodes }
+  React.useEffect(() => { if (me) setTfaOn(!!me.twoFactorEnabled); }, [me && me.twoFactorEnabled]);
+  const patchTfa = (p) => setTfa((t) => (t ? { ...t, ...p } : t));
+  async function startEnroll() {
+    if (!live) return;
+    setTfa({ mode: "enroll", step: "setup", secret: "", otpauthUri: "", code: "", busy: true, err: null, recoveryCodes: [] });
+    try {
+      const r = await window.TK_AUTH.mfaEnroll();
+      setTfa({ mode: "enroll", step: "setup", secret: r.secret, otpauthUri: r.otpauthUri, code: "", busy: false, err: null, recoveryCodes: [] });
+    } catch (e) {
+      setTfa({ mode: "enroll", step: "setup", secret: "", otpauthUri: "", code: "", busy: false, err: authErrMsg(e, "We couldn't start setup. Please try again."), recoveryCodes: [] });
+    }
+  }
+  async function submitVerify() {
+    setTfa((t) => ({ ...t, busy: true, err: null }));
+    try {
+      const r = await window.TK_AUTH.mfaVerify(tfa.code);
+      setTfaOn(true);
+      setTfa((t) => ({ ...t, busy: false, step: "codes", recoveryCodes: r.recoveryCodes || [] }));
+    } catch (e) {
+      setTfa((t) => ({ ...t, busy: false, err: e && e.status === 400 ? "That code didn't match — check your authenticator app and try again." : authErrMsg(e, "We couldn't verify that code.") }));
+    }
+  }
+  async function submitDisable() {
+    setTfa((t) => ({ ...t, busy: true, err: null }));
+    try {
+      await window.TK_AUTH.mfaDisable(tfa.code);
+      setTfaOn(false); setTfa(null); setToast("Two-factor authentication turned off");
+    } catch (e) {
+      setTfa((t) => ({ ...t, busy: false, err: e && e.status === 400 ? "Enter a current authenticator or recovery code to turn it off." : authErrMsg(e, "We couldn't turn off two-factor.") }));
+    }
+  }
   React.useEffect(() => {
     if (!live || loaded) return;
     let alive = true;
@@ -443,14 +540,17 @@ function AccountSettingsWeb({ go }) {
           <span><strong style={{ fontSize: 14.5, color: "var(--text-strong)" }}>Password</strong><p className="tk-body-sm tk-muted" style={{ margin: "2px 0 0" }}>Last changed 3 months ago.</p></span>
           <Button variant="secondary" size="sm" onClick={() => { setPw({ cur: "", next: "", conf: "" }); setPwOpen(true); }}>Change password</Button>
         </div>
-        {/* TRI-1018: consumer 2FA is a real build in flight (dedicated issue) — reuse of the admin TOTP
-            spine. Until the enrollment + login-challenge flow ships, the toggle must NOT pretend to save
-            (it used to just mark the form dirty). Show an honest "Coming soon" state instead of a fake. */}
+        {/* TRI-1029: real consumer two-factor (TOTP), reusing the admin authenticator spine. On flips the
+            login into a second-factor challenge; the enroll modal shows a QR + one-time recovery codes. */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, paddingTop: 14, borderTop: "1px solid var(--border-subtle)" }}>
-          <span><strong style={{ fontSize: 14.5, color: "var(--text-strong)" }}>Two-factor authentication <Badge tone="neutral">Coming soon</Badge></strong><p className="tk-body-sm tk-muted" style={{ margin: "2px 0 0" }}>Authenticator-app sign-in is on the way. We'll email you when you can turn it on.</p></span>
-          <Button variant="secondary" size="sm" disabled>Turn on</Button>
+          <span><strong style={{ fontSize: 14.5, color: "var(--text-strong)" }}>Two-factor authentication {tfaOn ? <Badge tone="success">On</Badge> : <Badge tone="neutral">Off</Badge>}</strong><p className="tk-body-sm tk-muted" style={{ margin: "2px 0 0" }}>{tfaOn ? "You'll enter a code from your authenticator app when you sign in." : "Add a code from an authenticator app (Google Authenticator, 1Password, Authy) on top of your password."}</p></span>
+          {tfaOn
+            ? <Button variant="secondary" size="sm" disabled={!live} onClick={() => setTfa({ mode: "disable", step: "confirm", code: "", busy: false, err: null })}>Turn off</Button>
+            : <Button variant="secondary" size="sm" disabled={!live} onClick={startEnroll}>Turn on</Button>}
         </div>
       </div></div>
+      <TwoFactorModal tfa={tfa} setCode={(v) => patchTfa({ code: v })} onClose={() => setTfa(null)}
+        onVerify={submitVerify} onDisable={submitDisable} onDone={() => { setTfa(null); setToast("Two-factor authentication is on"); }} />
       <div className="tk-stickybar" style={{ position: "sticky", bottom: 16, borderRadius: "var(--radius-card)", border: "1px solid var(--border-subtle)", boxShadow: "var(--elev-3)" }}>
         <span className="tk-caption">{dirty ? "Unsaved changes" : "All changes saved"}</span>
         <Button style={{ marginInlineStart: "auto" }} iconStart="check" disabled={!dirty || busy} onClick={() => { if (live) { savePrefs(); return; } setDirty(false); setToast("Settings saved"); }}>Save changes</Button>
@@ -484,6 +584,21 @@ function LoginWeb({ go, startCreating }) {
   // "check your inbox" panel (with a resend path) instead of dropping straight into bookings.
   const [signedUp, setSignedUp] = React.useState(false);
   const [signupEmail, setSignupEmail] = React.useState("");
+  // TRI-1029 — when a 2FA-enabled account logs in, the server withholds the session and asks for the
+  // authenticator code. `mfa` non-null switches this panel into the second-factor challenge step.
+  const [mfa, setMfa] = React.useState(null); // null | { code, busy, err }
+  async function submitMfa(e) {
+    if (e) e.preventDefault();
+    if (mfa.busy) return;
+    setMfa((m) => ({ ...m, busy: true, err: null }));
+    try {
+      await window.TK_AUTH.loginMfa(mfa.code);
+      tkMarkReturning();
+      go("bookings");
+    } catch (err) {
+      setMfa((m) => ({ ...m, busy: false, err: err && err.status === 401 ? "That code didn't match. Try again, or use a recovery code." : authErrMsg(err, "We couldn't verify that code.") }));
+    }
+  }
   async function submit(e) {
     e.preventDefault();
     if (!live) { go("bookings"); return; }
@@ -501,7 +616,8 @@ function LoginWeb({ go, startCreating }) {
       }
       const el = document.getElementById("lg-pw");
       const password = el && typeof el.value === "string" ? el.value : "";
-      await window.TK_AUTH.login(email, password);
+      const res = await window.TK_AUTH.login(email, password);
+      if (res && res.mfaRequired) { setBusy(false); setMfa({ code: "", busy: false, err: null }); return; } // TRI-1029 second factor
       tkMarkReturning(); // TRI-925 — this browser has now signed in at least once
       go("bookings");
     } catch (err) {
@@ -512,6 +628,29 @@ function LoginWeb({ go, startCreating }) {
     }
   }
   if (signedUp) return <CheckInboxPanel email={signupEmail} go={go} />;
+  if (mfa) return (
+    <div style={{ display: "grid", gridTemplateColumns: "1.05fr 0.95fr", minHeight: "calc(100vh - var(--header-h))" }} className="tk-login">
+      <PromoPanel mode="signin" returning={returning} />
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "40px" }}>
+        <div style={{ width: "100%", maxWidth: 380 }}>
+          <img src="../../assets/logo-badge.png" width="44" height="44" alt="TripKoach" style={{ marginBottom: "var(--space-5)" }} />
+          <h1 className="tk-h2">Two-step verification</h1>
+          <p className="tk-body-sm tk-muted" style={{ marginTop: 4, marginBottom: "var(--space-6)" }}>Enter the 6-digit code from your authenticator app to finish signing in.</p>
+          {mfa.err && <Alert tone="error" title="We couldn't verify that code" style={{ marginBottom: "var(--space-4)" }}>{mfa.err}</Alert>}
+          <form className="tk-stack" style={{ gap: "var(--space-4)" }} onSubmit={submitMfa}>
+            <FormField id="lg-mfa" label="Authenticator or recovery code">
+              <Input inputMode="numeric" autoComplete="one-time-code" placeholder="123 456" iconStart="lock" autoFocus
+                value={mfa.code} onChange={(e) => setMfa((m) => ({ ...m, code: e.target.value }))} />
+            </FormField>
+            <Button block size="lg" type="submit" disabled={mfa.busy || !String(mfa.code || "").trim()}>{mfa.busy ? "Verifying…" : "Verify & sign in"}</Button>
+          </form>
+          <p className="tk-body-sm" style={{ textAlign: "center", marginTop: "var(--space-5)" }}>
+            <a href="#" onClick={(e) => { e.preventDefault(); setMfa(null); }}>Back to sign in</a>
+          </p>
+        </div>
+      </div>
+    </div>
+  );
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1.05fr 0.95fr", minHeight: "calc(100vh - var(--header-h))" }} className="tk-login">
       <PromoPanel mode={creating ? "signup" : "signin"} returning={returning} />

@@ -262,9 +262,30 @@ export function createConsumerService(db: Db, cfg: Config) {
       await audit(db, { actorType: 'user', actorId: u?.id ?? null, action: 'user.login_failed', targetType: 'user_account', targetId: u?.id ?? null, after: { email }, ip: meta.ip ?? null });
       throw new ConsumerError('invalid_credentials', 'That email and password do not match.', 401);
     }
+    // TRI-1029: password is correct, but a 2FA-enabled account isn't logged in until the second factor
+    // clears. Signal the route to mint a half-auth (mfa_pending) session instead of a full one — bookings
+    // are NOT linked and no login is audited yet; that happens in completeMfaLogin once /auth/mfa passes.
+    if (u.two_factor_enabled) {
+      await audit(db, { actorType: 'user', actorId: u.id, action: 'user.mfa_challenge', targetType: 'user_account', targetId: u.id, ip: meta.ip ?? null });
+      return { mfaRequired: true as const, pendingUserId: u.id as string };
+    }
+    return finalizeLogin(u, meta);
+  }
+
+  /** Link guest bookings + audit the login + return the { user, linkedBookings } envelope. Shared by the
+   *  direct (no-2FA) login and the post-challenge completion (TRI-1029). */
+  async function finalizeLogin(u: any, meta: { ip?: string | null }) {
     const linked = await linkGuestBookings(db, u.id, u.email);
     await audit(db, { actorType: 'user', actorId: u.id, action: 'user.login', targetType: 'user_account', targetId: u.id, after: linked ? { linkedBookings: linked } : undefined, ip: meta.ip ?? null });
     return { user: profileDTO(u), linkedBookings: linked };
+  }
+
+  /** Finish a login that was gated by a 2FA challenge: the second factor has verified, so complete it by
+   *  user id (the pending session holds the identity). */
+  async function completeMfaLogin(userId: string, meta: { ip?: string | null } = {}) {
+    const u = await loadUser(userId);
+    if (!u) throw notFound('account');
+    return finalizeLogin(u, meta);
   }
 
   // ── Profile update ─────────────────────────────────────────────────────────
@@ -634,7 +655,7 @@ export function createConsumerService(db: Db, cfg: Config) {
   }
 
   return {
-    signup, verifyLogin, getProfile, updateProfile, changePassword, deleteAccount,
+    signup, verifyLogin, completeMfaLogin, getProfile, updateProfile, changePassword, deleteAccount,
     getNotificationPrefs, updateNotificationPrefs, listMyBookings, listMyReviews,
     requestPasswordReset, consumePasswordReset,
     verifyEmail, resendVerification, issueVerificationEmail,
