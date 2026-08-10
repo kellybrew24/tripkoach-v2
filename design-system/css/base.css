@@ -34,3 +34,6 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,te
 @keyframes tk-shimmer{0%{background-position:100% 0}100%{background-position:-100% 0}}
 @keyframes tk-spin{to{transform:rotate(360deg)}}
 @keyframes tk-rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+/* Overlay enter (TRI-1039): backdrop fades, panel fades+scales. Opacity/transform only. */
+@keyframes tk-fade{from{opacity:0}to{opacity:1}}
+@keyframes tk-modal-in{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:none}}

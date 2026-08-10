@@ -67,8 +67,8 @@
 .tk-kpi__delta--up{color:var(--green-600)}.tk-kpi__delta--down{color:var(--red-600)}.tk-kpi__delta--flat{color:var(--text-muted)}
 
 /* ── Drawer ────────────────────────────────────────────── */
-.tk-drawer-scrim{position:fixed;inset:0;background:var(--surface-scrim);z-index:var(--z-scrim);display:flex;justify-content:flex-end}
-.tk-drawer{background:var(--surface-card);width:min(560px,94vw);height:100%;display:flex;flex-direction:column;box-shadow:var(--elev-4);animation:tk-drawer-in var(--dur-slow) var(--ease-enter)}
+.tk-drawer-scrim{position:fixed;inset:0;background:var(--surface-scrim);z-index:var(--z-scrim);display:flex;justify-content:flex-end;animation:tk-fade var(--dur-base) var(--ease-enter)}
+.tk-drawer{background:var(--surface-card);width:min(560px,94vw);height:100%;display:flex;flex-direction:column;box-shadow:var(--elev-4);animation:tk-drawer-in var(--dur-base) var(--ease-enter)}
 @keyframes tk-drawer-in{from{transform:translateX(24px);opacity:.6}to{transform:none;opacity:1}}
 .tk-drawer__head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:20px 24px;border-bottom:1px solid var(--border-subtle)}
 .tk-drawer__body{padding:24px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:20px}

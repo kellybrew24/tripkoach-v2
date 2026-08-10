@@ -15,9 +15,10 @@
 .tk-toast__close{margin-inline-start:auto;background:transparent;border:0;color:inherit;opacity:.7;cursor:pointer;padding:var(--space-1)}
 .tk-toast__close:hover{opacity:1}
 .tk-scrim{position:fixed;inset:0;background:var(--surface-scrim);z-index:var(--z-scrim);
-  display:grid;place-items:center;padding:var(--space-4);animation:tk-rise var(--dur-base) var(--ease-enter)}
+  display:grid;place-items:center;padding:var(--space-4);animation:tk-fade var(--dur-base) var(--ease-enter)}
 .tk-modal{background:var(--surface-overlay);border-radius:var(--radius-sheet);box-shadow:var(--elev-modal);
-  width:100%;max-width:440px;padding:var(--space-6);display:flex;flex-direction:column;gap:var(--space-4);z-index:var(--z-modal)}
+  width:100%;max-width:440px;padding:var(--space-6);display:flex;flex-direction:column;gap:var(--space-4);z-index:var(--z-modal);
+  animation:tk-modal-in var(--dur-base) var(--ease-enter)}
 .tk-modal__actions{display:flex;flex-direction:column-reverse;gap:var(--space-2)}
 @media (min-width:480px){.tk-modal__actions{flex-direction:row;justify-content:flex-end}}
 .tk-modal--danger .tk-modal__mark{width:44px;height:44px;border-radius:50%;background:var(--danger-bg);color:var(--danger-fg);display:grid;place-items:center}
