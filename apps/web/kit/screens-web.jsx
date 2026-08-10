@@ -573,13 +573,17 @@ function matchesFilters(t, f) {
   return true;
 }
 
-function FilterPanel({ tours, filters, toggle, onClear }) {
+function FilterPanel({ tours, filters, toggle, onClear, open = false }) {
   const regions = [...new Set(tours.map(t => t.region))];
   const cats = [...new Set(tours.map(t => t.category))];
   const groups = [["Region", "region", regions], ["Price from", "price", PRICE_BANDS.map(b => b.label)], ["Duration", "duration", DURATIONS.map(b => b.label)], ["Category", "category", cats]];
   const anyActive = filters.region.length || filters.price.length || filters.duration.length || filters.category.length;
+  // TRI-1040: `tk-browsefilters` + data-open drive the handheld treatment (see build.mjs
+  // headCss): on desktop this stays a sticky left rail; at <=960px it drops to normal
+  // in-flow and is collapsed behind the "Filters" toggle so it can no longer escape its
+  // column and overlay the tour list on scroll.
   return (
-    <aside aria-label="Filters" style={{ display: "flex", flexDirection: "column", gap: "var(--space-6)", position: "sticky", top: "calc(var(--header-h) + 24px)" }}>
+    <aside id="browse-filters" className="tk-browsefilters" data-open={open ? "true" : "false"} aria-label="Filters" style={{ display: "flex", flexDirection: "column", gap: "var(--space-6)", position: "sticky", top: "calc(var(--header-h) + 24px)" }}>
       {groups.map(([title, key, opts]) => (
         <div key={title} className="tk-stack" style={{ gap: "var(--space-3)" }}>
           <h3 className="tk-h6">{title}</h3>
@@ -614,6 +618,10 @@ function BrowseWeb({ go, currency, view, initialRegion }) {
   }, [initialRegion]);
   const toggle = (key, val) => setFilters(f => ({ ...f, [key]: f[key].includes(val) ? f[key].filter(x => x !== val) : [...f[key], val] }));
   const clear = () => setFilters({ region: [], price: [], duration: [], category: [] });
+  // TRI-1040: handheld filter disclosure. The toggle bar + panel only change layout at
+  // <=960px (build.mjs headCss); on desktop the panel is always visible as a sticky rail.
+  const [filtersOpen, setFiltersOpen] = React.useState(false);
+  const activeCount = filters.region.length + filters.price.length + filters.duration.length + filters.category.length;
   const [sort, setSort] = React.useState("pop");
   const matched = tours.filter(t => matchesFilters(t, filters) && (!query || (t.title + t.region + t.category).toLowerCase().includes(query.toLowerCase())));
   // Client sort over the summary fields the catalogue actually carries. "Departing
@@ -648,8 +656,15 @@ function BrowseWeb({ go, currency, view, initialRegion }) {
         </div>
       </section>
 
+      <div className="tk-container tk-filtertoggle-bar" style={{ paddingTop: "var(--space-6)", maxWidth: 1200 }}>
+        <Button className="tk-filtertoggle" variant="secondary" size="sm" iconStart="sliders-horizontal" block
+          aria-expanded={filtersOpen} aria-controls="browse-filters"
+          onClick={() => setFiltersOpen(o => !o)}>
+          {filtersOpen ? "Hide filters" : "Filters"}{activeCount ? " (" + activeCount + ")" : ""}
+        </Button>
+      </div>
       <div className="tk-container" style={{ paddingBlock: "var(--space-10)", display: "grid", gridTemplateColumns: "240px 1fr", gap: "var(--space-10)", maxWidth: 1200 }}>
-        <FilterPanel tours={tours} filters={filters} toggle={toggle} onClear={clear} />
+        <FilterPanel tours={tours} filters={filters} toggle={toggle} onClear={clear} open={filtersOpen} />
         <div className="tk-stack" style={{ gap: "var(--space-5)" }}>
           <div className="tk-row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
             <h2 className="tk-h3">{shown.length} {shown.length === 1 ? "tour" : "tours"} across Ghana</h2>

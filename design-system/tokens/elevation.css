@@ -7,4 +7,7 @@
   --elev-4:0 14px 32px rgba(30,28,26,.14),0 4px 8px rgba(30,28,26,.06);
   --elev-sheet:0 -8px 24px rgba(30,28,26,.12);
   --elev-card:var(--elev-1);--elev-popover:var(--elev-3);--elev-modal:var(--elev-4);--elev-toast:var(--elev-3);
+  /* TRI-1040: --shadow-lg is referenced by the admin filter dropdown panels but was
+     never defined; alias it to the popover elevation so those menus read as raised. */
+  --shadow-lg:var(--elev-3);
 }

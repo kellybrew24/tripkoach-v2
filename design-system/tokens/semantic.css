@@ -2,6 +2,11 @@
 :root{
   --bg-page:var(--n-25);--bg-subtle:var(--n-50);--bg-sunken:var(--n-100);--bg-inverse:var(--n-900);
   --surface-card:var(--n-0);--surface-raised:var(--n-0);--surface-overlay:var(--n-0);--surface-scrim:var(--alpha-ink-60);
+  /* TRI-1040: --bg-surface is referenced by floating panels (admin filter dropdowns,
+     consumer mobile nav/option cards) but was never defined, so those surfaces rendered
+     transparent and overlapped the content behind them. Alias it to the opaque overlay
+     surface; it inherits the dark-theme value via --surface-overlay automatically. */
+  --bg-surface:var(--surface-overlay);
 
   --text-strong:var(--n-900);--text-body:var(--n-800);--text-muted:var(--n-500);--text-subtle:var(--n-400);
   --text-inverse:var(--n-0);--text-on-accent:var(--n-0);--text-link:var(--gold-700);--text-link-hover:var(--gold-800);

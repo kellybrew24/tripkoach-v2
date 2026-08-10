@@ -60,11 +60,20 @@ const APPS = {
     // Responsive layer lifted verbatim from ui_kits/web/index.html <style>.
     headCss: `main{min-height:60vh}
 .tk-only-mobile{display:none}
+/* TRI-1040: browse filter is a sticky left rail on desktop only. The mobile toggle bar
+   is hidden until the grid collapses. */
+.tk-filtertoggle-bar{display:none}
 @media (max-width:1023px){.tk-only-mobile{display:inline-flex}.tk-hide-mobile{display:none !important}}
 @media (max-width:960px){
   #root [style*="1fr 380px"],#root [style*="1fr 360px"],#root [style*="240px 1fr"],
   #root [style*="1.05fr 0.95fr"],#root [style*="1.1fr 0.9fr"]{grid-template-columns:1fr !important}
   #root [style*="repeat(3"],#root [style*="repeat(4"]{grid-template-columns:repeat(2,1fr) !important}
+  /* TRI-1040: at handheld widths the browse filter drops out of the sticky rail into
+     normal flow, collapsed behind the "Filters" toggle, so it can no longer escape its
+     column and overlay the tour list while scrolling. */
+  .tk-filtertoggle-bar{display:block !important}
+  #root .tk-browsefilters{position:static !important;top:auto !important}
+  #root .tk-browsefilters[data-open="false"]{display:none !important}
 }
 @media (max-width:600px){
   #root [style*="grid-template-columns"]{grid-template-columns:1fr !important}
