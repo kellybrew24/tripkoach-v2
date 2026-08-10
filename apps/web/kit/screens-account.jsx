@@ -737,18 +737,63 @@ function VerifyEmailPage({ go }) {
 
 Object.assign(window, { AccountShell, ProfileWeb, NotificationsWeb, AccountSettingsWeb, LoginWeb, ForgotWeb, ReviewsWeb, VerifyEmailPage, CheckInboxPanel });
 
+// TRI-1016 — the account "Reviews" page. When live (flag on + TK_AUTH), it reads the
+// signed-in traveller's OWN reviews + pending review invites from GET /me/reviews:
+// "Awaiting your review" lists real unredeemed invites (each carrying a one-time token
+// so "Write your review" submits the REAL verified review via TK_REVIEWS_API.submit,
+// TRI-1014/892 — no un-tokenized fixture form), and "Your reviews" shows this account's
+// own submissions with their moderation status. Flag OFF → the DS preview renders the
+// original fixture prototype byte-identically (no API calls, no demo-name filter). The
+// old build hard-coded "Ama Mensah" and fell back to slice(0,2) of the shared demo
+// reviews as the user's own — that fallback is dropped on the live path.
 function ReviewsWeb({ go }) {
   const Stars = NS.Stars;
-  const me = "Ama Mensah";
-  const awaiting = window.TK_INVITE ? [window.TK_INVITE] : [];
-  const all = (window.TK_REVIEWS || []);
-  let mine = all.filter(r => r.author === me || r.name === me);
-  if (!mine.length) mine = all.slice(0, 2); // demo fallback so the page has content
-  const tourTitle = (id) => { const t = window.TK_DATA.tours.find(x => x.id === id); return t ? t.title : id; };
+  const RM = window.ReviewModal;
+  const live = LIVE_AUTH();
+
+  const [data, setData] = React.useState(null);        // live { reviews, invites }
+  const [loaded, setLoaded] = React.useState(!live);
+  const [writeFor, setWriteFor] = React.useState(null); // invite being reviewed (live)
+
+  React.useEffect(() => {
+    if (!live) return;
+    let alive = true;
+    window.TK_AUTH.me().then((u) => {
+      if (!alive) return undefined;
+      if (!u) { go("login"); return undefined; }
+      return window.TK_AUTH.myReviews().then((d) => { if (alive) { setData(d); setLoaded(true); } });
+    }).catch(() => { if (alive) setLoaded(true); });
+    return () => { alive = false; };
+  }, []);
+
+  function reload() {
+    if (!live) return;
+    window.TK_AUTH.myReviews().then((d) => setData(d)).catch(() => {});
+  }
+
+  // Fixture demo (flag off / DS preview) — unchanged from the prototype.
+  const fxMe = "Ama Mensah";
+  const fxAll = (window.TK_REVIEWS || []);
+  let fxMine = fxAll.filter(r => r.author === fxMe || r.name === fxMe);
+  if (!fxMine.length) fxMine = fxAll.slice(0, 2); // demo fallback so the page has content
+  const fxAwaiting = window.TK_INVITE ? [window.TK_INVITE] : [];
+
+  const awaiting = live ? ((data && data.invites) || []) : fxAwaiting;
+  const mine = live ? ((data && data.reviews) || []) : fxMine;
+
+  const titleOf = (r) => { if (r.tourTitle || r.tour) return r.tourTitle || r.tour; const t = window.TK_DATA.tours.find(x => x.id === r.tourId); return t ? t.title : r.tourId; };
   const statusChip = (s) => s === "approved"
     ? <span className="tk-badge tk-badge--confirmed">Published</span>
     : s === "rejected" ? <span className="tk-badge tk-badge--cancelled">Not published</span>
     : <span className="tk-badge tk-badge--pending">In review</span>;
+  // Live invites carry a token → open the tokenized ReviewModal; fixture keeps the old go("review") demo.
+  const onWrite = (iv) => { if (live && iv && iv.token && RM) setWriteFor(iv); else go("review"); };
+
+  if (live && !loaded) return (
+    <AccountShell current="reviews" go={go} title="Reviews">
+      <div className="tk-card"><div className="tk-card__body" style={{ padding: "var(--space-8)", alignItems: "center" }}><span className="tk-body-sm tk-muted">Loading your reviews…</span></div></div>
+    </AccountShell>
+  );
   return (
     <AccountShell current="reviews" go={go} title="Reviews">
       <p className="tk-body tk-muted" style={{ marginTop: -8 }}>Reviews you can leave after a trip, and the ones you've already shared. We check each review before it appears publicly.</p>
@@ -756,13 +801,13 @@ function ReviewsWeb({ go }) {
       <div className="tk-stack" style={{ gap: "var(--space-3)" }}>
         <h2 className="tk-h5" style={{ margin: 0 }}>Awaiting your review</h2>
         {awaiting.length ? awaiting.map((iv, i) => (
-          <div key={i} className="tk-card" style={{ borderColor: "var(--brand-border)" }}><div className="tk-card__body" style={{ padding: "var(--space-5)", flexDirection: "row", alignItems: "center", gap: "var(--space-4)", flexWrap: "wrap" }}>
+          <div key={iv.token || i} className="tk-card" style={{ borderColor: "var(--brand-border)" }}><div className="tk-card__body" style={{ padding: "var(--space-5)", flexDirection: "row", alignItems: "center", gap: "var(--space-4)", flexWrap: "wrap" }}>
             <span style={{ width: 44, height: 44, borderRadius: "50%", background: "var(--brand-wash)", color: "var(--brand-ink)", display: "grid", placeItems: "center", flex: "none" }}><Icon name="star" size={20} /></span>
             <div style={{ flex: 1, minWidth: 200 }}>
               <strong style={{ display: "block" }}>{iv.tour}</strong>
-              <span className="tk-caption">You travelled on {iv.date} · booking {iv.ref}</span>
+              <span className="tk-caption">You travelled on {iv.date}{iv.ref ? " · booking " + iv.ref : ""}</span>
             </div>
-            <Button iconStart="pencil" onClick={() => go("review")}>Write your review</Button>
+            <Button iconStart="pencil" onClick={() => onWrite(iv)}>Write your review</Button>
           </div></div>
         )) : (
           <div className="tk-card"><div className="tk-card__body" style={{ padding: "var(--space-6)", alignItems: "center", textAlign: "center", gap: 6 }}>
@@ -773,10 +818,10 @@ function ReviewsWeb({ go }) {
 
       <div className="tk-stack" style={{ gap: "var(--space-3)", marginTop: "var(--space-6)" }}>
         <h2 className="tk-h5" style={{ margin: 0 }}>Your reviews</h2>
-        {mine.map((r, i) => (
-          <div key={i} className="tk-card"><div className="tk-card__body" style={{ padding: "var(--space-5)", gap: "var(--space-2)" }}>
+        {mine.length ? mine.map((r, i) => (
+          <div key={r.id || i} className="tk-card"><div className="tk-card__body" style={{ padding: "var(--space-5)", gap: "var(--space-2)" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-              <a href="#tour" onClick={(e) => { e.preventDefault(); go("tour", r.tourId); }} className="tk-h6" style={{ margin: 0, textDecoration: "none", color: "var(--text-strong)" }}>{tourTitle(r.tourId)}</a>
+              <a href="#tour" onClick={(e) => { e.preventDefault(); go("tour", r.tourId); }} className="tk-h6" style={{ margin: 0, textDecoration: "none", color: "var(--text-strong)" }}>{titleOf(r)}</a>
               {statusChip(r.status)}
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>{Stars ? <Stars value={r.rating} /> : null}<span className="tk-caption">{r.date || "Recently"}</span></div>
@@ -785,8 +830,16 @@ function ReviewsWeb({ go }) {
             {r.status === "pending" && <span className="tk-caption" style={{ color: "var(--warning-fg)" }}>Checked before it appears publicly — usually within a day.</span>}
             {r.reply && <div style={{ marginTop: 6, padding: "10px 12px", background: "var(--bg-sunken)", borderRadius: "var(--radius-md)" }}><span className="tk-caption" style={{ fontWeight: 700, color: "var(--brand-ink)" }}>TripKoach replied</span><p className="tk-body-sm" style={{ margin: "2px 0 0" }}>{r.reply}</p></div>}
           </div></div>
-        ))}
+        )) : (
+          <div className="tk-card"><div className="tk-card__body" style={{ padding: "var(--space-6)", alignItems: "center", textAlign: "center", gap: 6 }}>
+            <span className="tk-body-sm tk-muted">You haven't shared a review yet. After a trip we'll invite you to review it — they'll appear here once you do.</span>
+          </div></div>
+        )}
       </div>
+
+      {writeFor && RM && <RM key={writeFor.token} tour={{ title: writeFor.tour }} token={writeFor.token}
+        onClose={() => setWriteFor(null)}
+        onSubmitted={() => reload()} />}
     </AccountShell>
   );
 }

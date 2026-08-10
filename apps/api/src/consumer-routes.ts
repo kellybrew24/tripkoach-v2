@@ -116,6 +116,9 @@ export function registerConsumer(app: FastifyInstance, db: Db, cfg: Config, stor
     // ── My bookings (authed) ──
     api.get('/me/bookings', authed, async (req: FastifyRequest) => ({ bookings: await svc.listMyBookings(req.account!.id) }));
 
+    // ── My reviews + pending review invites (authed, TRI-1016) ──
+    api.get('/me/reviews', authed, async (req: FastifyRequest) => svc.listMyReviews(req.account!.id));
+
     // ── Avatar (TRI-943) ──────────────────────────────────────────────────────
     const avatarActor = (req: FastifyRequest) => ({ id: req.account!.id, ip: req.ip ?? null });
     // Upload my avatar. Raw image bytes in the body; filename via ?filename= or X-Filename. Hardened

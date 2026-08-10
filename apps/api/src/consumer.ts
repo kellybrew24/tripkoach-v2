@@ -63,6 +63,15 @@ function optBool(b: Body, field: string): boolean | undefined {
 const firstNameOf = (name: string | null, email: string) =>
   (name && name.trim().split(/\s+/)[0]) || email.split('@')[0];
 
+// Human review date ("18 Aug 2026") matching the FE fixture format. UTC-based so the label is stable
+// regardless of server TZ; the review page only needs a readable day, not a precise timestamp.
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function formatReviewDate(ts: unknown): string {
+  const d = ts instanceof Date ? ts : new Date(String(ts));
+  if (isNaN(d.getTime())) return '';
+  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+}
+
 // ── Notification preferences vocabulary (must match the CHECKs in 004_people.sql) ──
 export const NOTIF_CHANNELS = ['email', 'whatsapp'] as const;
 export const NOTIF_TYPES = [
@@ -443,6 +452,54 @@ export function createConsumerService(db: Db, cfg: Config) {
     }));
   }
 
+  // ── "My reviews" (authed) ───────────────────────────────────────────────────
+  async function listMyReviews(userId: string) {
+    // Reviews are provenance-linked to a booking (review.booking_id, TRI-892). The owner's own reviews
+    // are those whose booking belongs to this account — surfaced here so the account "Reviews" page can
+    // show real submissions + moderation status instead of the fixture demo (TRI-1016). `tourId` carries
+    // the SLUG (the FE keys tours/routing by slug, tk-boot mapTourSummary), not the internal UUID.
+    const reviews = (await db.query(
+      `SELECT r.id, r.rating, r.title, r.text, r.status, r.reply, r.created_at,
+              t.slug AS tour_slug, t.title AS tour_title
+         FROM review r
+         JOIN booking b ON b.id = r.booking_id
+         JOIN tour t ON t.id = r.tour_id
+        WHERE b.user_id = $1
+        ORDER BY r.created_at DESC`, [userId])).rows.map((r) => ({
+      id: r.id,
+      tourId: r.tour_slug,
+      tourTitle: r.tour_title,
+      rating: Number(r.rating),
+      title: r.title ?? '',
+      text: r.text ?? '',
+      status: r.status,
+      reply: r.reply ?? '',
+      date: formatReviewDate(r.created_at),
+    }));
+
+    // Pending invites = eligible bookings whose one-time review token is still unredeemed. Each carries
+    // its live token so the "Write your review" CTA submits the REAL verified review (TK_REVIEWS_API.submit,
+    // TRI-1014/892) — never an un-tokenized fixture form.
+    const invites = (await db.query(
+      `SELECT ri.token, ri.sent_at, b.ref,
+              t.slug AS tour_slug, t.title AS tour_title,
+              d.date_label, d.time_label
+         FROM review_invite ri
+         JOIN booking b ON b.id = ri.booking_id
+         JOIN tour t ON t.id = ri.tour_id
+         JOIN departure d ON d.id = b.departure_id
+        WHERE b.user_id = $1 AND ri.redeemed_at IS NULL
+        ORDER BY ri.sent_at DESC`, [userId])).rows.map((iv) => ({
+      token: iv.token,
+      tourId: iv.tour_slug,
+      tour: iv.tour_title,
+      ref: iv.ref,
+      date: (iv.date_label ?? '') + (iv.time_label ? ` · ${iv.time_label}` : ''),
+    }));
+
+    return { reviews, invites };
+  }
+
   // ── Password reset — request (always 200, no user enumeration) ──
   // Generates an opaque token, stores ONLY its sha256, emails the reset link. If the email is unknown we
   // still return ok and send nothing (so callers can't probe which emails have accounts).
@@ -578,7 +635,7 @@ export function createConsumerService(db: Db, cfg: Config) {
 
   return {
     signup, verifyLogin, getProfile, updateProfile, changePassword, deleteAccount,
-    getNotificationPrefs, updateNotificationPrefs, listMyBookings,
+    getNotificationPrefs, updateNotificationPrefs, listMyBookings, listMyReviews,
     requestPasswordReset, consumePasswordReset,
     verifyEmail, resendVerification, issueVerificationEmail,
     // exposed for tests / route-layer session minting after signup

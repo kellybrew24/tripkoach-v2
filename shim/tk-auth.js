@@ -236,6 +236,20 @@
       });
     },
 
+    // TRI-1016: the account "Reviews" page. Resolves { reviews, invites } —
+    // `reviews` are this account's own submissions (with moderation status),
+    // `invites` are pending review-invite tokens ("Awaiting your review") that
+    // the "Write your review" CTA submits against via TK_REVIEWS_API.submit.
+    myReviews: function () {
+      return api.get("/me/reviews").then(function (body) {
+        body = body || {};
+        return {
+          reviews: Array.isArray(body.reviews) ? body.reviews : [],
+          invites: Array.isArray(body.invites) ? body.invites : [],
+        };
+      });
+    },
+
     // TRI-943: upload avatar. `file` is a File/Blob. Resolves { avatarUrl, avatarStatus }.
     // The raw bytes are POSTed with the image's content-type; filename is sent via X-Filename.
     uploadAvatar: function (file) {
