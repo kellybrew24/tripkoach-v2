@@ -78,6 +78,24 @@
     if (body && Array.isArray(body.items)) return body.items;
     return [];
   }
+  // Pull EVERY page of a paginated admin list endpoint (TRI-1041). The server caps
+  // pageSize at 100 and returns {items,total,page,pageSize,totalPages}; the console
+  // filters/searches these lists client-side, so it needs the whole set, not just
+  // the default first page (25). Loop until we've collected `total` rows. The
+  // items.length>0 guard stops us if `total` is ever inconsistent so we never spin.
+  function fetchAllPages(path, key) {
+    var PAGE = 100, all = [], sep = path.indexOf("?") < 0 ? "?" : "&";
+    function page(n) {
+      return req("GET", path + sep + "page=" + n + "&pageSize=" + PAGE).then(function (b) {
+        var items = list(b, key);
+        all = all.concat(items);
+        var total = b && typeof b.total === "number" ? b.total : all.length;
+        if (items.length > 0 && all.length < total) return page(n + 1);
+        return all;
+      });
+    }
+    return page(1);
+  }
   function major(v, minorField) {
     if (typeof minorField === "number") return Math.round(minorField) / 100;
     return typeof v === "number" ? v : (v != null && !isNaN(+v) ? +v : 0);
@@ -579,7 +597,9 @@
         safe(function () { return API.listDepartures().then(function (b) { setAdmin("departures", list(b, "departures").map(function (x) { return mapDepartureRow(x, tourById); })); }); }),
         safe(function () { return API.listPromos().then(function (b) { setAdmin("promos", list(b, "promos").map(mapPromo)); }); }),
         safe(function () { return API.listStaff().then(function (b) { setAdmin("staff", list(b, "staff").map(mapStaff)); }); }),
-        safe(function () { return API.listCustomers().then(function (b) { setAdmin("customers", list(b, "customers").map(mapCustomer)); }); }),
+        // TRI-1041: page through ALL customers (not just the default first 25) so the
+        // client-side list + name/email search see the whole customer base.
+        safe(function () { return fetchAllPages("/customers", "customers").then(function (items) { setAdmin("customers", items.map(mapCustomer)); }); }),
         safe(function () { return API.listGuides().then(function (b) { setAdmin("guides", list(b, "guides").map(mapGuide)); }); }),
         safe(function () { return API.listBlog().then(function (b) { setAdmin("blog", list(b, "posts").map(mapBlogPost)); }); }),
         safe(function () { return req("GET", "/reviews").then(function (b) {
