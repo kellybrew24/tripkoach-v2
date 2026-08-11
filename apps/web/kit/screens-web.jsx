@@ -1287,11 +1287,10 @@ function tkFmtDate(iso) {
   try { return new Date(iso).toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }); }
   catch (_) { return String(iso); }
 }
-function tkEsc(s) {
-  return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
-    return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c];
-  });
-}
+// TRI-1066: consolidated onto the one shared DS escaper (NS.escapeHtml) — same
+// full-set (& < > " ') semantics as the old local copy, so the receipt renders
+// byte-for-byte identically.
+const tkEsc = NS.escapeHtml;
 
 // Build a self-contained receipt HTML document from the server booking DTO (the
 // full `.raw` payload from GET /bookings/:ref). All figures come straight from the
