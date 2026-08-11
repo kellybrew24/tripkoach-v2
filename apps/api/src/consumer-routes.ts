@@ -31,6 +31,17 @@ export function registerConsumer(app: FastifyInstance, db: Db, cfg: Config, stor
   const body = (req: FastifyRequest) => (req.body ?? {}) as unknown;
   const ipOf = (req: FastifyRequest) => ({ ip: req.ip ?? null });
 
+  // TRI-1055 [SEC-H3]: per-IP throttle on the unauthenticated auth routes (login, signup/register,
+  // password-reset request). @fastify/rate-limit is registered global:false in server.ts (with
+  // trustProxy so req.ip is the real client behind Caddy); a route is only throttled where it opts in
+  // via config.rateLimit. 10 / minute per IP — generous for a human, a cheap wall against credential
+  // stuffing / enumeration. Empty under `test` so the smoke/e2e suites can hit these routes many times
+  // from one loopback IP (mirrors the admin login opt-in from TRI-1054). Email-verify resend already
+  // has its own per-account throttle in the service, so it is intentionally left off the IP limiter.
+  const authRateLimit: Record<string, unknown> = cfg.env === 'test'
+    ? {}
+    : { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } };
+
   app.register(async (api) => {
     // Map service errors to the shared { error: { code, message } } envelope.
     api.setErrorHandler((err: any, _req, reply) => {
@@ -43,6 +54,10 @@ export function registerConsumer(app: FastifyInstance, db: Db, cfg: Config, stor
       }
       if (err?.statusCode === 400) {
         return reply.code(400).send({ error: { code: 'bad_request', message: err.message } });
+      }
+      // TRI-1055: @fastify/rate-limit throws a 429 Error when a per-IP auth limit is exceeded.
+      if ((err as any).statusCode === 429) {
+        return reply.code(429).send({ error: { code: 'rate_limited', message: err.message || 'Too many attempts. Please wait and try again.' } });
       }
       api.log.error(err);
       return reply.code(500).send({ error: { code: 'internal', message: 'Internal error' } });
@@ -61,15 +76,15 @@ export function registerConsumer(app: FastifyInstance, db: Db, cfg: Config, stor
       setUserCookie(reply, cfg, sid);
       return reply.code(201).send(out);
     };
-    api.post('/auth/signup', signup);
-    api.post('/auth/register', signup); // FE kits reference both names — alias to one handler
+    api.post('/auth/signup', authRateLimit, signup);
+    api.post('/auth/register', authRateLimit, signup); // FE kits reference both names — alias to one handler
 
     // ── Login ──
     // A 2FA-enabled account (TRI-1029) does not get a full session here: verifyLogin returns
     // { mfaRequired, pendingUserId } after the password check, and we mint a half-auth (mfa_pending)
     // session + set the cookie so POST /auth/mfa can find and complete it. The client sees only
     // { mfaRequired: true } and prompts for the authenticator code.
-    api.post('/auth/login', async (req: FastifyRequest, reply: FastifyReply) => {
+    api.post('/auth/login', authRateLimit, async (req: FastifyRequest, reply: FastifyReply) => {
       const out = await svc.verifyLogin(body(req), ipOf(req));
       if ((out as any).mfaRequired) {
         const sid = await createUserSession(db, cfg, (out as any).pendingUserId, { ip: req.ip, userAgent: req.headers['user-agent'], mfaPending: true });
@@ -109,7 +124,7 @@ export function registerConsumer(app: FastifyInstance, db: Db, cfg: Config, stor
     });
 
     // ── Password reset (public; request is always 200 to avoid user enumeration) ──
-    api.post('/auth/password-reset/request', async (req: FastifyRequest) => svc.requestPasswordReset(body(req), ipOf(req)));
+    api.post('/auth/password-reset/request', authRateLimit, async (req: FastifyRequest) => svc.requestPasswordReset(body(req), ipOf(req)));
     api.post('/auth/password-reset/consume', async (req: FastifyRequest) => svc.consumePasswordReset(body(req), ipOf(req)));
 
     // ── Email verification (TRI-941) ──
