@@ -104,20 +104,22 @@ export async function resolveUserSession(db: Db, cfg: Config, sessionId: string)
 }
 
 // ── Cookie helpers ───────────────────────────────────────────────────────────
-// Secure/SameSite reuse the shared COOKIE_* posture (same browser + TLS as admin); the cookie is scoped
-// to the consumer API prefix so it never leaks onto the admin realm.
+// Secure/SameSite reuse the shared COOKIE_* posture (same browser + TLS as admin). Path is '/' (required
+// by the __Host- prefix, TRI-1056); realm separation is by distinct origin (app. vs admin.), not path.
 export function setUserCookie(reply: FastifyReply, cfg: Config, sessionId: string): void {
   reply.setCookie(cfg.consumer.cookieName, sessionId, {
     httpOnly: true,
     secure: cfg.adminCookieSecure,
     sameSite: cfg.adminCookieSameSite,
-    path: cfg.apiPrefix,
+    // TRI-1056: Path MUST be '/' for the __Host- prefix. The consumer SPA reads the session only via
+    // same-origin /api fetches (which SameSite=strict still carries), so strict doesn't break the app.
+    path: '/',
     maxAge: cfg.consumer.sessionIdleMinutes * 60,
   });
 }
 
 export function clearUserCookie(reply: FastifyReply, cfg: Config): void {
-  reply.clearCookie(cfg.consumer.cookieName, { path: cfg.apiPrefix });
+  reply.clearCookie(cfg.consumer.cookieName, { path: '/' });
 }
 
 // ── Route guard (Fastify preHandler) ─────────────────────────────────────────
