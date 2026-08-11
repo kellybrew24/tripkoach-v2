@@ -431,8 +431,17 @@ export function createBookingService(
       },
       tour: { slug: b.tour_slug, title: b.tour_title },
       departure: { id: b.departure_id, date: b.date_label, time: b.time_label ?? '' },
+      // TRI-1063 [A01/F2]: bookingDTO is the UNAUTHENTICATED guest view (GET /bookings/:ref, guarded only
+      // by the ~30-bit ref), so it must not disclose co-travellers' contact details. Only the lead — the
+      // person who booked and holds the ref — keeps their own email/phone (the confirmation/receipt needs a
+      // contact); every other traveller's email+phone are dropped to null. Names stay so the party roster
+      // still renders. Full PII for all travellers remains behind the authenticated /me/bookings
+      // (listMyBookings), which does NOT go through this DTO.
       travellers: travellers.map((t) => ({
-        name: t.name, email: t.email ?? null, phone: t.phone ?? null, isLead: !!t.is_lead,
+        name: t.name,
+        email: t.is_lead ? (t.email ?? null) : null,
+        phone: t.is_lead ? (t.phone ?? null) : null,
+        isLead: !!t.is_lead,
       })),
       payment: pay ? {
         reference: pay.ref,
