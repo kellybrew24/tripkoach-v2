@@ -144,7 +144,8 @@ export function registerConsumer(app: FastifyInstance, db: Db, cfg: Config, stor
     // ── Profile + preferences (authed) ──
     api.get('/me', authed, async (req: FastifyRequest) => ({ user: await svc.getProfile(req.account!.id) }));
     api.patch('/me', authed, async (req: FastifyRequest) => ({ user: await svc.updateProfile(req.account!.id, body(req), ipOf(req)) }));
-    api.post('/me/password', authed, async (req: FastifyRequest) => svc.changePassword(req.account!.id, body(req), ipOf(req)));
+    // TRI-1065 (item 2): pass this device's session id so the change revokes all OTHER sessions but keeps the caller's.
+    api.post('/me/password', authed, async (req: FastifyRequest) => svc.changePassword(req.account!.id, body(req), { ip: req.ip ?? null, exceptSid: req.cookies?.[cfg.consumer.cookieName] ?? null }));
 
     // ── Two-factor (TOTP) self-service (authed, TRI-1029) ──
     // status → { enabled }; enroll issues a secret + otpauth URI (the FE renders the QR client-side, never

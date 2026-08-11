@@ -11,6 +11,12 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Db } from './db.ts';
 import type { Config } from './config.ts';
+// TRI-1065 (item 3): consumer login reuses the admin lockout thresholds + the pure lock-expiry check,
+// so the two realms stay in lockstep and there's a single source of truth for the policy numbers.
+import { accountLockedUntil, LOGIN_MAX_ATTEMPTS, LOGIN_LOCK_MINUTES } from './auth.ts';
+
+// Re-exported so consumer.ts imports the whole lockout vocabulary from one place.
+export { accountLockedUntil };
 
 export interface UserContext {
   id: string;
@@ -71,12 +77,57 @@ export async function revokeUserSession(db: Db, sessionId: string): Promise<void
   await db.query(`UPDATE session SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL`, [sessionId]);
 }
 
-/** Revoke every live session for a user (used after a password reset / change). Returns rows revoked. */
+/** Revoke every live session for a user (used after a password reset). Returns rows revoked. */
 export async function revokeAllUserSessions(db: Db, userId: string): Promise<number> {
   const r = await db.query(
     `UPDATE session SET revoked_at = now()
       WHERE subject_type = 'user' AND subject_id = $1 AND revoked_at IS NULL`, [userId]);
   return r.rowCount ?? 0;
+}
+
+/** TRI-1065 (item 2): revoke every live session for a user EXCEPT one — used after an authed password
+ *  change so a thief on another device is logged out while the caller stays signed in here. Mirrors the
+ *  admin changeOwnPassword all-but-current revoke (staff.ts). Returns rows revoked. */
+export async function revokeUserSessionsExcept(db: Db, userId: string, exceptSessionId: string | null): Promise<number> {
+  const r = await db.query(
+    `UPDATE session SET revoked_at = now()
+      WHERE subject_type = 'user' AND subject_id = $1 AND revoked_at IS NULL
+        AND ($2::uuid IS NULL OR id <> $2::uuid)`, [userId, exceptSessionId ?? null]);
+  return r.rowCount ?? 0;
+}
+
+// ── TRI-1065 (item 3): per-account brute-force lockout for CONSUMER accounts ──────────────────────
+// TRI-1055 added a per-IP throttle on the consumer auth routes; that does not slow a distributed /
+// rotating-IP spray against a single account. This mirrors the admin/staff lockout (auth.ts) on
+// user_account, sharing the same thresholds. `accountLockedUntil` (re-exported above) is realm-neutral.
+
+/** Record a failed consumer password attempt. A stale (elapsed) lock resets the counter first so each
+ *  window starts fresh; on reaching the threshold the account locks for LOGIN_LOCK_MINUTES. Returns the
+ *  new lock expiry when the account just locked, else null. */
+export async function recordFailedUserLogin(
+  db: Db,
+  u: { id: string; failed_login_count?: number | null; locked_until?: string | Date | null },
+): Promise<Date | null> {
+  const stale = accountLockedUntil(u) == null && u.locked_until != null;
+  const base = stale ? 0 : (u.failed_login_count ?? 0);
+  const newCount = base + 1;
+  const doLock = newCount >= LOGIN_MAX_ATTEMPTS;
+  const { rows } = await db.query<{ locked_until: Date | null }>(
+    `UPDATE user_account
+        SET failed_login_count = $2,
+            locked_until = CASE WHEN $3 THEN now() + ($4 * interval '1 minute') ELSE NULL END,
+            updated_at = now()
+      WHERE id = $1
+      RETURNING locked_until`,
+    [u.id, newCount, doLock, LOGIN_LOCK_MINUTES]);
+  return doLock && rows[0]?.locked_until ? new Date(rows[0].locked_until) : null;
+}
+
+/** Clear the consumer failed-attempt counter + any lock after a successful password verification. */
+export async function resetFailedUserLogins(db: Db, userId: string): Promise<void> {
+  await db.query(
+    `UPDATE user_account SET failed_login_count = 0, locked_until = NULL, updated_at = now()
+      WHERE id = $1 AND (failed_login_count <> 0 OR locked_until IS NOT NULL)`, [userId]);
 }
 
 /** Resolve a live consumer session → UserContext, applying sliding idle expiry. null if absent/expired/revoked. */

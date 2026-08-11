@@ -10,7 +10,10 @@ import { randomBytes, createHash } from 'node:crypto';
 import type { Db } from './db.ts';
 import type { Config } from './config.ts';
 import { hashPassword, verifyPassword, audit } from './auth.ts';
-import { revokeAllUserSessions } from './consumer-auth.ts';
+import {
+  revokeAllUserSessions, revokeUserSessionsExcept,
+  accountLockedUntil, recordFailedUserLogin, resetFailedUserLogins,
+} from './consumer-auth.ts';
 import { sendEmail, type SendOptions } from './email.ts';
 import { avatarUrlFor } from './avatar.ts';
 import { fromMinor } from './util.ts';
@@ -31,6 +34,11 @@ export class ConsumerError extends Error {
 const validation = (message: string, field?: string) => new ConsumerError('validation', message, 400, field);
 const conflict = (message: string) => new ConsumerError('conflict', message, 409);
 const notFound = (what: string) => new ConsumerError('not_found', `${what} not found`, 404);
+// TRI-1065 (item 3): human-friendly lock message (mirrors admin lockedMessage in admin-routes.ts).
+const lockedMessage = (until: Date): string => {
+  const mins = Math.max(1, Math.ceil((until.getTime() - Date.now()) / 60_000));
+  return `Too many failed attempts — this account is locked. Try again in about ${mins} minute${mins === 1 ? '' : 's'}.`;
+};
 
 // ── Tiny validators ──────────────────────────────────────────────────────────
 type Body = Record<string, unknown>;
@@ -257,11 +265,26 @@ export function createConsumerService(db: Db, cfg: Config) {
     if (!email || !password) throw validation('email and password are required');
 
     const u = (await db.query(`SELECT * FROM user_account WHERE lower(email) = $1 AND deleted_at IS NULL`, [email])).rows[0];
+
+    // TRI-1065 (item 3): reject an already-locked account before spending an argon2 verify. Only a real
+    // row can be locked, so this reveals nothing an unlocked account's differing timing wouldn't.
+    const lockedUntil = accountLockedUntil(u);
+    if (lockedUntil) {
+      await audit(db, { actorType: 'user', actorId: u.id, action: 'user.login_locked', targetType: 'user_account', targetId: u.id, after: { email }, ip: meta.ip ?? null });
+      throw new ConsumerError('account_locked', lockedMessage(lockedUntil), 429);
+    }
+
     const ok = u && u.password_hash && (await verifyPassword(password, u.password_hash));
     if (!ok) {
-      await audit(db, { actorType: 'user', actorId: u?.id ?? null, action: 'user.login_failed', targetType: 'user_account', targetId: u?.id ?? null, after: { email }, ip: meta.ip ?? null });
+      // Count the failure against the account (per-account, immune to IP rotation). If it just crossed the
+      // threshold, surface the lock; otherwise the generic invalid-credentials response is unchanged.
+      const justLocked = u ? await recordFailedUserLogin(db, u) : null;
+      await audit(db, { actorType: 'user', actorId: u?.id ?? null, action: 'user.login_failed', targetType: 'user_account', targetId: u?.id ?? null, after: { email, locked: !!justLocked }, ip: meta.ip ?? null });
+      if (justLocked) throw new ConsumerError('account_locked', lockedMessage(justLocked), 429);
       throw new ConsumerError('invalid_credentials', 'That email and password do not match.', 401);
     }
+    // Correct password → clear any accrued failed-attempt/lock state before proceeding (incl. 2FA).
+    await resetFailedUserLogins(db, u.id);
     // TRI-1029: password is correct, but a 2FA-enabled account isn't logged in until the second factor
     // clears. Signal the route to mint a half-auth (mfa_pending) session instead of a full one — bookings
     // are NOT linked and no login is audited yet; that happens in completeMfaLogin once /auth/mfa passes.
@@ -330,7 +353,7 @@ export function createConsumerService(db: Db, cfg: Config) {
   }
 
   // ── Change password (authed; requires current password) ──
-  async function changePassword(userId: string, rawBody: unknown, meta: { ip?: string | null } = {}) {
+  async function changePassword(userId: string, rawBody: unknown, meta: { ip?: string | null; exceptSid?: string | null } = {}) {
     if (!isPlainObject(rawBody)) throw validation('body must be an object');
     const cur = await loadUser(userId);
     if (!cur) throw notFound('account');
@@ -340,7 +363,11 @@ export function createConsumerService(db: Db, cfg: Config) {
     }
     const next = checkPassword(rawBody.newPassword);
     await db.query(`UPDATE user_account SET password_hash = $2, updated_at = now() WHERE id = $1`, [userId, await hashPassword(next)]);
-    await audit(db, { actorType: 'user', actorId: userId, action: 'user.password_change', targetType: 'user_account', targetId: userId, ip: meta.ip ?? null });
+    // TRI-1065 (item 2, A07/F3): a password change invalidates every OTHER live session so a thief on
+    // another device is logged out — mirrors reset-consume (revokeAllUserSessions) and admin
+    // changeOwnPassword (all-but-current). The caller keeps this session (exceptSid).
+    const sessionsRevoked = await revokeUserSessionsExcept(db, userId, meta.exceptSid ?? null);
+    await audit(db, { actorType: 'user', actorId: userId, action: 'user.password_change', targetType: 'user_account', targetId: userId, after: { sessionsRevoked }, ip: meta.ip ?? null });
     return { ok: true };
   }
 
