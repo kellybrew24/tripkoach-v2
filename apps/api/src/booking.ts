@@ -8,6 +8,7 @@ import type { Config } from './config.ts';
 import type { PaystackClient } from './paystack.ts';
 import type { NotificationService } from './notifications.ts';
 import { fromMinor } from './util.ts';
+import { audit } from './auth.ts';
 
 // ── Typed errors (mapped to the {error:{code,message}} envelope + HTTP status by the route layer) ──
 export class BookingError extends Error {
@@ -599,12 +600,22 @@ export function createBookingService(
       await q.query(
         `UPDATE booking SET status = 'confirmed', payment_state = 'paid', updated_at = now()
          WHERE id = $1`, [pay.booking_id]);
-      return { ref: pay.booking_ref, status: 'confirmed', paymentState: 'paid', justConfirmed: true };
+      return {
+        ref: pay.booking_ref, status: 'confirmed', paymentState: 'paid', justConfirmed: true,
+        bookingId: pay.booking_id, amountMinor: pay.amount_minor, currency: pay.currency,
+      };
     });
-    // Fire the booking-confirmed email AFTER the tx commits, and only on the fresh transition (never on
-    // an idempotent replay). notifier calls never throw — a confirmed payment must not depend on email.
-    if (result?.justConfirmed && notifier) {
-      await notifier.bookingConfirmed(result.ref);
+    // Audit + email AFTER the tx commits, and only on the fresh transition (never on an idempotent
+    // replay), so money-in is traceable at go-live (TRI-1062). notifier calls never throw — a confirmed
+    // payment must not depend on email.
+    if (result?.justConfirmed) {
+      await audit(db, {
+        actorId: null, actorType: 'system', action: 'payment.confirmed',
+        targetType: 'payment', targetId: reference,
+        after: { reference, providerRef, bookingRef: result.ref, bookingId: result.bookingId,
+                 amountMinor: result.amountMinor, currency: result.currency },
+      });
+      if (notifier) await notifier.bookingConfirmed(result.ref);
     }
     return result;
   }
@@ -612,9 +623,9 @@ export function createBookingService(
   // ── Mark a payment failed from a webhook (idempotent). Returns the booking ref ONLY when it flipped a
   //    non-failed payment to failed, so the caller emails the payer exactly once. ──
   async function markPaymentFailed(reference: string, raw: unknown): Promise<string | null> {
-    return db.tx(async (q) => {
+    const out = await db.tx(async (q) => {
       const payRes = await q.query(
-        `SELECT p.id, p.status, b.ref AS booking_ref, b.payment_state
+        `SELECT p.id, p.status, p.booking_id, p.amount_minor, p.currency, b.ref AS booking_ref, b.payment_state
          FROM payment p JOIN booking b ON b.id = p.booking_id
          WHERE p.ref = $1 FOR UPDATE OF p`, [reference]);
       const pay = payRes.rows[0];
@@ -623,8 +634,22 @@ export function createBookingService(
       if (pay.status === 'failed') return null;            // already failed — don't re-notify
       await q.query(`UPDATE payment SET status = 'failed', raw = $2 WHERE id = $1`,
         [pay.id, JSON.stringify(raw)]);
-      return pay.booking_ref as string;
+      return {
+        bookingRef: pay.booking_ref as string, prevStatus: pay.status as string,
+        bookingId: pay.booking_id, amountMinor: pay.amount_minor, currency: pay.currency,
+      };
     });
+    if (!out) return null;
+    // Audit the gateway-driven failure so it is traceable to finance/security (TRI-1062). Fires exactly
+    // once, on the transition into failed (the tx returns non-null only when it flipped the row).
+    await audit(db, {
+      actorId: null, actorType: 'system', action: 'payment.failed',
+      targetType: 'payment', targetId: reference,
+      before: { status: out.prevStatus },
+      after: { reference, status: 'failed', bookingRef: out.bookingRef, bookingId: out.bookingId,
+               amountMinor: out.amountMinor, currency: out.currency },
+    });
+    return out.bookingRef;
   }
 
   // ── Server-side verify (FE calls after checkout; fallback to the webhook when it lands first) ──
@@ -731,11 +756,11 @@ export function createBookingService(
       `SELECT 1 FROM information_schema.columns WHERE table_name='payment' AND column_name='refund_provider_id'`,
     ).then((r) => r.rows.length > 0);
     if (!hasCols) return; // DB predates migration 013 — nothing to reconcile against
-    await db.tx(async (q) => {
+    const audited = await db.tx(async (q) => {
       const pay = (await q.query(
         `SELECT id, booking_id, status, currency, method, amount_minor, ghs_amount_minor
            FROM payment WHERE ref=$1 OR provider_ref=$1 FOR UPDATE`, [transactionRef])).rows[0];
-      if (!pay) return; // unknown transaction — foreign refund, no-op
+      if (!pay) return null; // unknown transaction — foreign refund, no-op
       const refundedMinor = Number(data?.amount ?? pay.ghs_amount_minor ?? pay.amount_minor) || 0;
       await insertUniqueRef('RFN', 6, async (rfnRef) => {
         await q.query(
@@ -746,9 +771,22 @@ export function createBookingService(
           [rfnRef, pay.booking_id, -Math.abs(refundedMinor), data?.currency ?? pay.currency, pay.method,
            refundProviderId, JSON.stringify({ refund: data, via: 'webhook' }), pay.id, refundProviderId]);
       });
-      await q.query(`UPDATE payment SET status='refunded' WHERE id=$1 AND status <> 'refunded'`, [pay.id]);
+      const upd = await q.query(`UPDATE payment SET status='refunded' WHERE id=$1 AND status <> 'refunded'`, [pay.id]);
       await q.query(`UPDATE booking SET payment_state='refunded', updated_at=now() WHERE id=$1`, [pay.booking_id]);
+      // Only signal an audit when this delivery actually flipped the charge — idempotent replays no-op.
+      return upd.rowCount ? { bookingId: pay.booking_id, refundedMinor, currency: data?.currency ?? pay.currency, prevStatus: pay.status as string } : null;
     });
+    // Record gateway-initiated (Paystack-dashboard or webhook) refunds in the audit log so coverage
+    // matches admin executeRefund (TRI-1062). Fires once, only on the fresh flip to refunded.
+    if (audited) {
+      await audit(db, {
+        actorId: null, actorType: 'system', action: 'payment.refunded_webhook',
+        targetType: 'payment', targetId: transactionRef,
+        before: { status: audited.prevStatus },
+        after: { transactionRef, refundProviderId, bookingId: audited.bookingId,
+                 amountMinor: -Math.abs(audited.refundedMinor), currency: audited.currency },
+      });
+    }
   }
 
   // ── Expiry sweep: release unpaid holds past reservation_expires_at (cron-callable) ──
