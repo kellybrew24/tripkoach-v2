@@ -258,6 +258,21 @@ function AdminApp() {
     setDemo(d => ({ ...d, ...p }));
   };
 
+  // TRI-1059 [TRI-1058]: re-gate auth on EVERY render, not just at initial mount.
+  // The `initialScreen` gate above only runs once (useState initializer). signOut
+  // sets TK_ADMIN_SESSION → {unauthenticated:true} then routes to /login via
+  // pushState; a browser Back is then a `popstate` that setScreen()s straight
+  // back to a protected route (e.g. dashboard) with NO auth check — re-rendering
+  // the authenticated console (still-hydrated TK_ADMIN.* globals and all) for a
+  // signed-out user. Forcing the login screen here whenever we're live-but-
+  // unauthenticated on a protected route closes that hole for the popstate,
+  // bfcache-restore, and direct-state paths alike. The full-bleed auth/token
+  // screens below are the legitimate signed-out views and stay reachable.
+  const SIGNED_OUT_SCREENS = ["login", "mfa", "mfa-enroll", "reset", "reset-consume", "accept-invite", "expired"];
+  if (LIVE && !tkAuthed() && !SIGNED_OUT_SCREENS.includes(screen)) {
+    return <Frame demo={demo} setDemo={setDemo} screen="login" go={go}><AdminLogin go={go} state={state} /></Frame>;
+  }
+
   // Auth screens render full-bleed (no shell)
   if (screen === "login") return <Frame demo={demo} setDemo={setDemo} screen={screen} go={go}><AdminLogin go={go} state={state} /></Frame>;
   if (screen === "mfa") return <Frame demo={demo} setDemo={setDemo} screen={screen} go={go}><MfaChallenge go={go} state={state} /></Frame>;

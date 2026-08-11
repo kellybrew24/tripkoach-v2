@@ -44,6 +44,22 @@
   }
   function live() { return !!cfg().USE_LIVE_API; }
 
+  // ── TRI-1059: post-logout Back/bfcache exposure guard ──────────────────────
+  // A page restored from the browser back/forward cache (bfcache) comes back
+  // with the exact JS heap + DOM it had before the user navigated away —
+  // including, after a sign-out, the fully-rendered authenticated console view.
+  // Pressing Back after logout would therefore resurrect the console for a
+  // logged-out user (TRI-1058). When we detect a bfcache restore (`pageshow`
+  // with `persisted`), force a fresh load: the normal boot (window.TK_BOOT)
+  // then re-checks the staff session (revoked → 401 → /login). The Caddy
+  // `Cache-Control: no-store` on the SPA document (TRI-1053 vhosts) already
+  // suppresses bfcache in Chrome/Firefox; this is the belt-and-suspenders for
+  // engines that still restore. Live mode only — the fixtures/DS-preview build
+  // has no real session, so it keeps normal bfcache behaviour.
+  window.addEventListener("pageshow", function (e) {
+    if (e && e.persisted && live()) window.location.reload();
+  });
+
   // ---- transport (admin base, same-origin cookie) ---------------------------
   function req(method, path, body, opts) {
     opts = opts || {};

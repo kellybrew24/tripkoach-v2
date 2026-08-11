@@ -27,6 +27,21 @@
 (function () {
   var api = window.TK_API;
 
+  // ── TRI-1059: post-logout Back/bfcache exposure guard ──────────────────────
+  // A page restored from the browser back/forward cache (bfcache) comes back
+  // with the exact JS heap + DOM it had before the user navigated away —
+  // including, after a sign-out, the fully-rendered authenticated account view.
+  // Pressing Back after logout would therefore resurrect the app for a
+  // logged-out user (TRI-1058). When we detect a bfcache restore (`pageshow`
+  // with `persisted`), force a fresh load: the account screens then re-fetch
+  // /me and gate to /login on 401. The Caddy `Cache-Control: no-store` on the
+  // SPA document (TRI-1053 vhosts) already suppresses bfcache in Chrome/
+  // Firefox; this is the belt-and-suspenders for engines that still restore.
+  // Live mode only — the fixtures/DS-preview build has no real session.
+  window.addEventListener("pageshow", function (e) {
+    if (e && e.persisted && (window.TK_CONFIG || {}).USE_LIVE_API) window.location.reload();
+  });
+
   // ---- money / date helpers -------------------------------------------------
   // Fixtures carry whole-currency numbers (e.g. 65). The API carries integer
   // minor units + an explicit currency (Phase 0 §3.1). Accept both.
