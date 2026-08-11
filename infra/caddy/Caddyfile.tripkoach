@@ -1,0 +1,285 @@
+# ===========================================================================
+# TripKoach v2 — Caddy vhost configuration (VERSION-CONTROLLED, TRI-1064)
+# ===========================================================================
+#
+# This file is a FRAGMENT, not a standalone Caddyfile. The live config is the
+# shared `/etc/caddy/Caddyfile` on the Hetzner box 168.119.117.136, which is
+# co-tenanted with other apps (sworvo, totalhouse). Only the TripKoach-owned
+# blocks are mirrored here for code review; the co-tenant blocks and the
+# global `{ ... }` options block (email + acme_dns) are intentionally omitted
+# because they belong to other products / infra, not this repo.
+#
+# WHY THIS FILE EXISTS (TRI-1060 OWASP audit, Finding A05/F3):
+#   Before TRI-1064 the Caddy config lived ONLY on the servers, so nobody
+#   could review the HSTS max-age, CSP strictness, frame/nosniff/referrer/
+#   permissions headers, or the Server-banner strip, and header drift was
+#   invisible. This mirror makes all of that reviewable and diffable.
+#
+# HOW TO KEEP IN SYNC — this is a mirror, the server is the source of truth:
+#   Pull:  ssh root@168.119.117.136 'cat /etc/caddy/Caddyfile'   (extract the
+#          TripKoach blocks below and update this file).
+#   Push:  edit the TripKoach blocks in /etc/caddy/Caddyfile on the box, then
+#            set -a; . /etc/sworvo/secrets.env; set +a         # load CF token
+#            caddy validate --adapter caddyfile --config /etc/caddy/Caddyfile
+#            systemctl reload caddy
+#          Always keep a timestamped backup: cp Caddyfile Caddyfile.bak-<ticket>-<ts>
+#          Gotcha (TRI-854): pre-create any NEW /var/log/caddy/*.log file
+#          (touch && chown caddy:caddy) BEFORE reload or reload 400s on
+#          "permission denied" (Caddy runs as user `caddy`).
+#
+# TLS: every TripKoach vhost sets a PER-SITE `tls { dns cloudflare ... }` using
+# the tripkoach-zone token (CF_API_TOKEN_TRIPKOACH). The global acme_dns uses
+# the sworvo-zone token, which CANNOT issue for tripkoach.com — any new
+# TripKoach vhost MUST carry the per-site override or cert issuance fails.
+#
+# PARITY: see SECURITY-HEADERS-PARITY.md for the dev/prod header checklist and
+# the verify-live commands.
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# TRI-1053 [SEC-H1]: shared HTTP security-header snippet (from the TRI-1048
+# security audit). Imported by every TripKoach vhost so the header set is
+# defined ONCE and cannot drift between web/admin or dev/prod.
+#
+# CSP notes (do NOT tighten blindly — tuned to the built SPA):
+#   - every script is self-hosted (vendor/ React UMD, _ds_bundle.js, tk-*.js,
+#     app.js) with zero eval/new Function  -> script-src 'self' (no unsafe-eval)
+#   - built SPAs carry an inline <style> in <head> + React inline styles
+#                                             -> style-src 'unsafe-inline'
+#   - images: R2 CDN + picsum placeholder + data:/blob:
+#   - fonts: self-hosted Manrope woff2       -> font-src 'self'
+#   - same-origin /api                        -> connect-src 'self'
+#   HSTS = 2y + includeSubDomains, NO preload (preload intentionally omitted).
+#   -Server strips the "Server: Caddy" version banner.
+#
+# ⚠ At TRI-1057 prod cutover, re-check whether prod checkout uses a Paystack
+#   IFRAME (dev uses the redirect flow). An iframe flow needs
+#   `https://*.paystack.co` added to CSP frame-src/connect-src.
+# ---------------------------------------------------------------------------
+(tripkoach_security_headers) {
+	header {
+		Strict-Transport-Security "max-age=63072000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), browsing-topics=()"
+		Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; img-src 'self' data: blob: https://cdn.tripkoach.com https://picsum.photos; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; form-action 'self'"
+		-Server
+	}
+}
+
+
+# ===========================================================================
+# DEV plane — dev.tripkoach.com + admin.dev.tripkoach.com  (LIVE, hardened)
+# Static SPAs from tripkoach-v2 apps/{web,admin}/dist. Same-origin /api ->
+# the dev API on 127.0.0.1:3020 (no CORS, no prefix strip).
+# ===========================================================================
+
+# --- Web (consumer) -> tripkoach-v2 web SPA (TRI-854) ---
+dev.tripkoach.com {
+	tls {
+		dns cloudflare {env.CF_API_TOKEN_TRIPKOACH}
+	}
+
+	# TRI-1053 [SEC-H1]: HSTS/CSP/X-Frame/nosniff/Referrer/Permissions + drop Server banner.
+	import tripkoach_security_headers
+
+	# TRI-1059: post-logout Back/bfcache exposure fix. `no-store` on the SPA
+	# document (index.html, served at / or via the try_files SPA fallback)
+	# disables the browser back/forward cache for it and stops authenticated
+	# HTML from being reused after sign-out. The matcher excludes hashed
+	# static assets so they keep normal caching.
+	@spa_doc not path *.js *.mjs *.css *.map *.woff *.woff2 *.ttf *.otf *.png *.jpg *.jpeg *.gif *.svg *.webp *.avif *.ico *.json *.txt *.xml *.wasm *.mp4 *.webm
+
+	encode zstd gzip
+
+	# TRI-862: same-origin /api — no CORS. Reverse-proxy to the dev API (3020).
+	handle /api/v1/internal/* {
+		# TRI-868: cron-only expiry sweep; loopback-only, never publicly reachable.
+		respond "forbidden" 403
+	}
+
+	handle /api/* {
+		reverse_proxy 127.0.0.1:3020 {
+			header_up Host {host}
+			header_up X-Forwarded-Host {host}
+			header_up X-Forwarded-Proto https
+			header_up X-Real-IP {remote_host}
+			transport http {
+				response_header_timeout 30s
+			}
+		}
+	}
+
+	# SPA static — every non-/api route.
+	handle {
+		root * /var/www/tripkoach-dev-web
+		header @spa_doc Cache-Control "no-store"
+		try_files {path} /index.html
+		file_server
+	}
+
+	log {
+		output file /var/log/caddy/tripkoach-dev-web.log {
+			roll_size 100MiB
+			roll_keep 14
+			roll_keep_for 30d
+		}
+		format json
+	}
+}
+
+# --- Admin -> tripkoach-v2 admin SPA (TRI-854) ---
+admin.dev.tripkoach.com {
+	tls {
+		dns cloudflare {env.CF_API_TOKEN_TRIPKOACH}
+	}
+
+	# TRI-1053 [SEC-H1]: HSTS/CSP/X-Frame/nosniff/Referrer/Permissions + drop Server banner.
+	import tripkoach_security_headers
+
+	# TRI-1059: post-logout Back/bfcache exposure fix (see web block above).
+	@spa_doc not path *.js *.mjs *.css *.map *.woff *.woff2 *.ttf *.otf *.png *.jpg *.jpeg *.gif *.svg *.webp *.avif *.ico *.json *.txt *.xml *.wasm *.mp4 *.webm
+
+	encode zstd gzip
+
+	handle /api/v1/internal/* {
+		respond "forbidden" 403
+	}
+
+	handle /api/* {
+		reverse_proxy 127.0.0.1:3020 {
+			header_up Host {host}
+			header_up X-Forwarded-Host {host}
+			header_up X-Forwarded-Proto https
+			header_up X-Real-IP {remote_host}
+			transport http {
+				response_header_timeout 30s
+			}
+		}
+	}
+
+	handle {
+		root * /var/www/tripkoach-dev-admin
+		header @spa_doc Cache-Control "no-store"
+		try_files {path} /index.html
+		file_server
+	}
+
+	log {
+		output file /var/log/caddy/tripkoach-dev-admin.log {
+			roll_size 100MiB
+			roll_keep 14
+			roll_keep_for 30d
+		}
+		format json
+	}
+}
+
+
+# ===========================================================================
+# PROD plane — app.tripkoach.com + admin.tripkoach.com  (TRI-875)
+# Static SPAs from prod dist. Same-origin /api/* -> PROD API on 127.0.0.1:3120
+# (NO prefix strip -> raw body preserved for the Paystack webhook HMAC).
+#
+# ⚠⚠ PROD HARDENING NOT YET LIVE — RIDES TRI-1057 BATCHED CUTOVER ⚠⚠
+# The two lines flagged `# PENDING TRI-1057` in each prod block below are the
+# TRI-1053 header import + the TRI-1059 no-store, and are the ONLY delta
+# between the current live prod config and this target. They are shown here
+# (not commented out) so reviewers see the intended end state and cutover is a
+# straight apply. Until the CEO-authorized TRI-1057 window, the LIVE prod
+# blocks on the box still OMIT these two lines. See SECURITY-HEADERS-PARITY.md.
+# ===========================================================================
+
+# --- Consumer web -> tripkoach-v2 web SPA (prod dist, TRI-874) ---
+app.tripkoach.com {
+	tls {
+		dns cloudflare {env.CF_API_TOKEN_TRIPKOACH}
+	}
+
+	import tripkoach_security_headers                 # PENDING TRI-1057 (TRI-1053 parity)
+
+	# PENDING TRI-1057 (TRI-1059 parity): no-store on the SPA document.
+	@spa_doc not path *.js *.mjs *.css *.map *.woff *.woff2 *.ttf *.otf *.png *.jpg *.jpeg *.gif *.svg *.webp *.avif *.ico *.json *.txt *.xml *.wasm *.mp4 *.webm
+
+	encode zstd gzip
+
+	handle /api/v1/internal/* {
+		respond "forbidden" 403
+	}
+
+	handle /api/* {
+		reverse_proxy 127.0.0.1:3120 {
+			header_up Host {host}
+			header_up X-Forwarded-Host {host}
+			header_up X-Forwarded-Proto https
+			header_up X-Real-IP {remote_host}
+			transport http {
+				response_header_timeout 30s
+			}
+		}
+	}
+
+	handle {
+		root * /var/www/tripkoach-prod-web
+		header @spa_doc Cache-Control "no-store"   # PENDING TRI-1057 (TRI-1059 parity)
+		try_files {path} /index.html
+		file_server
+	}
+
+	log {
+		output file /var/log/caddy/tripkoach-prod-web.log {
+			roll_size 100MiB
+			roll_keep 14
+			roll_keep_for 30d
+		}
+		format json
+	}
+}
+
+# --- Admin -> tripkoach-v2 admin SPA (prod dist, TRI-874) ---
+admin.tripkoach.com {
+	tls {
+		dns cloudflare {env.CF_API_TOKEN_TRIPKOACH}
+	}
+
+	import tripkoach_security_headers                 # PENDING TRI-1057 (TRI-1053 parity)
+
+	# PENDING TRI-1057 (TRI-1059 parity): no-store on the SPA document.
+	@spa_doc not path *.js *.mjs *.css *.map *.woff *.woff2 *.ttf *.otf *.png *.jpg *.jpeg *.gif *.svg *.webp *.avif *.ico *.json *.txt *.xml *.wasm *.mp4 *.webm
+
+	encode zstd gzip
+
+	handle /api/v1/internal/* {
+		respond "forbidden" 403
+	}
+
+	handle /api/* {
+		reverse_proxy 127.0.0.1:3120 {
+			header_up Host {host}
+			header_up X-Forwarded-Host {host}
+			header_up X-Forwarded-Proto https
+			header_up X-Real-IP {remote_host}
+			transport http {
+				response_header_timeout 30s
+			}
+		}
+	}
+
+	handle {
+		root * /var/www/tripkoach-prod-admin
+		header @spa_doc Cache-Control "no-store"   # PENDING TRI-1057 (TRI-1059 parity)
+		try_files {path} /index.html
+		file_server
+	}
+
+	log {
+		output file /var/log/caddy/tripkoach-prod-admin.log {
+			roll_size 100MiB
+			roll_keep 14
+			roll_keep_for 30d
+		}
+		format json
+	}
+}
