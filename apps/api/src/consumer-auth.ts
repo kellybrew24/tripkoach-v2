@@ -45,17 +45,25 @@ export async function createUserSession(
 
 /** Resolve a live but MFA-PENDING consumer session → the pending user's id (for the /auth/mfa challenge).
  *  null unless the session is live, unrevoked, and still awaiting its second factor. */
-export async function resolvePendingUserSession(db: Db, sessionId: string): Promise<{ sessionId: string; userId: string } | null> {
+export async function resolvePendingUserSession(
+  db: Db, sessionId: string,
+): Promise<{ sessionId: string; userId: string; failedLoginCount: number; lockedUntil: Date | null } | null> {
   if (!sessionId) return null;
   const { rows } = await db.query<any>(
-    `SELECT s.id AS session_id, s.subject_id AS user_id
+    // TRI-1061: also surface the per-account lockout state (added to user_account in mig 030) so the
+    // /auth/mfa challenge can reject a locked account and feed MFA failures into the same counter.
+    `SELECT s.id AS session_id, s.subject_id AS user_id, u.failed_login_count, u.locked_until
        FROM session s JOIN user_account u ON u.id = s.subject_id
       WHERE s.id = $1 AND s.subject_type = 'user' AND s.mfa_pending = true
         AND s.revoked_at IS NULL AND s.expires_at > now() AND u.deleted_at IS NULL`,
     [sessionId],
   );
   const r = rows[0];
-  return r ? { sessionId: r.session_id, userId: r.user_id } : null;
+  return r ? {
+    sessionId: r.session_id, userId: r.user_id,
+    failedLoginCount: r.failed_login_count ?? 0,
+    lockedUntil: r.locked_until ? new Date(r.locked_until) : null,
+  } : null;
 }
 
 /** Clear the MFA-pending flag on a session (called after a successful login challenge) + slide the window. */

@@ -13,7 +13,7 @@ import {
   makeRequireAuth, makeRequirePermission, audit, type Permission,
   verifyTrustedDevice, issueTrustedDevice, sessionWasTrusted,
   revokeTrustedDevices, setTrustCookie, clearTrustCookie,
-  accountLockedUntil, recordFailedLogin, resetFailedLogins,
+  accountLockedUntil, recordFailedLogin, resetFailedLogins, recordMfaFailure,
 } from './auth.ts';
 import { createAdminService, AdminError, ValidationError } from './admin.ts';
 import type { NotificationService } from './notifications.ts';
@@ -70,6 +70,13 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
   const loginRouteOpts: Record<string, unknown> = cfg.env === 'test'
     ? {}
     : { config: { rateLimit: { max: 5, timeWindow: '15 minutes' } } };
+  // TRI-1061: per-IP throttle for the second-factor + token-consume routes (the MFA challenge, password-
+  // reset consume). @fastify/rate-limit keeps an independent per-route counter, so reusing the same
+  // shape here does not share a bucket with the login limiter above. 10 / 15 min is generous for a human
+  // re-typing a 6-digit code yet caps automated guessing; the per-account lockout is the IP-proof half.
+  const mfaRouteOpts: Record<string, unknown> = cfg.env === 'test'
+    ? {}
+    : { config: { rateLimit: { max: 10, timeWindow: '15 minutes' } } };
   const lockedMessage = (until: Date): string => {
     const mins = Math.max(1, Math.ceil((until.getTime() - Date.now()) / 60_000));
     return `Too many failed attempts — this account is locked. Try again in about ${mins} minute${mins === 1 ? '' : 's'}.`;
@@ -135,8 +142,12 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
         }
         return reply.code(401).send({ error: { code: 'invalid_credentials', message: 'That email and password do not match.' } });
       }
-      // Authenticated: clear any accumulated failed-attempt state before establishing the session.
-      await resetFailedLogins(db, u.id);
+      // TRI-1061: do NOT clear the failed-attempt counter on a correct password alone. For an MFA- or
+      // enroll-gated account the login is not yet complete, and wiping the counter here would let an
+      // attacker who knows the password reset it between wrong-code guesses — dodging the account lock
+      // that MFA failures feed (the IP-rotation evasion). The counter is cleared only where a FULL
+      // session is actually established: the trusted-device and plain-login branches below, and on a
+      // successful /auth/mfa challenge or /auth/mfa/verify enroll.
       const trust = b.trustDevice === true || b.trust === true;
       // TRI-983: a device the operator previously chose to trust skips the second factor for 30 days. We
       // check the long-lived tk_admin_trust cookie against a live trusted_device row scoped to THIS staff
@@ -147,6 +158,7 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
           ip: req.ip, userAgent: req.headers['user-agent'], trustedDevice: true,
         });
         setSessionCookie(reply, cfg, sid);
+        await resetFailedLogins(db, u.id); // full session established → clear accumulated failures
         await audit(db, { actorId: u.id, action: 'staff.login', targetType: 'staff_user', targetId: u.id, after: { mfa: 'skipped_trusted_device' }, ip: req.ip ?? null });
         return {
           staff: { id: u.id, email: u.email, name: u.name ?? null, role: u.role, jobTitle: u.job_title ?? null },
@@ -182,6 +194,7 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
         ip: req.ip, userAgent: req.headers['user-agent'], trustedDevice: trust,
       });
       setSessionCookie(reply, cfg, sid);
+      await resetFailedLogins(db, u.id); // full session established → clear accumulated failures
       await audit(db, { actorId: u.id, action: 'staff.login', targetType: 'staff_user', targetId: u.id, ip: req.ip ?? null });
       return {
         staff: { id: u.id, email: u.email, name: u.name ?? null, role: u.role, jobTitle: u.job_title ?? null },
@@ -193,20 +206,45 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
     // The FE posts the 6-digit authenticator code (or a recovery code) here after login returned
     // { mfaRequired: true }. On success we clear mfa_pending and return the same { staff, permissions }
     // shape as a plain login, so the console hydrates identically (window.TK_ADMIN_ENTER).
-    admin.post('/auth/mfa', async (req: FastifyRequest, reply: FastifyReply) => {
+    admin.post('/auth/mfa', mfaRouteOpts, async (req: FastifyRequest, reply: FastifyReply) => {
       const sid = req.cookies?.[cfg.adminCookieName];
       const pending = sid ? await resolvePendingSession(db, sid) : null;
       if (!pending) {
         return reply.code(401).send({ error: { code: 'no_challenge', message: 'No pending sign-in to verify. Please sign in again.' } });
       }
+      // TRI-1061: MFA failures feed the same per-account lockout as password failures — reject a locked
+      // account before spending a verify (and kill the half-auth cookie so it can't be reused). The lock
+      // helpers take a snake_case row; resolvePendingSession hands back camelCase, so adapt once here.
+      const lockRow = { id: pending.staffId, failed_login_count: pending.failedLoginCount, locked_until: pending.lockedUntil };
+      const lockedUntil = accountLockedUntil(lockRow);
+      if (lockedUntil) {
+        await revokeSession(db, pending.sessionId);
+        clearSessionCookie(reply, cfg);
+        await audit(db, { actorId: pending.staffId, action: 'staff.login_locked', targetType: 'staff_user', targetId: pending.staffId, after: { via: 'mfa' }, ip: req.ip ?? null });
+        return reply.code(429).send({ error: { code: 'account_locked', message: lockedMessage(lockedUntil) } });
+      }
       const b = (req.body ?? {}) as Record<string, unknown>;
       const code = typeof b.code === 'string' ? b.code : '';
       const ok = await staffSvc.verifyChallenge(pending.staffId, code);
       if (!ok) {
-        await audit(db, { actorId: pending.staffId, action: 'staff.mfa_failed', targetType: 'staff_user', targetId: pending.staffId, ip: req.ip ?? null });
+        // TRI-1061: bump BOTH the per-account lockout counter (same as a password miss) and the per-
+        // session cap. Either can end the challenge: the account lock stops IP-rotating guessers, the
+        // session cap forces a full re-login even from one IP.
+        const justLocked = await recordFailedLogin(db, lockRow);
+        const cap = await recordMfaFailure(db, pending.sessionId);
+        await audit(db, { actorId: pending.staffId, action: 'staff.mfa_failed', targetType: 'staff_user', targetId: pending.staffId, after: { attempts: cap.count, locked: !!justLocked }, ip: req.ip ?? null });
+        if (justLocked) {
+          clearSessionCookie(reply, cfg); // recordFailedLogin locked; also drop the now-dead pending cookie
+          return reply.code(429).send({ error: { code: 'account_locked', message: lockedMessage(justLocked) } });
+        }
+        if (cap.revoked) {
+          clearSessionCookie(reply, cfg); // per-session cap hit → session revoked, force full re-login
+          return reply.code(401).send({ error: { code: 'too_many_attempts', message: 'Too many incorrect codes. Please sign in again.' } });
+        }
         return reply.code(401).send({ error: { code: 'invalid_code', message: "That code didn't match or has expired." } });
       }
       await clearMfaPending(db, pending.sessionId);
+      await resetFailedLogins(db, pending.staffId); // full session established → clear accumulated failures
       // TRI-983: the operator ticked "Trust this device for 30 days" at login — now that the factor has
       // verified, mint a trusted-device token and drop it in the long-lived tk_admin_trust cookie so the
       // next login on this device skips the challenge. Only issued after a real second-factor success.
@@ -239,8 +277,10 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
     // Forgot-password from the sign-in screen: request is public + always 200 (no account enumeration);
     // consume redeems the emailed single-use token and sets the new password. Change-password (below,
     // under /me) is the authed self-service flow. All three were previously front-end-only fakes.
-    admin.post('/auth/password-reset/request', async (req: FastifyRequest) => staffSvc.requestPasswordReset(body(req), { ip: req.ip ?? null }));
-    admin.post('/auth/password-reset/consume', async (req: FastifyRequest) => staffSvc.consumePasswordReset(body(req), { ip: req.ip ?? null }));
+    // TRI-1061: per-IP throttle on both — request triggers an email send (anti-spam/enumeration),
+    // consume redeems a token (defence-in-depth even though tokens are 256-bit).
+    admin.post('/auth/password-reset/request', mfaRouteOpts, async (req: FastifyRequest) => staffSvc.requestPasswordReset(body(req), { ip: req.ip ?? null }));
+    admin.post('/auth/password-reset/consume', mfaRouteOpts, async (req: FastifyRequest) => staffSvc.consumePasswordReset(body(req), { ip: req.ip ?? null }));
 
     admin.get('/me', { preHandler: auth }, async (req: FastifyRequest) => {
       const s = req.staff!;
@@ -344,6 +384,7 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
       if (req.mfaEnrollPending) {
         const sid = req.cookies?.[cfg.adminCookieName];
         if (sid) await clearMfaEnrollPending(db, sid);
+        await resetFailedLogins(db, req.staff!.id); // full session established → clear accumulated failures
         const s = req.staff!;
         // TRI-983: an enroll-gated login can also carry the "trust this device" intent (it was stored on
         // the half-auth session at login). The factor is now confirmed, so honor it the same way the

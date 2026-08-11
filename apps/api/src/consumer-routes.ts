@@ -15,6 +15,7 @@ import {
   createUserSession, revokeUserSession, setUserCookie, clearUserCookie, makeRequireUser, resolveUserSession,
   resolvePendingUserSession, clearUserMfaPending,
 } from './consumer-auth.ts';
+import { audit, accountLockedUntil, recordFailedLogin, recordMfaFailure, lockoutMessage } from './auth.ts';
 import { createMediaService, MediaError } from './media.ts';
 import { createStorage, type Storage } from './storage.ts';
 import { createAvatarService, AvatarError, AVATAR_MAX_BYTES } from './avatar.ts';
@@ -100,15 +101,40 @@ export function registerConsumer(app: FastifyInstance, db: Db, cfg: Config, stor
     // Reads the pending session from the cookie, verifies the authenticator/recovery code, clears the
     // pending flag, and returns the same { user, linkedBookings } a normal login would. 401 if there's no
     // pending challenge or the code is wrong (the pending session is left intact so the user can retry).
-    api.post('/auth/mfa', async (req: FastifyRequest, reply: FastifyReply) => {
+    api.post('/auth/mfa', authRateLimit, async (req: FastifyRequest, reply: FastifyReply) => {
       const sid = req.cookies?.[cfg.consumer.cookieName];
       const pending = sid ? await resolvePendingUserSession(db, sid) : null;
       if (!pending) {
         return reply.code(401).send({ error: { code: 'no_challenge', message: 'No pending sign-in to verify. Please sign in again.' } });
       }
+      // TRI-1061: MFA failures feed the same per-account lockout as password failures — reject a locked
+      // account before spending a verify and kill the half-auth cookie so it can't be reused. The lock
+      // helpers take a snake_case row; resolvePendingUserSession hands back camelCase, so adapt once here.
+      const lockRow = { id: pending.userId, failed_login_count: pending.failedLoginCount, locked_until: pending.lockedUntil };
+      const lockedUntil = accountLockedUntil(lockRow);
+      if (lockedUntil) {
+        await revokeUserSession(db, pending.sessionId);
+        clearUserCookie(reply, cfg);
+        await audit(db, { actorType: 'user', actorId: pending.userId, action: 'user.login_locked', targetType: 'user_account', targetId: pending.userId, after: { via: 'mfa' }, ip: req.ip ?? null });
+        return reply.code(429).send({ error: { code: 'account_locked', message: lockoutMessage(lockedUntil) } });
+      }
       const b = (body(req) ?? {}) as { code?: unknown };
       const ok = await mfaSvc.verifyChallenge(pending.userId, String(b.code ?? ''));
       if (!ok) {
+        // TRI-1061: bump BOTH the per-account lockout (same counter as a password miss — mig 030) and the
+        // per-session cap. The account lock stops IP-rotating guessers; the session cap forces a full
+        // re-login even from a single IP.
+        const justLocked = await recordFailedLogin(db, lockRow, 'user_account');
+        const cap = await recordMfaFailure(db, pending.sessionId);
+        await audit(db, { actorType: 'user', actorId: pending.userId, action: 'user.mfa_failed', targetType: 'user_account', targetId: pending.userId, after: { attempts: cap.count, locked: !!justLocked }, ip: req.ip ?? null });
+        if (justLocked) {
+          clearUserCookie(reply, cfg);
+          return reply.code(429).send({ error: { code: 'account_locked', message: lockoutMessage(justLocked) } });
+        }
+        if (cap.revoked) {
+          clearUserCookie(reply, cfg);
+          return reply.code(401).send({ error: { code: 'too_many_attempts', message: 'Too many incorrect codes. Please sign in again.' } });
+        }
         return reply.code(401).send({ error: { code: 'invalid_code', message: 'That code did not match. Try again, or use a recovery code.' } });
       }
       await clearUserMfaPending(db, cfg, pending.sessionId);
@@ -125,14 +151,17 @@ export function registerConsumer(app: FastifyInstance, db: Db, cfg: Config, stor
 
     // ── Password reset (public; request is always 200 to avoid user enumeration) ──
     api.post('/auth/password-reset/request', authRateLimit, async (req: FastifyRequest) => svc.requestPasswordReset(body(req), ipOf(req)));
-    api.post('/auth/password-reset/consume', async (req: FastifyRequest) => svc.consumePasswordReset(body(req), ipOf(req)));
+    // TRI-1061: throttle consume too (defence-in-depth; the token is 256-bit but the endpoint was unthrottled).
+    api.post('/auth/password-reset/consume', authRateLimit, async (req: FastifyRequest) => svc.consumePasswordReset(body(req), ipOf(req)));
 
     // ── Email verification (TRI-941) ──
     // Consume is public — the emailed link carries the single-use token; the FE /verify-email page POSTs it.
-    api.post('/auth/verify-email', async (req: FastifyRequest) => svc.verifyEmail(body(req), ipOf(req)));
+    // TRI-1061: per-IP throttle the token-consume too (defence-in-depth over the opaque token).
+    api.post('/auth/verify-email', authRateLimit, async (req: FastifyRequest) => svc.verifyEmail(body(req), ipOf(req)));
     // Resend is public but session-aware: an authed caller resends to their own account; otherwise the
-    // caller passes { email } and always gets { ok: true } (no enumeration). Rate-limited in the service.
-    api.post('/auth/resend-verification', async (req: FastifyRequest) => {
+    // caller passes { email } and always gets { ok: true } (no enumeration). It has a per-account service
+    // throttle (60s); TRI-1061 adds a per-IP limit on top to stop cross-account enumeration/email spam.
+    api.post('/auth/resend-verification', authRateLimit, async (req: FastifyRequest) => {
       const sid = req.cookies?.[cfg.consumer.cookieName];
       const account = sid ? await resolveUserSession(db, cfg, sid) : null;
       const b = (body(req) ?? {}) as { email?: unknown };

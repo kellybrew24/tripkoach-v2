@@ -9,7 +9,10 @@
 import { randomBytes, createHash } from 'node:crypto';
 import type { Db } from './db.ts';
 import type { Config } from './config.ts';
-import { hashPassword, verifyPassword, audit } from './auth.ts';
+import {
+  hashPassword, verifyPassword, audit,
+  accountLockedUntil, recordFailedLogin, resetFailedLogins, lockoutMessage,
+} from './auth.ts';
 import { revokeAllUserSessions } from './consumer-auth.ts';
 import { sendEmail, type SendOptions } from './email.ts';
 import { avatarUrlFor } from './avatar.ts';
@@ -257,9 +260,20 @@ export function createConsumerService(db: Db, cfg: Config) {
     if (!email || !password) throw validation('email and password are required');
 
     const u = (await db.query(`SELECT * FROM user_account WHERE lower(email) = $1 AND deleted_at IS NULL`, [email])).rows[0];
+    // TRI-1061: a locked account (5 consecutive password OR MFA failures — mig 030) is rejected before
+    // the argon2 verify. Only a real row can be locked, so this leaks nothing an unlocked account doesn't.
+    const lockedUntil = accountLockedUntil(u);
+    if (lockedUntil) {
+      await audit(db, { actorType: 'user', actorId: u.id, action: 'user.login_locked', targetType: 'user_account', targetId: u.id, after: { email }, ip: meta.ip ?? null });
+      throw new ConsumerError('account_locked', lockoutMessage(lockedUntil), 429);
+    }
     const ok = u && u.password_hash && (await verifyPassword(password, u.password_hash));
     if (!ok) {
-      await audit(db, { actorType: 'user', actorId: u?.id ?? null, action: 'user.login_failed', targetType: 'user_account', targetId: u?.id ?? null, after: { email }, ip: meta.ip ?? null });
+      // TRI-1061: count the miss into the same per-account lockout MFA failures feed. Unknown emails
+      // can't be locked (no row), matching the pre-existing enumeration-safe behaviour.
+      const justLocked = u ? await recordFailedLogin(db, u, 'user_account') : null;
+      await audit(db, { actorType: 'user', actorId: u?.id ?? null, action: 'user.login_failed', targetType: 'user_account', targetId: u?.id ?? null, after: { email, locked: !!justLocked }, ip: meta.ip ?? null });
+      if (justLocked) throw new ConsumerError('account_locked', lockoutMessage(justLocked), 429);
       throw new ConsumerError('invalid_credentials', 'That email and password do not match.', 401);
     }
     // TRI-1029: password is correct, but a 2FA-enabled account isn't logged in until the second factor
@@ -275,6 +289,10 @@ export function createConsumerService(db: Db, cfg: Config) {
   /** Link guest bookings + audit the login + return the { user, linkedBookings } envelope. Shared by the
    *  direct (no-2FA) login and the post-challenge completion (TRI-1029). */
   async function finalizeLogin(u: any, meta: { ip?: string | null }) {
+    // TRI-1061: a fully-completed login (direct, or post-MFA via completeMfaLogin) clears the shared
+    // password/MFA failure counter. We deliberately do NOT reset in the mfaRequired branch above — a
+    // correct password alone must not let an attacker wipe the counter between wrong-code guesses.
+    await resetFailedLogins(db, u.id, 'user_account');
     const linked = await linkGuestBookings(db, u.id, u.email);
     await audit(db, { actorType: 'user', actorId: u.id, action: 'user.login', targetType: 'user_account', targetId: u.id, after: linked ? { linkedBookings: linked } : undefined, ip: meta.ip ?? null });
     return { user: profileDTO(u), linkedBookings: linked };
