@@ -47,6 +47,16 @@ function optName(b: Body): string | null {
   if (v.length > 200) throw new ValidationError('"name" is too long', 'name');
   return v.trim();
 }
+// TRI-1079: optional contact phone. Free-text (dial-code + national digits) to match the DS
+// PhoneInput, which stores the phone as a single string; empty → null (clears the field).
+function optPhone(b: Body): string | null {
+  const v = b.phone;
+  if (v == null || v === '') return null;
+  if (typeof v !== 'string') throw new ValidationError('"phone" must be a string', 'phone');
+  const t = v.trim();
+  if (t.length > 40) throw new ValidationError('"phone" is too long', 'phone');
+  return t || null;
+}
 function reqRole(b: Body, field = 'role'): Role {
   const v = b[field];
   if (typeof v !== 'string' || !(ROLES as readonly string[]).includes(v)) {
@@ -73,6 +83,7 @@ export function createStaffService(db: Db, cfg: Config) {
       id: r.id,
       name,
       email: r.email,
+      phone: r.phone ?? null,
       role: r.role,
       status: r.status,
       jobTitle: r.job_title ?? null,
@@ -437,15 +448,16 @@ export function createStaffService(db: Db, cfg: Config) {
     const set = (col: string, val: unknown) => { params.push(val); sets.push(`${col} = $${params.length}`); };
 
     if (body.name !== undefined) set('name', optName(body));
+    if (body.phone !== undefined) set('phone', optPhone(body)); // TRI-1079: self-editable contact phone
     if (body.jobTitle !== undefined) {
       if (actorRole !== 'admin') throw new AdminError('forbidden', 'only admins may set their own job title', 403);
       set('job_title', typeof body.jobTitle === 'string' ? body.jobTitle.trim().slice(0, 200) || null : null);
     }
 
-    if (!sets.length) throw new ValidationError('no updatable fields provided (name, jobTitle)');
+    if (!sets.length) throw new ValidationError('no updatable fields provided (name, phone, jobTitle)');
     params.push(id);
     await db.query(`UPDATE staff_user SET ${sets.join(', ')}, updated_at=now() WHERE id=$${params.length}`, params);
-    await audit(db, { actorId: id, action: 'staff.update_self', targetType: 'staff_user', targetId: id, before: { name: cur.name, job_title: cur.job_title }, after: { name: body.name ?? cur.name, job_title: body.jobTitle ?? cur.job_title }, ip: null });
+    await audit(db, { actorId: id, action: 'staff.update_self', targetType: 'staff_user', targetId: id, before: { name: cur.name, phone: cur.phone, job_title: cur.job_title }, after: { name: body.name ?? cur.name, phone: body.phone ?? cur.phone, job_title: body.jobTitle ?? cur.job_title }, ip: null });
     return staffDTO(await getStaffRow(id));
   }
 

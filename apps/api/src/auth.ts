@@ -23,6 +23,7 @@ export interface StaffContext {
   id: string;
   email: string;
   name: string | null;
+  phone: string | null;
   role: 'admin' | 'operator' | 'viewer';
   jobTitle: string | null;
   permissions: Set<string>;
@@ -141,7 +142,7 @@ export async function clearMfaEnrollPending(db: Db, sessionId: string): Promise<
 export async function resolveSession(db: Db, cfg: Config, sessionId: string): Promise<StaffContext | null> {
   if (!sessionId) return null;
   const { rows } = await db.query<any>(
-    `SELECT s.id AS session_id, u.id, u.email, u.name, u.role, u.job_title, u.status
+    `SELECT s.id AS session_id, u.id, u.email, u.name, u.phone, u.role, u.job_title, u.status
        FROM session s
        JOIN staff_user u ON u.id = s.subject_id
       WHERE s.id = $1 AND s.subject_type = 'staff'
@@ -161,7 +162,7 @@ export async function resolveSession(db: Db, cfg: Config, sessionId: string): Pr
   await db.query(`UPDATE staff_user SET last_active_at = now() WHERE id = $1`, [r.id]);
 
   return {
-    id: r.id, email: r.email, name: r.name ?? null, role: r.role, jobTitle: r.job_title ?? null,
+    id: r.id, email: r.email, name: r.name ?? null, phone: r.phone ?? null, role: r.role, jobTitle: r.job_title ?? null,
     permissions: await permissionsFor(db, r.role),
   };
 }
@@ -281,10 +282,10 @@ export function makeRequireAuthAllowingEnroll(db: Db, cfg: Config) {
       const enroll = await resolveEnrollPendingSession(db, sid);
       if (enroll) {
         const { rows } = await db.query<any>(
-          `SELECT id, email, name, role, job_title FROM staff_user WHERE id = $1`, [enroll.staffId]);
+          `SELECT id, email, name, phone, role, job_title FROM staff_user WHERE id = $1`, [enroll.staffId]);
         const u = rows[0];
         if (u) {
-          req.staff = { id: u.id, email: u.email, name: u.name ?? null, role: u.role, jobTitle: u.job_title ?? null,
+          req.staff = { id: u.id, email: u.email, name: u.name ?? null, phone: u.phone ?? null, role: u.role, jobTitle: u.job_title ?? null,
             permissions: await permissionsFor(db, u.role) };
           req.mfaEnrollPending = true;
           return;

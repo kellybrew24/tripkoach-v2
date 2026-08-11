@@ -912,12 +912,13 @@ function AccountProfileAdmin({ go, user }) {
   const u = user || { name: "Kwame Boateng", role: "Admin", rawRole: "admin", initials: "KB", email: "kwame@tripkoach.com", jobTitle: null };
   const isAdmin = (u.rawRole || "").toLowerCase() === "admin";
   const [nameVal, setNameVal] = React.useState(u.name || "");
+  const [phoneVal, setPhoneVal] = React.useState(u.phone || ""); // TRI-1079: phone was a no-op fake — now round-trips
   const [titleVal, setTitleVal] = React.useState(u.jobTitle || "");
   const touch = () => setDirty(true);
 
   function saveProfile() {
     if (!LIVE || !window.TK_ADMIN_API) { setDirty(false); setToast("Profile saved"); return; }
-    const patch = { name: nameVal.trim() || undefined };
+    const patch = { name: nameVal.trim() || undefined, phone: phoneVal.trim() };
     if (isAdmin) patch.jobTitle = titleVal.trim() || null;
     setSaving(true);
     window.TK_ADMIN_API.patchMe(patch).then(function () {
@@ -949,7 +950,7 @@ function AccountProfileAdmin({ go, user }) {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-4)" }}>
           <FormField id="ap-name" label="Full name"><Input value={nameVal} onChange={e => { setNameVal(e.target.value); touch(); }} /></FormField>
           <FormField id="ap-email" label="Work email"><Input type="email" defaultValue={u.email} readOnly /></FormField>
-          <FormField id="ap-phone" label="Phone"><PhoneInput id="ap-phone" onChange={touch} /></FormField>
+          <FormField id="ap-phone" label="Phone"><PhoneInput id="ap-phone" value={phoneVal} onChange={e => { setPhoneVal(e.target.value); touch(); }} /></FormField>
           <FormField id="ap-title" label="Job title" optional hint={isAdmin ? undefined : "Set by your admin"}><Input placeholder="Operations lead" value={titleVal} onChange={e => { setTitleVal(e.target.value); touch(); }} disabled={!isAdmin} /></FormField>
         </div>
       </div></div>

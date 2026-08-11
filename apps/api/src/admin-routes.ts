@@ -211,7 +211,7 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
     admin.get('/me', { preHandler: auth }, async (req: FastifyRequest) => {
       const s = req.staff!;
       return {
-        staff: { id: s.id, email: s.email, name: s.name, role: s.role, jobTitle: s.jobTitle },
+        staff: { id: s.id, email: s.email, name: s.name, phone: s.phone, role: s.role, jobTitle: s.jobTitle },
         permissions: [...s.permissions],
         preferences: await staffSvc.getPreferences(s.id),
       };
