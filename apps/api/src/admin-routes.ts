@@ -325,7 +325,16 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
 
     // ── Role → permission matrix (TRI-1011) — the RBAC the guards actually enforce. users.manage gates both.
     admin.get('/roles/permissions', perm('users.manage'), async () => svc.getRolePermissions());
-    admin.put('/roles/permissions', perm('users.manage'), async (req) => svc.setRolePermissions(body(req), actorOf(req)));
+    // TRI-1065 (item 4, A01/F5): editing the matrix is an admin-tier action. `users.manage` alone is not
+    // enough — an operator granted users.manage could otherwise self-escalate the operator role (grant it
+    // settings.manage / payments.refund / users.manage). Only the built-in `admin` role (which already
+    // holds every permission) may rewrite the matrix; the perm() guard stays as defence in depth.
+    admin.put('/roles/permissions', perm('users.manage'), async (req: FastifyRequest) => {
+      if (req.staff!.role !== 'admin') {
+        throw new AdminError('forbidden', 'Only an administrator can edit role permissions.', 403);
+      }
+      return svc.setRolePermissions(body(req), actorOf(req));
+    });
 
     // ── Invite accept (PUBLIC — the opaque token is the credential; no session) ──
     admin.get('/staff/accept', async (req) => ({ invite: await staffSvc.previewInvite(qStr(query(req), 'token') ?? '') }));

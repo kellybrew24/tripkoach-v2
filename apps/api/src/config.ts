@@ -173,6 +173,12 @@ export function loadConfig(): Config {
   // REQUIRES Secure, so under plain-HTTP local testing (COOKIE_SECURE=false) we fall back to the bare name
   // (a __Host- cookie set over HTTP is silently dropped by the browser, which would break login).
   const cookieSecure = process.env.COOKIE_SECURE ? process.env.COOKIE_SECURE === 'true' : true;
+  // TRI-1065 (item 7, A05/A02): a single stray COOKIE_SECURE=false in the prod env would silently drop
+  // Secure on every session cookie (and disable the __Host- prefix). Refuse to boot rather than serve
+  // downgradeable session cookies in production. (Dev/local plain-HTTP testing is unaffected.)
+  if (process.env.NODE_ENV === 'production' && process.env.COOKIE_SECURE === 'false') {
+    throw new Error('COOKIE_SECURE=false is not permitted when NODE_ENV=production — session cookies must be Secure.');
+  }
   const hostPrefix = cookieSecure ? '__Host-' : '';
   return {
     // DevOps (TRI-862) proxies /api/* verbatim → 127.0.0.1:3020 on the dev box. Match that by default.

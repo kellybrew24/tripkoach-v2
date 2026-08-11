@@ -574,6 +574,25 @@ export function createBookingService(
         // Already confirmed — idempotent no-op; don't re-send the confirmation email.
         return { ref: pay.booking_ref, status: pay.booking_status, paymentState: pay.payment_state, justConfirmed: false };
       }
+
+      // TRI-1065 (item 5, A08-2): defence-in-depth amount reconciliation. A valid-HMAC charge.success (or a
+      // paystack.verify result) must carry the exact pesewa amount + currency we asked Paystack to charge.
+      // If it doesn't, refuse to confirm and record the mismatch rather than trusting the event. Exploiting
+      // this needs the Paystack secret (hence LOW), but we no longer confirm a booking we can't reconcile.
+      const r = (raw ?? {}) as { amount?: unknown; currency?: unknown };
+      const gotAmount = Number(r.amount);
+      const wantAmount = pay.ghs_amount_minor != null ? Number(pay.ghs_amount_minor) : null;
+      const gotCurrency = typeof r.currency === 'string' ? r.currency.toUpperCase() : null;
+      const wantCurrency = pay.currency ? String(pay.currency).toUpperCase() : null;
+      const amountMismatch = wantAmount != null && Number.isFinite(gotAmount) && gotAmount !== wantAmount;
+      const currencyMismatch = wantCurrency != null && gotCurrency != null && gotCurrency !== wantCurrency;
+      if (amountMismatch || currencyMismatch) {
+        console.error(
+          `[booking] payment reconciliation mismatch for ref=${reference}: ` +
+          `got ${gotAmount} ${gotCurrency ?? '?'}, expected ${wantAmount} ${wantCurrency ?? '?'} — refusing to confirm`);
+        throw new BookingError('amount_mismatch', 'Payment amount does not match the expected charge.', 409);
+      }
+
       await q.query(
         `UPDATE payment SET status = 'paid', provider_ref = $2, raw = $3 WHERE id = $1`,
         [pay.id, providerRef, JSON.stringify(raw)]);

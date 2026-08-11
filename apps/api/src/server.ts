@@ -61,6 +61,27 @@ export function buildServer(db: Db, cfg: Config, paystack?: PaystackClient, stor
   // Read-only for consumer routes → /api/v1 responses are unchanged.
   app.register(cookie);
 
+  // ── TRI-1065 (item 1, A05/F4) · Root-level error handler ────────────────────────────────────────
+  // The public read routes below (/regions, /tours, /blog, …) have no per-route try/catch, so without
+  // this an unexpected throw would serialise err.message straight to the client. The admin/consumer
+  // realms set their own handlers (encapsulated), so this only governs the root context. Map the typed
+  // service errors we may surface here to the shared { error: { code, message } } envelope; everything
+  // else becomes a generic 500 with a server-side log — no internal detail leaks.
+  app.setErrorHandler((err: any, _req, reply) => {
+    if (err instanceof BookingError) {
+      return reply.code(err.httpStatus).send({ error: { code: err.code, message: err.message } });
+    }
+    if (err instanceof ReviewError) {
+      return reply.code(err.httpStatus).send({ error: { code: err.code, message: err.message, field: err.field } });
+    }
+    // Malformed JSON body etc. surface as a 400 from Fastify's parser — answer a generic bad_request.
+    if (err?.statusCode === 400) {
+      return reply.code(400).send({ error: { code: 'bad_request', message: 'Malformed request.' } });
+    }
+    app.log.error(err);
+    return reply.code(500).send({ error: { code: 'internal', message: 'Internal error' } });
+  });
+
   // TRI-1054 [SEC-H2]: brute-force protection for the admin login. Registered global:false so only
   // routes that opt in (config.rateLimit — currently just POST /api/admin/auth/login) are throttled;
   // every other endpoint is untouched. The in-memory store is per-instance, which is fine for the
