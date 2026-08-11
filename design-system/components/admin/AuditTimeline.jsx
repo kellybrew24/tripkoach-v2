@@ -11,7 +11,14 @@ export function AuditTimeline({ events = [] }) {
             <Icon name={ICON[e.type] || "info"} size={13} />
           </span>
           <div className="tk-timeline__body">
-            <span dangerouslySetInnerHTML={{ __html: e.text }} />
+            {/* TRI-1066 (A03): escape `text` by default so a future caller that
+                passes an unescaped user-controlled string (customer name, enquiry
+                body, …) can't inject markup. Only `html` is rendered raw — an
+                explicit opt-in for callers that intentionally pass trusted markup
+                (e.g. the audit screen bolds the actor via escapeHtml-built HTML). */}
+            {e.html != null
+              ? <span dangerouslySetInnerHTML={{ __html: e.html }} />
+              : <span>{e.text}</span>}
             <div className="tk-timeline__meta">{e.actor ? e.actor + " · " : ""}{e.time}</div>
           </div>
         </li>

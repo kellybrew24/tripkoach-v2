@@ -8,6 +8,17 @@ const __ds_scope = {};
 
 (__ds_ns.__errors = __ds_ns.__errors || []);
 
+// util/escapeHtml.js
+// TRI-1066: single canonical HTML escaper shared by both apps (admin audit
+// summaries, web printable receipt). Escapes the full set of HTML-significant
+// characters so it is safe in both element-content and attribute contexts.
+try { (() => {
+function escapeHtml(v) {
+  return String(v == null ? "" : v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+Object.assign(__ds_scope, { escapeHtml });
+})(); } catch (e) { __ds_ns.__errors.push({ path: "util/escapeHtml.js", error: String((e && e.message) || e) }); }
+
 // components/actions/Spinner.jsx
 try { (() => {
 function Spinner({
@@ -1313,11 +1324,12 @@ function AuditTimeline({
     size: 13
   })), /*#__PURE__*/React.createElement("div", {
     className: "tk-timeline__body"
-  }, /*#__PURE__*/React.createElement("span", {
+    // TRI-1066 (A03): escape `text` by default (React child); only `html` renders raw (explicit opt-in for trusted markup).
+  }, e.html != null ? /*#__PURE__*/React.createElement("span", {
     dangerouslySetInnerHTML: {
-      __html: e.text
+      __html: e.html
     }
-  }), /*#__PURE__*/React.createElement("div", {
+  }) : /*#__PURE__*/React.createElement("span", null, e.text), /*#__PURE__*/React.createElement("div", {
     className: "tk-timeline__meta"
   }, e.actor ? e.actor + " · " : "", e.time)))));
 }
@@ -19073,5 +19085,7 @@ __ds_ns.Logo = __ds_scope.Logo;
 __ds_ns.Pagination = __ds_scope.Pagination;
 
 __ds_ns.Tabs = __ds_scope.Tabs;
+
+__ds_ns.escapeHtml = __ds_scope.escapeHtml;
 
 })();
