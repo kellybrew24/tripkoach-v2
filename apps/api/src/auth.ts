@@ -55,6 +55,52 @@ export async function verifyPassword(password: string, encodedHash: string | nul
   }
 }
 
+// ── TRI-1054: brute-force account lockout ────────────────────────────────────
+// Server-side lockout backing the (previously cosmetic) "attempts left" UI on the admin sign-in
+// screen. After LOGIN_MAX_ATTEMPTS consecutive failed password attempts the account is locked for
+// LOGIN_LOCK_MINUTES; any successful authentication clears the counter. This is the per-account,
+// spoof-resistant half of SEC-H2 — the per-IP @fastify/rate-limit on the login route is the other.
+export const LOGIN_MAX_ATTEMPTS = 5;
+export const LOGIN_LOCK_MINUTES = 15;
+
+type LockableRow = { failed_login_count?: number | null; locked_until?: string | Date | null };
+
+/** The active lock expiry for this staff row, or null when it is not currently locked. */
+export function accountLockedUntil(u: LockableRow | null | undefined): Date | null {
+  if (!u?.locked_until) return null;
+  const until = u.locked_until instanceof Date ? u.locked_until : new Date(u.locked_until);
+  return until.getTime() > Date.now() ? until : null;
+}
+
+/** Record a failed password attempt against a known staff row. A stale lock (already elapsed) resets
+ *  the counter first, so each lock window starts fresh. On reaching the threshold the row is locked
+ *  for LOGIN_LOCK_MINUTES. Returns the new lock expiry when the account just locked, else null. */
+export async function recordFailedLogin(db: Db, u: { id: string } & LockableRow): Promise<Date | null> {
+  const stale = accountLockedUntil(u) == null && u.locked_until != null;
+  const base = stale ? 0 : (u.failed_login_count ?? 0);
+  const newCount = base + 1;
+  const doLock = newCount >= LOGIN_MAX_ATTEMPTS;
+  const { rows } = await db.query<{ locked_until: Date | null }>(
+    `UPDATE staff_user
+        SET failed_login_count = $2,
+            locked_until = CASE WHEN $3 THEN now() + ($4 * interval '1 minute') ELSE NULL END,
+            updated_at = now()
+      WHERE id = $1
+      RETURNING locked_until`,
+    [u.id, newCount, doLock, LOGIN_LOCK_MINUTES],
+  );
+  return doLock && rows[0]?.locked_until ? new Date(rows[0].locked_until) : null;
+}
+
+/** Clear the failed-attempt counter and any lock after a successful authentication. */
+export async function resetFailedLogins(db: Db, staffId: string): Promise<void> {
+  await db.query(
+    `UPDATE staff_user SET failed_login_count = 0, locked_until = NULL, updated_at = now()
+      WHERE id = $1 AND (failed_login_count <> 0 OR locked_until IS NOT NULL)`,
+    [staffId],
+  );
+}
+
 // ── Permission resolution ────────────────────────────────────────────────────
 // admin is all-locked-on in the app (per the 006 comment); operator/viewer consult the role_permission matrix.
 export async function permissionsFor(db: Db, role: string): Promise<Set<string>> {

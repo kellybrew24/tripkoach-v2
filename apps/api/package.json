@@ -4,7 +4,9 @@
   "private": true,
   "description": "TripKoach v2 API — clean-room Fastify + TypeScript service (TRI-857 / Phase 1: TRI-860). Serves the v2 SPAs from a fresh Postgres schema. No v1 assets.",
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "dev": "node --experimental-strip-types --watch src/index.ts",
@@ -20,6 +22,7 @@
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.0",
+    "@fastify/rate-limit": "^10.3.0",
     "fastify": "^5.11.0",
     "hash-wasm": "^4.11.0",
     "pg": "^8.13.0"

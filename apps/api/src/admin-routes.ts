@@ -13,6 +13,7 @@ import {
   makeRequireAuth, makeRequirePermission, audit, type Permission,
   verifyTrustedDevice, issueTrustedDevice, sessionWasTrusted,
   revokeTrustedDevices, setTrustCookie, clearTrustCookie,
+  accountLockedUntil, recordFailedLogin, resetFailedLogins,
 } from './auth.ts';
 import { createAdminService, AdminError, ValidationError } from './admin.ts';
 import type { NotificationService } from './notifications.ts';
@@ -63,6 +64,17 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
   const qStr = (q: Record<string, unknown>, k: string) => (q[k] != null ? String(q[k]) : undefined);
   const qNum = (q: Record<string, unknown>, k: string) => (q[k] != null ? Number(q[k]) : undefined);
 
+  // TRI-1054: per-IP throttle on the login route. @fastify/rate-limit is registered global:false in
+  // server.ts; the limit only applies where a route opts in via config.rateLimit. Off under `test` so
+  // the suites can log in repeatedly from loopback.
+  const loginRouteOpts: Record<string, unknown> = cfg.env === 'test'
+    ? {}
+    : { config: { rateLimit: { max: 5, timeWindow: '15 minutes' } } };
+  const lockedMessage = (until: Date): string => {
+    const mins = Math.max(1, Math.ceil((until.getTime() - Date.now()) / 60_000));
+    return `Too many failed attempts — this account is locked. Try again in about ${mins} minute${mins === 1 ? '' : 's'}.`;
+  };
+
   app.register(async (admin) => {
     // Map service errors to the shared { error: { code, message } } envelope.
     admin.setErrorHandler((err: any, _req, reply) => {
@@ -85,12 +97,19 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
       if ((err as any).statusCode === 400) {
         return reply.code(400).send({ error: { code: 'bad_request', message: err.message } });
       }
+      // TRI-1054: @fastify/rate-limit throws a 429 Error when the per-IP login limit is exceeded.
+      if ((err as any).statusCode === 429) {
+        return reply.code(429).send({ error: { code: 'rate_limited', message: err.message || 'Too many attempts. Please wait and try again.' } });
+      }
       admin.log.error(err);
       return reply.code(500).send({ error: { code: 'internal', message: 'Internal error' } });
     });
 
     // ── AuthN ────────────────────────────────────────────────────────────────
-    admin.post('/auth/login', async (req: FastifyRequest, reply: FastifyReply) => {
+    // TRI-1054 [SEC-H2]: per-IP rate limit (5 / 15 min) via @fastify/rate-limit + a per-account
+    // failed-attempt lockout (see auth.ts). loginRouteOpts is empty under `test` so the smoke/e2e
+    // suites — which log in many times from one loopback IP — aren't throttled.
+    admin.post('/auth/login', loginRouteOpts, async (req: FastifyRequest, reply: FastifyReply) => {
       const b = (req.body ?? {}) as Record<string, unknown>;
       const email = typeof b.email === 'string' ? b.email.trim().toLowerCase() : '';
       const password = typeof b.password === 'string' ? b.password : '';
@@ -98,11 +117,26 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
         return reply.code(400).send({ error: { code: 'validation', message: 'email and password are required' } });
       }
       const u = (await db.query(`SELECT * FROM staff_user WHERE lower(email) = $1`, [email])).rows[0];
+
+      // Reject an already-locked account before spending an argon2 verify. Only a real row can be
+      // locked, so this reveals nothing an unlocked account's differing behaviour wouldn't.
+      const lockedUntil = accountLockedUntil(u);
+      if (lockedUntil) {
+        await audit(db, { actorId: u.id, action: 'staff.login_locked', targetType: 'staff_user', targetId: u.id, after: { email }, ip: req.ip ?? null });
+        return reply.code(429).send({ error: { code: 'account_locked', message: lockedMessage(lockedUntil) } });
+      }
+
       const ok = u && u.status === 'active' && (await verifyPassword(password, u.password_hash));
       if (!ok) {
-        await audit(db, { actorId: u?.id ?? null, action: 'staff.login_failed', targetType: 'staff_user', targetId: u?.id ?? null, after: { email }, ip: req.ip ?? null });
+        const justLocked = u ? await recordFailedLogin(db, u) : null;
+        await audit(db, { actorId: u?.id ?? null, action: 'staff.login_failed', targetType: 'staff_user', targetId: u?.id ?? null, after: { email, locked: !!justLocked }, ip: req.ip ?? null });
+        if (justLocked) {
+          return reply.code(429).send({ error: { code: 'account_locked', message: lockedMessage(justLocked) } });
+        }
         return reply.code(401).send({ error: { code: 'invalid_credentials', message: 'That email and password do not match.' } });
       }
+      // Authenticated: clear any accumulated failed-attempt state before establishing the session.
+      await resetFailedLogins(db, u.id);
       const trust = b.trustDevice === true || b.trust === true;
       // TRI-983: a device the operator previously chose to trust skips the second factor for 30 days. We
       // check the long-lived tk_admin_trust cookie against a live trusted_device row scoped to THIS staff

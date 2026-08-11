@@ -3,6 +3,7 @@
 
 import Fastify, { type FastifyInstance } from 'fastify';
 import cookie from '@fastify/cookie';
+import rateLimit from '@fastify/rate-limit';
 import type { Config } from './config.ts';
 import type { Db } from './db.ts';
 import { listRegions, listTours, getTourBySlug, getAvailability, getReviews } from './catalog.ts';
@@ -42,7 +43,10 @@ function sendBookingError(reply: any, err: unknown): any {
 }
 
 export function buildServer(db: Db, cfg: Config, paystack?: PaystackClient, storage?: Storage): FastifyInstance {
-  const app = Fastify({ logger: cfg.env !== 'test' });
+  // trustProxy so req.ip is the real client (Caddy proxies /api/* and sets X-Forwarded-For); without
+  // it every request looks like it came from 127.0.0.1 and the per-IP login rate limit (TRI-1054)
+  // would bucket all operators together. Also gives the audit log real client IPs.
+  const app = Fastify({ logger: cfg.env !== 'test', trustProxy: true });
 
   // Keep the raw JSON body available for Paystack webhook HMAC verification, while still parsing JSON
   // for every other route. (Signature is computed over the exact bytes Paystack sent.)
@@ -56,6 +60,22 @@ export function buildServer(db: Db, cfg: Config, paystack?: PaystackClient, stor
   // Cookie support for the admin session (parses Cookie header; adds reply.setCookie/clearCookie).
   // Read-only for consumer routes → /api/v1 responses are unchanged.
   app.register(cookie);
+
+  // TRI-1054 [SEC-H2]: brute-force protection for the admin login. Registered global:false so only
+  // routes that opt in (config.rateLimit — currently just POST /api/admin/auth/login) are throttled;
+  // every other endpoint is untouched. The in-memory store is per-instance, which is fine for the
+  // single API process. Errors are shaped into the app's { error: { code, message } } envelope.
+  // The plugin THROWS the errorResponseBuilder result, so it must be a real Error carrying statusCode
+  // 429 (a plain object would land in the admin error handler with no status → 500). The admin realm's
+  // setErrorHandler maps that 429 into the { error: { code: 'rate_limited', ... } } envelope.
+  app.register(rateLimit, {
+    global: false,
+    errorResponseBuilder: (_req, context) => {
+      const err = new Error(`Too many attempts. Try again in about ${Math.ceil(context.ttl / 1000)} seconds.`);
+      (err as any).statusCode = 429;
+      return err;
+    },
+  });
 
   // Transactional booking-lifecycle emails (TRI-889 P5.2). Inert when the email transport is unconfigured
   // (no RESEND_API_KEY / EMAIL_FROM) — every send renders + logs 'skipped'. Never throws to its callers.
