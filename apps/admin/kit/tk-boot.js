@@ -454,6 +454,13 @@
     revokeStaffInvite: function (id) { return req("POST", "/staff/" + encodeURIComponent(id) + "/revoke-invite"); },
     disableStaff: function (id) { return req("POST", "/staff/" + encodeURIComponent(id) + "/disable"); },
     enableStaff: function (id) { return req("POST", "/staff/" + encodeURIComponent(id) + "/enable"); },
+    // TRI-1083 (TRI-1080 §1 / TRI-1082 backend): admin recovery actions on ANOTHER admin's account.
+    // All guarded server-side by perm('users.manage'). If the backend requires a fresh re-auth for
+    // these sensitive writes it returns 401/403 with a step-up code; `body` carries the confirm code
+    // on retry. recovery-codes returns { recoveryCodes: [...] } shown ONCE — never persisted here.
+    clearStaffLockout: function (id, body) { return req("POST", "/staff/" + encodeURIComponent(id) + "/clear-lockout", body); },
+    regenerateStaffRecoveryCodes: function (id, body) { return req("POST", "/staff/" + encodeURIComponent(id) + "/recovery-codes", body); },
+    resetStaffMfa: function (id, body) { return req("POST", "/staff/" + encodeURIComponent(id) + "/reset-mfa", body); },
     // TRI-1011: role→permission matrix. GET hydrates the RBAC toggles; PUT persists operator/viewer edits
     // (admin is locked all-on server-side). Guards resolve permissions per request, so edits take effect live.
     getRolePermissions: function () { return req("GET", "/roles/permissions"); },

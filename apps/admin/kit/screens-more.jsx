@@ -131,11 +131,16 @@ function PortalRowMenu({ label = "Row actions", items = [], width = 220 }) {
           style={{ position: "fixed", top: pos.top, left: pos.left, width, zIndex: 900, maxHeight: 320, overflowY: "auto" }}>
           {items.map((it, i) => it.divider
             ? <div key={i} style={{ height: 1, background: "var(--border-subtle)", margin: "4px 0" }} />
-            : <button key={i} type="button" role="menuitem" className="tk-menu__item"
-                style={it.danger ? { color: "var(--danger-fg)" } : undefined}
-                onClick={() => { setOpen(false); it.onClick && it.onClick(); }}>
-                {it.icon && <Icon name={it.icon} size={16} />}{it.label}
-              </button>)}
+            : it.section
+              // TRI-1083: non-interactive muted group label (e.g. "Recover access") — lets the flat
+              // PortalRowMenu read as a grouped section without a nested-flyout primitive (TRI-1081 §1).
+              ? <div key={i} className="tk-caption tk-muted" role="presentation"
+                  style={{ padding: "6px 12px 2px", fontWeight: 700, fontSize: 10.5, letterSpacing: "0.05em", textTransform: "uppercase" }}>{it.label}</div>
+              : <button key={i} type="button" role="menuitem" className="tk-menu__item"
+                  style={it.danger ? { color: "var(--danger-fg)" } : undefined}
+                  onClick={() => { setOpen(false); it.onClick && it.onClick(); }}>
+                  {it.icon && <Icon name={it.icon} size={16} />}{it.label}
+                </button>)}
         </div>, document.body)}
     </span>
   );
@@ -481,12 +486,118 @@ function PromosAdmin({ go }) {
   );
 }
 
+/* ── Admin recovery (TRI-1083 · spec TRI-1081 · plan TRI-1080 §1) ──────────
+ * Three recovery actions an admin runs on ANOTHER admin's account, launched from
+ * the Staff row menu's "Recover access" group: clear a lockout, regenerate the
+ * target's MFA recovery codes, and force MFA re-enrolment. Reuses Modal/Alert/
+ * Button + the canonical MFA codes grid — no new DS primitives. Regenerated codes
+ * are shown exactly ONCE and are never stored client-side; reopening the action
+ * mints a fresh set (and re-invalidates). If the TRI-1082 backend requires a fresh
+ * re-auth for these sensitive writes it answers 401/403 with a step-up code — we
+ * then collect a current authenticator/recovery code for the ACTING admin and retry. */
+function RecoverAccessModal({ kind, target, onClose, onToast }) {
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState(null);
+  const [stepUp, setStepUp] = React.useState(false);
+  const [reauth, setReauth] = React.useState("");
+  const [codes, setCodes] = React.useState(null); // null → confirm step; array → codes revealed once
+  const [copied, setCopied] = React.useState(false);
+  if (!kind || !target) return null;
+  const name = target.name || target.email || "this admin";
+  const firstName = String(target.name || "").trim().split(/\s+/)[0] || name;
+  const revealed = kind === "codes" && Array.isArray(codes);
+
+  // Backend contract for step-up isn't final (TRI-1082 in flight) — match on a few plausible
+  // codes/messages so the re-auth prompt still appears whatever exact shape it lands on.
+  const isStepUp = (e) => {
+    if (!e || (e.status !== 401 && e.status !== 403)) return false;
+    const c = String(e.code || "").toLowerCase();
+    if (c.indexOf("step_up") !== -1 || c.indexOf("stepup") !== -1 || c.indexOf("reauth") !== -1 || c.indexOf("re_auth") !== -1 || c.indexOf("mfa_required") !== -1) return true;
+    return /step[-_ ]?up|re-?auth|confirm it'?s you/i.test(String(e.message || ""));
+  };
+  const call = (apiFn, onOk) => {
+    if (busy) return;
+    setBusy(true); setErr(null);
+    const extra = stepUp && reauth.trim() ? { reauthCode: reauth.trim(), code: reauth.trim() } : undefined;
+    Promise.resolve(apiFn(target.id, extra)).then(
+      (res) => { setBusy(false); onOk(res); },
+      (e) => {
+        setBusy(false);
+        if (isStepUp(e)) { setErr(stepUp && reauth ? "That code didn't match — enter a current code and try again." : null); setStepUp(true); return; }
+        if (e && e.status === 401) { window.dispatchEvent(new CustomEvent("tk-admin-401")); return; } // real session expiry → login
+        setErr((e && e.message) || "Something went wrong. Please try again.");
+      }
+    );
+  };
+  const errBlock = err ? <Alert tone="error" title="Couldn't complete that" style={{ marginBottom: "var(--space-3)" }}>{err}</Alert> : null;
+  const stepUpField = (stepUp && !revealed) ? <div style={{ marginTop: "var(--space-3)" }}>
+    <Alert tone="info" title="Confirm it's you">For this sensitive action, enter a current authenticator or recovery code for your own account.</Alert>
+    <FormField id="ra-reauth" label="Your authenticator or recovery code"><Input id="ra-reauth" value={reauth} onChange={(e) => setReauth(e.target.value)} placeholder="123456" autoComplete="one-time-code" /></FormField>
+  </div> : null;
+
+  if (kind === "clear") return (
+    <Modal open title={"Clear lockout for " + name + "?"} onClose={busy ? undefined : onClose}
+      actions={<><Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button>
+        <Button disabled={busy} onClick={() => call(window.TK_ADMIN_API.clearStaffLockout, () => { onToast("Lockout cleared for " + name + "."); onClose(); })}>{busy ? "Clearing…" : "Clear lockout"}</Button></>}>
+      {errBlock}
+      <p className="tk-body-sm tk-muted">This resets the failed-login counter and removes the lock, letting {firstName} sign in again right away. Their password and two-factor are unchanged.</p>
+      {stepUpField}
+    </Modal>
+  );
+
+  if (kind === "reset") return (
+    <Modal open tone="danger" title={"Reset two-factor for " + name + "?"} onClose={busy ? undefined : onClose}
+      actions={<><Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button>
+        <Button variant="danger" disabled={busy} onClick={() => call(window.TK_ADMIN_API.resetStaffMfa, () => { onToast("Two-factor reset — " + name + " must re-enrol at next sign-in."); onClose(); })}>{busy ? "Resetting…" : "Reset two-factor"}</Button></>}>
+      {errBlock}
+      <Alert tone="warning" title="This removes their authenticator app">At their next sign-in {firstName} will be required to set up two-factor again from scratch.</Alert>
+      <p className="tk-body-sm tk-muted" style={{ marginTop: "var(--space-3)" }}>{firstName} still needs their own password to finish re-enrolment — this doesn't sign them in for you or reveal their password.</p>
+      {stepUpField}
+    </Modal>
+  );
+
+  // kind === "codes" — step 1 confirm
+  if (!revealed) return (
+    <Modal open title={"Regenerate recovery codes for " + name} onClose={busy ? undefined : onClose}
+      actions={<><Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button>
+        <Button disabled={busy} onClick={() => call(window.TK_ADMIN_API.regenerateStaffRecoveryCodes, (res) => setCodes((res && res.recoveryCodes) || []))}>{busy ? "Generating…" : "Generate codes"}</Button></>}>
+      {errBlock}
+      <Alert tone="warning" title="This replaces their current codes">This creates 10 new one-time recovery codes and immediately invalidates {firstName}'s current codes. You'll see the new codes once, on the next screen — we never store them in a readable form, so they can't be recovered later.</Alert>
+      {stepUpField}
+    </Modal>
+  );
+
+  // kind === "codes" — step 2, codes revealed ONCE. No backdrop/Escape close (onClose no-op); only Done exits.
+  return (
+    <Modal open title={"New recovery codes for " + name} onClose={function () {}}
+      actions={<Button onClick={() => { onToast("Recovery codes regenerated for " + name + "."); onClose(); }}>Done</Button>}>
+      <Alert tone="success" title="New codes generated">10 new codes generated. {firstName}'s old codes no longer work.</Alert>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: "12px 14px", background: "var(--bg-sunken)", borderRadius: "var(--radius-md)", marginTop: "var(--space-3)" }}>
+        {codes.map((c) => <span key={c} className="tk-num" style={{ fontSize: 14, letterSpacing: "0.04em", color: "var(--text-strong)" }}>{c}</span>)}
+        <span className="tk-caption tk-muted" style={{ gridColumn: "1 / -1" }}>These will not be shown again.</span>
+      </div>
+      <Button variant="secondary" size="sm" iconStart={copied ? "check" : "copy"} style={{ marginTop: 10 }}
+        onClick={() => { try { navigator.clipboard && navigator.clipboard.writeText(codes.join("\n")); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch (_) {} }}>{copied ? "Copied" : "Copy codes"}</Button>
+      <Alert tone="warning" title="Deliver over a trusted channel" style={{ marginTop: "var(--space-3)" }}>Give these to {firstName} in person or over their known-good email. Anyone who has a code can pass two-factor as {firstName}. Don't paste them into chat or tickets.</Alert>
+    </Modal>
+  );
+}
+
 /* ── Users & roles ─────────────────────────────────────── */
 function UsersAdmin({ go }) {
   const A = window.TK_ADMIN;
   const [invite, setInvite] = React.useState(false);
   const [edit, setEdit] = React.useState(null);
   const [toast, setToast] = React.useState(null);
+  // TRI-1083: admin recovery actions are admin-only (users.manage) and hidden on the acting
+  // admin's own row (self-recovery goes through More → Security). `recover` = { kind, target }.
+  const [recover, setRecover] = React.useState(null);
+  const _sess = window.TK_ADMIN_SESSION || {};
+  const _me = _sess.staff || {};
+  const myId = _me.id;
+  const _perms = _sess.permissions;
+  const canManageUsers = String(_sess.role || _me.role || "").toLowerCase() === "admin"
+    || (Array.isArray(_perms) ? _perms.indexOf("users.manage") !== -1 : !!(_perms && _perms["users.manage"]));
   // TRI-996: screens read the mutable A.staff global directly, so a successful
   // write must both mutate the shared record AND force a re-render (TRI-980
   // pattern) — run only from the TK_ADMIN_ACT success callback, never on failure.
@@ -521,6 +632,15 @@ function UsersAdmin({ go }) {
       items.push({ label: "Re-enable account", icon: "circle-check-big", onClick: () => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.enableStaff(r.id), () => { applyStaff(r.id, { status: "active" }); setToast(r.name + " re-enabled"); }) });
     else if (r.status !== "invited")
       items.push({ label: "Disable account", icon: "log-out", danger: true, onClick: () => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.disableStaff(r.id), () => { applyStaff(r.id, { status: "disabled" }); setToast(r.name + " disabled — signed out everywhere"); }) });
+    // TRI-1083: "Recover access" group — admin-only, and never on your own row or a pending invite
+    // (an invited account has no lockout/MFA state yet). Inline grouped section (TRI-1081 §1), not a flyout.
+    if (canManageUsers && r.id !== myId && r.status !== "invited") {
+      items.push({ divider: true });
+      items.push({ section: true, label: "Recover access" });
+      items.push({ label: "Clear lockout", icon: "lock", onClick: () => setRecover({ kind: "clear", target: r }) });
+      items.push({ label: "Regenerate recovery codes", icon: "rotate-ccw", onClick: () => setRecover({ kind: "codes", target: r }) });
+      items.push({ label: "Force MFA re-enrollment", icon: "shield-check", danger: true, onClick: () => setRecover({ kind: "reset", target: r }) });
+    }
     return items;
   };
   const saveEdit = () => {
@@ -618,6 +738,7 @@ function UsersAdmin({ go }) {
           {edit.status === "invited" && <Alert tone="info" title="Invite pending">This person hasn't accepted their invite yet. Role and name changes apply now; use “Resend invite” from the row menu if they need a fresh link.</Alert>}
         </>}
       </Drawer>
+      {recover && <RecoverAccessModal kind={recover.kind} target={recover.target} onClose={() => setRecover(null)} onToast={setToast} />}
       {toast && <div style={{ position: "fixed", bottom: 20, insetInline: 0, display: "flex", justifyContent: "center", zIndex: 800 }}><Toast tone="success" onClose={() => setToast(null)}>{toast}</Toast></div>}
     </div>
   );
