@@ -119,6 +119,7 @@ a.btn{display:block;background:#1E1C1A;color:#FFFFFF;text-decoration:none;font-w
     </table>
   </td></tr>
   <tr><td class="pad" style="padding:22px 28px 0"><a class="btn" href="{{manageUrl}}">View this booking</a></td></tr>
+  <tr><td class="pad" style="padding:18px 28px 0"><p class="mut" style="margin:0"><strong style="color:#8A8078">Staying safe:</strong> You’ll only ever pay on Paystack’s secured checkout page. TripKoach will never ask for your card number, PIN or one-time code by email, phone or text.</p></td></tr>
   <tr><td style="background:#1E1C1A;padding:20px 28px"><p style="margin:0;color:#A8A096;font-size:12px;line-height:1.6">TripKoach Ghana Ltd · Accra · Prices in US dollars (USD)</p></td></tr>
 </table>
 </body></html>`,
@@ -133,6 +134,8 @@ Travellers: {{travellers}}
 Total due: {{totalDisplay}} (charged in US dollars — final quote confirmed by your koach)
 
 View this booking: {{manageUrl}}
+
+Staying safe: You'll only ever pay on Paystack's secured checkout page. TripKoach will never ask for your card number, PIN or one-time code by email, phone or text.
 
 TripKoach Ghana Ltd · Accra · Prices in US dollars (USD)`,
   },
@@ -182,6 +185,7 @@ a.btn{display:block;background:#1E1C1A;color:#FFFFFF;text-decoration:none;font-w
     </table>
   </td></tr>
   <tr><td class="pad" style="padding:22px 28px 0"><a class="btn" href="{{manageUrl}}">View this booking</a></td></tr>
+  <tr><td class="pad" style="padding:18px 28px 0"><p class="mut" style="margin:0"><strong style="color:#8A8078">Staying safe:</strong> You’ll only ever pay on Paystack’s secured checkout page. TripKoach will never ask for your card number, PIN or one-time code by email, phone or text.</p></td></tr>
   <tr><td style="background:#1E1C1A;padding:20px 28px"><p style="margin:0;color:#A8A096;font-size:12px;line-height:1.6">TripKoach Ghana Ltd · Accra · Prices in US dollars (USD)</p></td></tr>
 </table>
 </body></html>`,
@@ -197,6 +201,8 @@ Total paid: {{totalDisplay}}
 
 Your guide will call the day before with pickup details.
 View this booking: {{manageUrl}}
+
+Staying safe: You'll only ever pay on Paystack's secured checkout page. TripKoach will never ask for your card number, PIN or one-time code by email, phone or text.
 
 TripKoach Ghana Ltd · Accra · Prices in US dollars (USD)`,
   },
@@ -338,6 +344,7 @@ a.btn{display:block;background:#1E1C1A;color:#FFFFFF;text-decoration:none;font-w
     </table>
   </td></tr>
   <tr><td class="pad" style="padding:22px 28px 0"><a class="btn" href="{{manageUrl}}">Try payment again</a></td></tr>
+  <tr><td class="pad" style="padding:18px 28px 0"><p class="mut" style="margin:0"><strong style="color:#8A8078">Staying safe:</strong> Retry only from the button above — you’ll finish on Paystack’s secured checkout page. TripKoach will never ask for your card number, PIN or one-time code by email, phone or text.</p></td></tr>
   <tr><td style="background:#1E1C1A;padding:20px 28px"><p style="margin:0;color:#A8A096;font-size:12px;line-height:1.6">TripKoach Ghana Ltd · Accra · Prices in US dollars (USD)</p></td></tr>
 </table>
 </body></html>`,
@@ -351,6 +358,8 @@ Departure: {{departureLabel}}
 Amount outstanding: {{totalDisplay}}
 
 Try payment again: {{manageUrl}}
+
+Staying safe: Retry only from the link above — you'll finish on Paystack's secured checkout page. TripKoach will never ask for your card number, PIN or one-time code by email, phone or text.
 
 TripKoach Ghana Ltd · Accra · Prices in US dollars (USD)`,
   },

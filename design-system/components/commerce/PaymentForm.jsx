@@ -58,7 +58,7 @@ export function PaymentForm({
             </p>
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", background: "var(--bg-subtle)", borderRadius: "var(--radius-md)" }}>
               <Icon name="shield-check" size={16} style={{ color: "var(--success-fg)", flex: "none" }} />
-              <span className="tk-caption" style={{ margin: 0 }}>TripKoach never sees or stores your card details — Paystack handles them.</span>
+              <span className="tk-caption" style={{ margin: 0 }}>TripKoach never sees or stores your card details — Paystack handles them. You’ll only ever pay on Paystack’s secured page; we never ask for card details, PIN or one-time codes by email, phone or text.</span>
             </div>
             {state === "processing" && (
               <div className="tk-row" style={{ gap: 10, color: "var(--text-muted)" }} role="status">

@@ -2625,7 +2625,7 @@ function PaymentForm({
     style: {
       margin: 0
     }
-  }, "TripKoach never sees or stores your card details \u2014 Paystack handles them.")), state === "processing" && /*#__PURE__*/React.createElement("div", {
+  }, "TripKoach never sees or stores your card details \u2014 Paystack handles them. You\u2019ll only ever pay on Paystack\u2019s secured page; we never ask for card details, PIN or one-time codes by email, phone or text.")), state === "processing" && /*#__PURE__*/React.createElement("div", {
     className: "tk-row",
     style: {
       gap: 10,
