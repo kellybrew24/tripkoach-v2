@@ -1,5 +1,5 @@
 const NS = window.TripKoachDesignSystem_c9e4af;
-const { AuditTimeline, Button, EmptyState, Spinner, SearchField, Select } = NS;
+const { AuditTimeline, Button, EmptyState, Spinner, SearchField, Select, escapeHtml } = NS;
 
 // Map a backend audit action string to one of AuditTimeline's known icon types.
 // Unmatched actions fall back to a neutral "note".
@@ -19,9 +19,11 @@ function auditTime(iso) {
   if (isNaN(d.getTime())) return String(iso);
   return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
-function auditEsc(s) {
-  return String(s == null ? "" : s).replace(/[<>&]/g, (c) => (c === "<" ? "&lt;" : c === ">" ? "&gt;" : "&amp;"));
-}
+// TRI-1066: use the one shared DS escaper (NS.escapeHtml) instead of a local
+// ad-hoc copy. `auditText` builds trusted markup (the actor is bolded) so it is
+// passed to AuditTimeline via the `html` opt-in; every interpolated, possibly
+// user-controlled value goes through auditEsc first.
+const auditEsc = escapeHtml;
 
 // TRI-997 · Turn a raw "<entity>.<verb>" action code into a plain-English past-
 // tense phrase. `SELF` verbs describe an action on the actor themselves (sign in,
@@ -186,7 +188,8 @@ function AuditLogAdmin({ go }) {
 
   const events = items.map((it) => ({
     type: auditType(it.action),
-    text: auditText(it),
+    // `html` (not `text`): auditText returns escaped markup with the actor bolded.
+    html: auditText(it),
     actor: it.actorEmail || null,
     time: auditTime(it.createdAt),
   }));
