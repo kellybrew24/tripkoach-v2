@@ -92,6 +92,28 @@ export function buildServer(db: Db, cfg: Config, paystack?: PaystackClient, stor
   app.get('/api/health', health);
 
   app.register(async (api) => {
+    // TRI-1063 [A01/F2]: the /api/v1 public plugin has no error handler of its own, so shape
+    // @fastify/rate-limit's thrown 429 (from the guest booking-lookup route below) into the public
+    // { error: { code, message } } envelope. Any other error is re-thrown so Fastify's default handling
+    // is unchanged for every other /api/v1 read route.
+    api.setErrorHandler((err: any, _req, reply) => {
+      if (err?.statusCode === 429) {
+        return reply.code(429).send({ error: { code: 'rate_limited', message: err.message || 'Too many requests. Please wait and try again.' } });
+      }
+      throw err;
+    });
+
+    // TRI-1063 [A01/F2]: per-IP throttle for the UNAUTHENTICATED guest booking lookup (GET /bookings/:ref).
+    // The ref is only ~30 bits of randomBytes entropy and the endpoint discloses booking PII, so without a
+    // limit the space is probeable. @fastify/rate-limit is registered global:false in server.ts (trustProxy →
+    // req.ip is the real client behind Caddy); a route is throttled only where it opts in via config.rateLimit.
+    // 100 / minute per IP sits far above the FE confirmation poll (≤6 GETs per booking + receipt reloads) yet
+    // makes brute-forcing the ref space hopeless. Empty under `test` so the smoke/e2e suites can poll freely
+    // from one loopback IP (mirrors the TRI-1054/1055 opt-in). Payment init/verify keep their own POST paths.
+    const bookingLookupRateLimit: Record<string, unknown> = cfg.env === 'test'
+      ? {}
+      : { config: { rateLimit: { max: 100, timeWindow: '1 minute' } } };
+
     // ── TRI-939 · Public config for the consumer SPA. Surfaces the customer-facing USD→GHS
     //    DISPLAY rate (settings.usd_to_ghs_display_rate) so the web app converts "from GH₵…"
     //    figures from a single settings-driven source instead of a hardcoded constant that
@@ -215,7 +237,7 @@ export function buildServer(db: Db, cfg: Config, paystack?: PaystackClient, stor
       } catch (e) { return sendBookingError(reply, e); }
     });
 
-    api.get('/bookings/:ref', async (req, reply) => {
+    api.get('/bookings/:ref', bookingLookupRateLimit, async (req, reply) => {
       const { ref } = req.params as { ref: string };
       const out = await bookings.getByRef(ref);
       return out ?? notFound(reply, `booking "${ref}" not found`);
