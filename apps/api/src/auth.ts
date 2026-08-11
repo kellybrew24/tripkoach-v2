@@ -218,13 +218,15 @@ export function setSessionCookie(reply: FastifyReply, cfg: Config, sessionId: st
     httpOnly: true,
     secure: cfg.adminCookieSecure,
     sameSite: cfg.adminCookieSameSite,
-    path: cfg.adminPrefix,
+    // TRI-1056: Path MUST be '/' for the __Host- prefix (browsers reject a prefixed cookie scoped to a
+    // sub-path). Sent only to the admin origin; httpOnly keeps it off the SPA's JS.
+    path: '/',
     maxAge: cfg.adminSessionIdleMinutes * 60,
   });
 }
 
 export function clearSessionCookie(reply: FastifyReply, cfg: Config): void {
-  reply.clearCookie(cfg.adminCookieName, { path: cfg.adminPrefix });
+  reply.clearCookie(cfg.adminCookieName, { path: '/' });
 }
 
 // ── Trusted devices (TRI-983 · "Trust this device for 30 days") ───────────────

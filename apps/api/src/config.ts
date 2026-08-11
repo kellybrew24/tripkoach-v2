@@ -168,6 +168,12 @@ export function loadConfig(): Config {
   const databaseUrl = process.env.DATABASE_URL;
   // Default to pglite when no DATABASE_URL is present so local dev/smoke needs no external Postgres.
   const dbDriver = (process.env.DB_DRIVER as 'pg' | 'pglite') || (databaseUrl ? 'pg' : 'pglite');
+  // TRI-1056 (SEC-H4): session cookies carry the __Host- prefix so browsers accept them ONLY when set with
+  // Secure + Path=/ + no Domain — that closes subdomain cookie-injection and forces HTTPS. The prefix
+  // REQUIRES Secure, so under plain-HTTP local testing (COOKIE_SECURE=false) we fall back to the bare name
+  // (a __Host- cookie set over HTTP is silently dropped by the browser, which would break login).
+  const cookieSecure = process.env.COOKIE_SECURE ? process.env.COOKIE_SECURE === 'true' : true;
+  const hostPrefix = cookieSecure ? '__Host-' : '';
   return {
     // DevOps (TRI-862) proxies /api/* verbatim → 127.0.0.1:3020 on the dev box. Match that by default.
     port: Number(process.env.PORT || 3020),
@@ -191,14 +197,14 @@ export function loadConfig(): Config {
       chargeRateOverride: num(process.env.PAYSTACK_USD_TO_GHS_RATE),
     },
     adminPrefix: process.env.ADMIN_PREFIX || '/api/admin',
-    adminCookieName: process.env.ADMIN_COOKIE_NAME || 'tk_admin_session',
-    adminCookieSecure: process.env.COOKIE_SECURE ? process.env.COOKIE_SECURE === 'true' : true,
-    adminCookieSameSite: (process.env.COOKIE_SAMESITE as 'lax' | 'strict' | 'none') || 'lax',
+    adminCookieName: process.env.ADMIN_COOKIE_NAME || `${hostPrefix}tk_admin_session`,
+    adminCookieSecure: cookieSecure,
+    adminCookieSameSite: (process.env.COOKIE_SAMESITE as 'lax' | 'strict' | 'none') || 'strict',
     adminSessionIdleMinutes: Number(process.env.ADMIN_SESSION_IDLE_MINUTES || 30),
     adminTrustCookieName: process.env.ADMIN_TRUST_COOKIE_NAME || 'tk_admin_trust',
     trustedDeviceDays: num(process.env.TRUSTED_DEVICE_DAYS) ?? 30,
     consumer: {
-      cookieName: process.env.USER_COOKIE_NAME || 'tk_user_session',
+      cookieName: process.env.USER_COOKIE_NAME || `${hostPrefix}tk_user_session`,
       sessionIdleMinutes: num(process.env.USER_SESSION_IDLE_MINUTES) ?? 20_160, // 14 days
       resetTokenTtlMinutes: num(process.env.PASSWORD_RESET_TTL_MINUTES) ?? 60,
       verifyTokenTtlMinutes: num(process.env.EMAIL_VERIFY_TTL_MINUTES) ?? 1_440, // 24h
