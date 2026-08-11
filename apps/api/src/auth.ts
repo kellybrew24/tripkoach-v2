@@ -182,9 +182,10 @@ export function clearSessionCookie(reply: FastifyReply, cfg: Config): void {
   reply.clearCookie(cfg.adminCookieName, { path: cfg.adminPrefix });
 }
 
-// ── Trusted devices (TRI-983 · "Trust this device for 30 days") ───────────────
+// ── Trusted devices (TRI-983 · "Trust this device" · TRI-1085: window standardized to 14 days) ────────
 // A trusted-device credential lets an MFA-enabled staffer skip the TOTP challenge on a device they have
-// already verified, for a fixed 30-day window. It is deliberately SEPARATE from the session cookie: the
+// already verified, for a fixed window (cfg.trustedDeviceDays, 14 days per TRI-1085). It is deliberately
+// SEPARATE from the session cookie: the
 // session is short-lived (30-min sliding idle) and revoked on logout, whereas trust must survive logout
 // and outlive the session. We store only the SHA-256 of the opaque token, scope every check to a single
 // staff_id, and let logout keep the trust (so the next login on this device stays fast).
@@ -200,7 +201,7 @@ export async function sessionWasTrusted(db: Db, sessionId: string): Promise<bool
 }
 
 /** Mint a trusted-device token for this staffer: random 32-byte secret, stored only as its SHA-256 hash
- *  with a 30-day TTL. Returns the RAW token for the caller to drop into the tk_admin_trust cookie. */
+ *  with a TTL of cfg.trustedDeviceDays. Returns the RAW token for the caller to drop into the tk_admin_trust cookie. */
 export async function issueTrustedDevice(
   db: Db, cfg: Config, staffId: string, meta: { ip?: string | null; userAgent?: string | null } = {},
 ): Promise<string> {

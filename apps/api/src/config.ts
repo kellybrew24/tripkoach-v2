@@ -196,7 +196,7 @@ export function loadConfig(): Config {
     adminCookieSameSite: (process.env.COOKIE_SAMESITE as 'lax' | 'strict' | 'none') || 'lax',
     adminSessionIdleMinutes: Number(process.env.ADMIN_SESSION_IDLE_MINUTES || 30),
     adminTrustCookieName: process.env.ADMIN_TRUST_COOKIE_NAME || 'tk_admin_trust',
-    trustedDeviceDays: num(process.env.TRUSTED_DEVICE_DAYS) ?? 30,
+    trustedDeviceDays: num(process.env.TRUSTED_DEVICE_DAYS) ?? 14,
     consumer: {
       cookieName: process.env.USER_COOKIE_NAME || 'tk_user_session',
       sessionIdleMinutes: num(process.env.USER_SESSION_IDLE_MINUTES) ?? 20_160, // 14 days

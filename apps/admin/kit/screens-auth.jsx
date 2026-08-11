@@ -100,7 +100,7 @@ function AdminLogin({ go, state }) {
     });
   };
   return (
-    <AuthFrame foot={<p className="tk-caption" style={{ textAlign: "center", marginTop: "var(--space-6)" }}><Icon name="lock" size={12} /> Protected by two-factor authentication</p>}>
+    <AuthFrame foot={<p className="tk-caption" style={{ textAlign: "center", marginTop: "var(--space-3)" }}><Icon name="lock" size={12} /> Protected by two-factor authentication</p>}>
       <span className="tk-overline" style={{ color: "var(--gold-700)" }}>Staff sign-in</span>
       <h2 className="tk-h2" style={{ marginTop: 6 }}>Sign in to the console</h2>
       <p className="tk-body-sm tk-muted" style={{ marginTop: 4, marginBottom: "var(--space-6)" }}>Use your TripKoach staff account. Personal customer logins won't work here.</p>
@@ -111,7 +111,7 @@ function AdminLogin({ go, state }) {
         <FormField id="a-email" label="Work email"><Input type="email" autoComplete="username" placeholder="you@tripkoach.com" iconStart="mail" disabled={locked} /></FormField>
         <FormField id="a-pw" label="Password" error={wrong ? "Check your password" : undefined}><PasswordInput id="a-pw" disabled={locked} /></FormField>
         <div className="tk-row" style={{ justifyContent: "space-between" }}>
-          <Checkbox id="a-trust" label="Trust this device for 30 days" />
+          <Checkbox id="a-trust" label="Trust this device for 14 days" />
           <Button variant="link" size="sm" type="button" onClick={() => go("reset")}>Forgot password?</Button>
         </div>
         <Button block size="lg" type="submit" disabled={locked || busy}>{busy ? "Signing in…" : "Continue"}</Button>
