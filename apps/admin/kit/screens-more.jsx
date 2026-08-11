@@ -921,7 +921,26 @@ function AccountProfileAdmin({ go, user }) {
     const patch = { name: nameVal.trim() || undefined, phone: phoneVal.trim() };
     if (isAdmin) patch.jobTitle = titleVal.trim() || null;
     setSaving(true);
-    window.TK_ADMIN_API.patchMe(patch).then(function () {
+    window.TK_ADMIN_API.patchMe(patch).then(function (updated) {
+      // TRI-1079 follow-up (Samuel): the PATCH persists (DB) and the value reappears
+      // after a full reload/re-login, but SPA navigation away and back showed the
+      // saved phone/name as lost. Root cause: `user` is derived every render from the
+      // in-memory session (window.TK_ADMIN_SESSION.staff), and this screen seeds its
+      // fields from that via useState on mount — but a successful save never wrote the
+      // fresh values back into the session, so the next remount re-seeded from stale
+      // data. Sync the returned DTO into the session cache so the derived identity
+      // stays current across navigation without a reload.
+      try {
+        var d = (updated && updated.staff) ? updated.staff : updated;
+        var sess = window.TK_ADMIN_SESSION;
+        if (sess && sess.staff && d) {
+          if (d.name !== undefined) sess.staff.name = d.name;
+          if (d.phone !== undefined) sess.staff.phone = d.phone;
+          if (d.jobTitle !== undefined) sess.staff.jobTitle = d.jobTitle;
+        }
+      } catch (_) {}
+      // Refresh the mounted tree so the shell header/avatar reflect the change live.
+      if (window.TK_ADMIN_NOTIFY_MUTATED) window.TK_ADMIN_NOTIFY_MUTATED();
       setDirty(false); setSaving(false); setToast("Profile saved");
     }, function (err) {
       setSaving(false);
