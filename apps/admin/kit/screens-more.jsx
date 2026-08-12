@@ -136,10 +136,14 @@ function PortalRowMenu({ label = "Row actions", items = [], width = 220 }) {
               // PortalRowMenu read as a grouped section without a nested-flyout primitive (TRI-1081 §1).
               ? <div key={i} className="tk-caption tk-muted" role="presentation"
                   style={{ padding: "6px 12px 2px", fontWeight: 700, fontSize: 10.5, letterSpacing: "0.05em", textTransform: "uppercase" }}>{it.label}</div>
+              // TRI-1080 follow-up: disabled items (e.g. "Clear lockout" on a non-locked
+              // account) render inert + muted with an optional trailing hint.
               : <button key={i} type="button" role="menuitem" className="tk-menu__item"
-                  style={it.danger ? { color: "var(--danger-fg)" } : undefined}
-                  onClick={() => { setOpen(false); it.onClick && it.onClick(); }}>
+                  disabled={!!it.disabled}
+                  style={it.disabled ? { opacity: .5, cursor: "not-allowed" } : (it.danger ? { color: "var(--danger-fg)" } : undefined)}
+                  onClick={() => { if (it.disabled) return; setOpen(false); it.onClick && it.onClick(); }}>
                   {it.icon && <Icon name={it.icon} size={16} />}{it.label}
+                  {it.hint && <span className="tk-caption tk-muted" style={{ marginInlineStart: "auto", fontStyle: "italic" }}>{it.hint}</span>}
                 </button>)}
         </div>, document.body)}
     </span>
@@ -637,7 +641,11 @@ function UsersAdmin({ go }) {
     if (canManageUsers && r.id !== myId && r.status !== "invited") {
       items.push({ divider: true });
       items.push({ section: true, label: "Recover access" });
-      items.push({ label: "Clear lockout", icon: "lock", onClick: () => setRecover({ kind: "clear", target: r }) });
+      // TRI-1080 follow-up: only actionable when the account is actually locked; on an
+      // active account it's an inert no-op, so show it disabled with a "Not locked" hint.
+      items.push(r.locked
+        ? { label: "Clear lockout", icon: "lock", onClick: () => setRecover({ kind: "clear", target: r }) }
+        : { label: "Clear lockout", icon: "lock", disabled: true, hint: "Not locked" });
       items.push({ label: "Regenerate recovery codes", icon: "rotate-ccw", onClick: () => setRecover({ kind: "codes", target: r }) });
       items.push({ label: "Force MFA re-enrollment", icon: "shield-check", danger: true, onClick: () => setRecover({ kind: "reset", target: r }) });
     }
@@ -702,7 +710,11 @@ function UsersAdmin({ go }) {
                 <span style={{ flex: "none", width: 32, height: 32, borderRadius: "50%", background: "var(--brand-wash)", color: "var(--brand-gold-deep)", display: "grid", placeItems: "center", fontWeight: 800, fontSize: 12, opacity: r.status === "disabled" ? .5 : 1 }}>{r.initials}</span>{r.name}</span>) },
             { key: "email", header: "Email" },
             { key: "role", header: "Role", render: r => roleBadge(r.role) },
-            { key: "status", header: "Status", render: r => statusBadge(r.status) },
+            { key: "status", header: "Status", render: r => (
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                {statusBadge(r.status)}
+                {r.locked && <span className="tk-badge tk-badge--cancelled" title={r.lockedUntil ? "Locked until " + new Date(r.lockedUntil).toLocaleString() : "Locked"}>Locked</span>}
+              </span>) },
             { key: "last", header: "Last active" },
           ]}
           rows={A.staff} getRowId={r => r.id}

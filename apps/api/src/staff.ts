@@ -88,6 +88,10 @@ export function createStaffService(db: Db, cfg: Config) {
       status: r.status,
       jobTitle: r.job_title ?? null,
       mfaEnabled: !!r.mfa_enabled,
+      // TRI-1080 follow-up: surface lockout state (mig 029/030 cols) so the console
+      // can badge locked admins and only enable "Clear lockout" when actually locked.
+      locked: !!r.locked_until && new Date(r.locked_until).getTime() > Date.now(),
+      lockedUntil: r.locked_until ?? null,
       initials: initials(name || r.email),
       lastActiveAt: r.last_active_at ?? null,
       last: r.last_active_at ? formatReviewDate(r.last_active_at) : '—',
