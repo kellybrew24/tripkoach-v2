@@ -51,11 +51,11 @@
   ];
 
   var staff = [
-    { id:"u1", name:"Kwame Boateng", email:"kwame@tripkoach.com", role:"admin", status:"active", initials:"KB", last:"2 min ago" },
-    { id:"u2", name:"Ama Owusu", email:"ama.o@tripkoach.com", role:"operator", status:"active", initials:"AO", last:"1 hr ago" },
-    { id:"u3", name:"Kofi Adjei", email:"kofi@tripkoach.com", role:"operator", status:"active", initials:"KA", last:"Today, 08:12" },
+    { id:"u1", name:"Kwame Boateng", email:"kwame@tripkoach.com", role:"admin", status:"active", initials:"KB", last:"2 min ago", mfaEnabled:true },
+    { id:"u2", name:"Ama Owusu", email:"ama.o@tripkoach.com", role:"operator", status:"active", initials:"AO", last:"1 hr ago", mfaEnabled:true },
+    { id:"u3", name:"Kofi Adjei", email:"kofi@tripkoach.com", role:"operator", status:"active", initials:"KA", last:"Today, 08:12", mfaEnabled:false, locked:true, lockedUntil:"2026-08-12T23:59:00Z" },
     { id:"u4", name:"Efua Sarpong", email:"efua@tripkoach.com", role:"viewer", status:"invited", initials:"ES", last:"—" },
-    { id:"u5", name:"Yaw Darko", email:"yaw@tripkoach.com", role:"operator", status:"disabled", initials:"YD", last:"14 Mar 2026" },
+    { id:"u5", name:"Yaw Darko", email:"yaw@tripkoach.com", role:"operator", status:"disabled", initials:"YD", last:"14 Mar 2026", mfaEnabled:true },
   ];
 
   // Departures across the catalogue with capacity/inventory

@@ -256,6 +256,12 @@
       role: u.role || "viewer", status: u.status || "active", initials: u.initials || initials(u.name),
       jobTitle: pick(u.jobTitle, u.job_title) || "",
       last: pick(u.last, u.lastActive, u.last_active_at, "—"),
+      // TRI-1080: lock + MFA state drive the Staff "Locked"/"2FA" badges and the
+      // "Recover access" row-menu gating. This whitelist mapper drops any DTO field
+      // it doesn't list, so these MUST be forwarded explicitly (TRI-992 lesson).
+      mfaEnabled: !!pick(u.mfaEnabled, u.mfa_enabled, false),
+      locked: !!pick(u.locked, false),
+      lockedUntil: pick(u.lockedUntil, u.locked_until, null),
     };
   }
   function mapCustomer(c) {

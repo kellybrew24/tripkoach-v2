@@ -646,8 +646,17 @@ function UsersAdmin({ go }) {
       items.push(r.locked
         ? { label: "Clear lockout", icon: "lock", onClick: () => setRecover({ kind: "clear", target: r }) }
         : { label: "Clear lockout", icon: "lock", disabled: true, hint: "Not locked" });
-      items.push({ label: "Regenerate recovery codes", icon: "rotate-ccw", onClick: () => setRecover({ kind: "codes", target: r }) });
-      items.push({ label: "Force MFA re-enrollment", icon: "shield-check", danger: true, onClick: () => setRecover({ kind: "reset", target: r }) });
+      // TRI-1080: both MFA actions require the target to actually have 2FA enabled.
+      // Regenerating codes hits a backend 409 ("enable MFA first") when off, and there's
+      // nothing to reset when off — so gate both on r.mfaEnabled with a "2FA not enabled"
+      // hint. Clear lockout stays independent (gated on r.locked above). For a not-yet-
+      // enrolled locked-out admin the right recovery is Clear lockout → they enroll at login.
+      items.push(r.mfaEnabled
+        ? { label: "Regenerate recovery codes", icon: "rotate-ccw", onClick: () => setRecover({ kind: "codes", target: r }) }
+        : { label: "Regenerate recovery codes", icon: "rotate-ccw", disabled: true, hint: "2FA not enabled" });
+      items.push(r.mfaEnabled
+        ? { label: "Force MFA re-enrollment", icon: "shield-check", danger: true, onClick: () => setRecover({ kind: "reset", target: r }) }
+        : { label: "Force MFA re-enrollment", icon: "shield-check", disabled: true, hint: "2FA not enabled" });
     }
     return items;
   };
@@ -685,6 +694,14 @@ function UsersAdmin({ go }) {
   }, []);
   const roleBadge = (r) => ({ admin: <Badge tone="solid">Admin</Badge>, operator: <span className="tk-badge tk-badge--confirmed">Operator</span>, viewer: <Badge tone="neutral">Read-only</Badge> }[r]);
   const statusBadge = (s) => ({ active: <span className="tk-badge tk-badge--confirmed">Active</span>, invited: <span className="tk-badge tk-badge--pending">Invited</span>, disabled: <Badge tone="neutral">Disabled</Badge> }[s]);
+  // TRI-1080: 2FA state per staff row. MFA is org-enforced (TRI-912), so "Off" means
+  // "not yet enrolled" (forced at next login) — muted, not alarming. Pending invites
+  // have no MFA state yet, so we show a dash. This badge also gates the recovery menu.
+  const mfaBadge = (r) => r.status === "invited"
+    ? <span className="tk-muted">—</span>
+    : r.mfaEnabled
+      ? <span className="tk-badge tk-badge--confirmed" title="Two-factor authentication is enabled">On</span>
+      : <span className="tk-badge tk-badge--neutral" title="Not yet enrolled — enforced at next login">Off</span>;
   const toggle = (perm, role) => {
     if (role === "admin") return; // admin is locked all-on; RoleMatrix disables its cells anyway
     const next = !(perms[perm] && perms[perm][role]);
@@ -710,6 +727,7 @@ function UsersAdmin({ go }) {
                 <span style={{ flex: "none", width: 32, height: 32, borderRadius: "50%", background: "var(--brand-wash)", color: "var(--brand-gold-deep)", display: "grid", placeItems: "center", fontWeight: 800, fontSize: 12, opacity: r.status === "disabled" ? .5 : 1 }}>{r.initials}</span>{r.name}</span>) },
             { key: "email", header: "Email" },
             { key: "role", header: "Role", render: r => roleBadge(r.role) },
+            { key: "mfa", header: "2FA", render: r => mfaBadge(r) },
             { key: "status", header: "Status", render: r => (
               <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                 {statusBadge(r.status)}
