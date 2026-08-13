@@ -159,6 +159,7 @@ function CustomersAdmin({ go, state, setState }) {
   const [country, setCountry] = React.useState(null);
   const [band, setBand] = React.useState(null);
   const [menu, setMenu] = React.useState(null);
+  const [sort, setSort] = React.useState(null); // TRI-1097: header sort for the Customers table.
   // TRI-969: the list row only carries summary fields. The full profile
   // (emergency contact, dietary needs, preferences) + the complete booking
   // history come from GET /admin/customers/:id — fetched when the drawer opens.
@@ -202,6 +203,7 @@ function CustomersAdmin({ go, state, setState }) {
   if (q) rows = rows.filter(c => (c.name + c.email + c.country).toLowerCase().includes(q.toLowerCase()));
   if (country) rows = rows.filter(c => c.country === country);
   if (band) { const b = bands.find(x => x.id === band); rows = rows.filter(c => b.test(spend(c.id))); }
+  rows = tkSortRows(rows, sort); // TRI-1097: apply the header sort (name / joined).
   const applied = [];
   if (country) applied.push({ id: "country", label: "Country: " + country, onRemove: () => setCountry(null) });
   if (band) applied.push({ id: "band", label: "Value: " + bands.find(x => x.id === band).label, onRemove: () => setBand(null) });
@@ -251,6 +253,7 @@ function CustomersAdmin({ go, state, setState }) {
           ))}
         </div></>}
         <DataTable onRowClick={(r) => setState({ detailRef: r.id })}
+          sort={sort} onSortChange={setSort}
           columns={[
             { key: "name", header: "Customer", strong: true, sortable: true, render: r => (
               <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -471,7 +474,7 @@ function PromosAdmin({ go }) {
       <Drawer open={!!edit} title={edit && edit.code ? "Edit " + edit.code : "New promo code"} onClose={() => setEdit(null)}
         footer={<><Button variant="secondary" onClick={() => setEdit(null)}>Cancel</Button><Button onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.savePromo({ id: edit && edit.code ? edit.code : undefined, code: (document.getElementById("pc-code") || {}).value, type: (document.getElementById("pc-type") || {}).value || "percent", value: +(((document.getElementById("pc-val") || {}).value) || 0), tours: (document.getElementById("pc-tours") || {}).value, from: (document.getElementById("pc-from") || {}).value, to: (document.getElementById("pc-to") || {}).value, limit: +(((document.getElementById("pc-limit") || {}).value) || 0), active: !!(edit && edit.active), currency: "USD" }), () => { setToast("Promo code saved"); setEdit(null); })}>Save code</Button></>}>
         {edit && <>
-          <FormField id="pc-code" label="Code" help="Uppercase, no spaces"><Input defaultValue={edit.code} placeholder="HARMATTAN10" style={{ textTransform: "uppercase" }} /></FormField>
+          <FormField id="pc-code" label="Code" help="Uppercase, no spaces"><Input defaultValue={edit.code} style={{ textTransform: "uppercase" }} /></FormField>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
             <FormField id="pc-type" label="Type"><Select defaultValue={edit.type} options={[{ value: "percent", label: "Percentage" }, { value: "fixed", label: "Fixed amount" }]} /></FormField>
             <FormField id="pc-val" label="Value"><Input inputMode="numeric" defaultValue={edit.value} iconStart={edit.type === "fixed" ? "wallet" : undefined} /></FormField>
@@ -536,7 +539,7 @@ function RecoverAccessModal({ kind, target, onClose, onToast }) {
   const errBlock = err ? <Alert tone="error" title="Couldn't complete that" style={{ marginBottom: "var(--space-3)" }}>{err}</Alert> : null;
   const stepUpField = (stepUp && !revealed) ? <div style={{ marginTop: "var(--space-3)" }}>
     <Alert tone="info" title="Confirm it's you">For this sensitive action, enter a current authenticator or recovery code for your own account.</Alert>
-    <FormField id="ra-reauth" label="Your authenticator or recovery code"><Input id="ra-reauth" value={reauth} onChange={(e) => setReauth(e.target.value)} placeholder="123456" autoComplete="one-time-code" /></FormField>
+    <FormField id="ra-reauth" label="Your authenticator or recovery code"><Input id="ra-reauth" value={reauth} onChange={(e) => setReauth(e.target.value)} autoComplete="one-time-code" /></FormField>
   </div> : null;
 
   if (kind === "clear") return (
@@ -754,17 +757,17 @@ function UsersAdmin({ go }) {
       </div>
       <Drawer open={invite} title="Invite staff" subtitle="They'll get an email to set a password and enable two-factor." onClose={() => setInvite(false)}
         footer={<><Button variant="secondary" onClick={() => setInvite(false)}>Cancel</Button><Button iconStart="mail" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.inviteStaff({ email: (document.getElementById("iv-email") || {}).value, name: (document.getElementById("iv-name") || {}).value, role: (document.getElementById("iv-role") || {}).value || "operator" }), () => { setToast("Invite sent"); setInvite(false); })}>Send invite</Button></>}>
-        <FormField id="iv-email" label="Work email" required><Input type="email" placeholder="name@tripkoach.com" iconStart="mail" /></FormField>
-        <FormField id="iv-name" label="Full name"><Input placeholder="Ama Owusu" /></FormField>
+        <FormField id="iv-email" label="Work email" required><Input type="email" iconStart="mail" /></FormField>
+        <FormField id="iv-name" label="Full name"><Input /></FormField>
         <FormField id="iv-role" label="Role" help="You can change this later"><Select defaultValue="operator" options={[{ value: "admin", label: "Admin — full access" }, { value: "operator", label: "Operator — day-to-day ops" }, { value: "viewer", label: "Read-only — view but not change" }]} /></FormField>
       </Drawer>
       <Drawer open={!!edit} title="Edit staff member" subtitle={edit ? edit.email : ""} onClose={() => setEdit(null)}
         footer={<><Button variant="secondary" onClick={() => setEdit(null)}>Cancel</Button><Button iconStart="check" onClick={saveEdit}>Save changes</Button></>}>
         {edit && <>
-          <FormField id="se-name" label="Full name"><Input defaultValue={edit.name} placeholder="Ama Owusu" /></FormField>
+          <FormField id="se-name" label="Full name"><Input defaultValue={edit.name} /></FormField>
           <FormField id="se-role" label="Role" help="Changing to Operator or Read-only removes admin access. The last active admin can't be demoted.">
             <Select defaultValue={edit.role} options={[{ value: "admin", label: "Admin — full access" }, { value: "operator", label: "Operator — day-to-day ops" }, { value: "viewer", label: "Read-only — view but not change" }]} /></FormField>
-          <FormField id="se-title" label="Job title" help="Shown on their profile — e.g. Operations Lead"><Input defaultValue={edit.jobTitle} placeholder="Operations Lead" /></FormField>
+          <FormField id="se-title" label="Job title" help="Shown on their profile — e.g. Operations Lead"><Input defaultValue={edit.jobTitle} /></FormField>
           {edit.status === "invited" && <Alert tone="info" title="Invite pending">This person hasn't accepted their invite yet. Role and name changes apply now; use “Resend invite” from the row menu if they need a fresh link.</Alert>}
         </>}
       </Drawer>
@@ -961,7 +964,7 @@ function MfaEnrollDrawer({ open, mode, onClose, onEnabled, setToast }) {
       {step === "confirm" && (
         <>
           <Alert tone="info" title="Confirm it's you">Enter a current authenticator or recovery code. This replaces your existing authenticator with a new one.</Alert>
-          <FormField id="mfa-reconf-code" label="Current code"><Input id="mfa-reconf-code" value={confirmCode} onChange={(e) => setConfirmCode(e.target.value)} placeholder="123456 or recovery code" autoComplete="one-time-code" /></FormField>
+          <FormField id="mfa-reconf-code" label="Current code"><Input id="mfa-reconf-code" value={confirmCode} onChange={(e) => setConfirmCode(e.target.value)} autoComplete="one-time-code" /></FormField>
         </>
       )}
       {step === "scan" && (
@@ -1121,7 +1124,7 @@ function AccountProfileAdmin({ go, user }) {
           <FormField id="ap-name" label="Full name"><Input value={nameVal} onChange={e => { setNameVal(e.target.value); touch(); }} /></FormField>
           <FormField id="ap-email" label="Work email"><Input type="email" defaultValue={u.email} readOnly /></FormField>
           <FormField id="ap-phone" label="Phone"><PhoneInput id="ap-phone" value={phoneVal} onChange={e => { setPhoneVal(e.target.value); touch(); }} /></FormField>
-          <FormField id="ap-title" label="Job title" optional hint={isAdmin ? undefined : "Set by your admin"}><Input placeholder="Operations lead" value={titleVal} onChange={e => { setTitleVal(e.target.value); touch(); }} disabled={!isAdmin} /></FormField>
+          <FormField id="ap-title" label="Job title" optional hint={isAdmin ? undefined : "Set by your admin"}><Input value={titleVal} onChange={e => { setTitleVal(e.target.value); touch(); }} disabled={!isAdmin} /></FormField>
         </div>
       </div></div>
       <div className="tk-card"><div className="tk-card__body" style={{ padding: "var(--space-6)", gap: "var(--space-4)" }}>
@@ -1280,6 +1283,7 @@ function GuidesAdmin({ go }) {
   const [q, setQ] = React.useState("");
   const [region, setRegion] = React.useState("");
   const [status, setStatus] = React.useState("");
+  const [sort, setSort] = React.useState(null); // TRI-1097: header sort for the Guides table.
   const [edit, setEdit] = React.useState(null);
   const [remove, setRemove] = React.useState(null);
   const [toast, setToast] = React.useState(null);
@@ -1351,6 +1355,7 @@ function GuidesAdmin({ go }) {
   if (q) rows = rows.filter(g => (g.name + g.email + g.base).toLowerCase().includes(q.toLowerCase()));
   if (region) rows = rows.filter(g => g.regions.includes(region));
   if (status) rows = rows.filter(g => g.status === status);
+  rows = tkSortRows(rows, sort); // TRI-1097: apply the header sort (Trips led).
   const stBadge = (s) => s === "active" ? <span className="tk-badge tk-badge--confirmed">Active</span> : s === "leave" ? <span className="tk-badge tk-badge--pending">On leave</span> : <Badge tone="neutral">Inactive</Badge>;
   const isNew = edit === "new";
   const g = (edit && edit !== "new") ? edit : null;
@@ -1365,6 +1370,7 @@ function GuidesAdmin({ go }) {
           <span className="tk-caption" style={{ marginInlineStart: "auto" }}>{rows.length} of {guides.length} guides</span>
         </div>
         <DataTable
+          sort={sort} onSortChange={setSort}
           columns={[
             { key: "name", header: "Guide", render: r => (
               <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -1391,18 +1397,18 @@ function GuidesAdmin({ go }) {
 
       <Drawer open={!!edit} title={isNew ? "Add guide" : (g ? g.name : "")} subtitle={isNew ? "Create a guide profile that departures can be assigned to" : (g ? "Based in " + g.base : "")} onClose={() => setEdit(null)}
         footer={<><Button variant="secondary" onClick={() => setEdit(null)}>Cancel</Button><Button iconStart={isNew ? "plus" : "check"} style={{ marginInlineStart: "auto" }} onClick={saveGuide}>{isNew ? "Add guide" : "Save changes"}</Button></>}>
-        <FormField id="g-name" label="Full name" required><Input id="g-name" defaultValue={g ? g.name : ""} placeholder="e.g. Kwame Boateng" /></FormField>
+        <FormField id="g-name" label="Full name" required><Input id="g-name" defaultValue={g ? g.name : ""} /></FormField>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-4)" }}>
-          <FormField id="g-email" label="Email"><Input id="g-email" type="email" defaultValue={g ? g.email : ""} placeholder="name@tripkoach.com" /></FormField>
+          <FormField id="g-email" label="Email"><Input id="g-email" type="email" defaultValue={g ? g.email : ""} /></FormField>
           <FormField id="g-phone" label="Phone"><PhoneInput id="g-phone" defaultValue={g ? g.phone : ""} /></FormField>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-4)" }}>
-          <FormField id="g-base" label="Home base"><Input id="g-base" defaultValue={g ? g.base : ""} placeholder="e.g. Accra" /></FormField>
+          <FormField id="g-base" label="Home base"><Input id="g-base" defaultValue={g ? g.base : ""} /></FormField>
           <FormField id="g-status" label="Status"><Select id="g-status" defaultValue={g ? g.status : "active"} options={[{ value: "active", label: "Active" }, { value: "leave", label: "On leave" }, { value: "disabled", label: "Inactive" }]} /></FormField>
         </div>
-        <FormField id="g-regions" label="Regions covered" help="Comma-separated. Used to match guides to departures."><Input id="g-regions" defaultValue={g ? g.regions.join(", ") : ""} placeholder="Greater Accra, Eastern" /></FormField>
-        <FormField id="g-langs" label="Languages" help="Comma-separated."><Input id="g-langs" defaultValue={g ? g.languages.join(", ") : ""} placeholder="English, Twi, Ga" /></FormField>
-        <FormField id="g-bio" label="Short bio" optional><Textarea id="g-bio" rows={3} defaultValue={g ? g.bio : ""} placeholder="What this guide is known for." /></FormField>
+        <FormField id="g-regions" label="Regions covered" help="Comma-separated. Used to match guides to departures."><Input id="g-regions" defaultValue={g ? g.regions.join(", ") : ""} /></FormField>
+        <FormField id="g-langs" label="Languages" help="Comma-separated."><Input id="g-langs" defaultValue={g ? g.languages.join(", ") : ""} /></FormField>
+        <FormField id="g-bio" label="Short bio" optional><Textarea id="g-bio" rows={3} defaultValue={g ? g.bio : ""} /></FormField>
         {g && <Alert tone="info" title="Assignments">{g.name} has led {g.trips} trips · ★ {g.rating}. Assign them to a departure from Departures → Add departure.</Alert>}
       </Drawer>
 
@@ -1490,7 +1496,7 @@ function ReviewsAdmin({ go }) {
       <Drawer open={!!reply} title="Reply to review" subtitle={reply ? reply.author + " · " + reply.tour : ""} onClose={() => setReply(null)}
         footer={<><Button variant="secondary" onClick={() => setReply(null)}>Cancel</Button><Button iconStart="check" style={{ marginInlineStart: "auto" }} onClick={() => { const v = (document.getElementById("rv-reply") || {}).value || ""; const id = reply && reply.id; window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.replyReview(id, v), () => { applyReply(id, v); setReply(null); setToast("Reply saved — shown publicly under the review"); }); }}>Save reply</Button></>}>
         {reply && <><div className="tk-card" style={{ boxShadow: "none", border: "1px solid var(--border-subtle)", marginBottom: "var(--space-4)" }}><div className="tk-card__body" style={{ padding: "var(--space-4)", gap: 4 }}><AdminStars value={reply.rating} /><p className="tk-body-sm" style={{ margin: 0 }}>{reply.text}</p></div></div>
-        <FormField id="rv-reply" label="Your public reply" hint="Speak as TripKoach. Warm, brief and specific."><Textarea id="rv-reply" rows={4} defaultValue={reply.reply || ""} placeholder="Thank the traveller and add a personal touch." /></FormField></>}
+        <FormField id="rv-reply" label="Your public reply" hint="Speak as TripKoach. Warm, brief and specific."><Textarea id="rv-reply" rows={4} defaultValue={reply.reply || ""} /></FormField></>}
       </Drawer>
       {toast && <div style={{ position: "fixed", bottom: 20, insetInline: 0, display: "flex", justifyContent: "center", zIndex: 800 }}><Toast tone="success" onClose={() => setToast(null)}>{toast}</Toast></div>}
     </div>

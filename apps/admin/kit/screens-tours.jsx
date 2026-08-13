@@ -27,6 +27,7 @@ function ToursAdmin({ go, state, setState }) {
   if (region) rows = rows.filter(t => t.region === region);
   if (cat) rows = rows.filter(t => t.category === cat);
   if (status) rows = rows.filter(t => status === "live" ? t.published : !t.published);
+  rows = tkSortRows(rows, sort); // TRI-1097: DataTable only tracks {key,dir}; apply it here.
   const applied = [];
   if (region) applied.push({ id: "region", label: "Region: " + region, onRemove: () => setRegion(null) });
   if (status) applied.push({ id: "status", label: "Status: " + (status === "live" ? "Live" : "Draft"), onRemove: () => setStatus(null) });
@@ -279,12 +280,12 @@ function TourEdit({ go, state }) {
       <div style={{ maxWidth: 900 }}>
         {loadErr && <Alert tone="warning" title="Couldn't load the full tour">We showed the summary we had. Reload before saving — saving now may overwrite fields that didn't load. Images won't be changed.</Alert>}
         <Section title="Basics" hint="The name, region and category travellers see on the tour card.">
-          <FormField id="e-title" label="Tour title" required><Input defaultValue={t.title} placeholder="Cape Coast Castle & Kakum" onChange={touch} /></FormField>
+          <FormField id="e-title" label="Tour title" required><Input defaultValue={t.title} onChange={touch} /></FormField>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
             <FormField id="e-region" label="Region" required help="Adding a new region here makes it available across the public site.">
               {addingRegion ? (
                 <div style={{ display: "flex", gap: 8 }}>
-                  <Input id="e-region-new" autoFocus value={newRegion} placeholder="e.g. Bono East" onChange={(e) => setNewRegion(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitRegion(); } }} />
+                  <Input id="e-region-new" autoFocus value={newRegion} onChange={(e) => setNewRegion(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitRegion(); } }} />
                   <Button size="sm" iconStart="check" disabled={!newRegion.trim()} onClick={commitRegion}>Add</Button>
                   <Button size="sm" variant="secondary" onClick={() => { setAddingRegion(false); setNewRegion(""); }}>Cancel</Button>
                 </div>
@@ -298,8 +299,8 @@ function TourEdit({ go, state }) {
         </Section>
 
         <Section title="Description" hint="The intro paragraph and the selling points on the tour detail page.">
-          <FormField id="e-blurb" label="Overview" required><Textarea rows={4} defaultValue={t.blurb} onChange={touch} placeholder="What makes this trip worth it?" /></FormField>
-          <FormField id="e-high" label="Highlights" help="One per line. Shown as a ticked list."><Textarea rows={4} onChange={touch} defaultValue={(t.highlights || []).join("\\n")} placeholder={"Guided castle tour\\nKakum canopy walkway"} /></FormField>
+          <FormField id="e-blurb" label="Overview" required><Textarea rows={4} defaultValue={t.blurb} onChange={touch} /></FormField>
+          <FormField id="e-high" label="Highlights" help="One per line. Shown as a ticked list."><Textarea rows={4} onChange={touch} defaultValue={(t.highlights || []).join("\\n")} /></FormField>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
             <FormField id="e-inc" label="Included" help="One per line"><Textarea rows={4} onChange={touch} defaultValue={(t.included || []).join("\\n")} /></FormField>
             <FormField id="e-exc" label="Not included" help="One per line"><Textarea rows={4} onChange={touch} defaultValue={(t.excluded || []).join("\\n")} /></FormField>
@@ -353,14 +354,14 @@ function TourEdit({ go, state }) {
                     <IconButton icon="trash-2" label="Remove track" variant="ghost" size="sm" onClick={() => removeTrack(tr._uid)} />
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                    <FormField id={"trk-name-" + tr._uid} label="Track name" required><Input value={tr.name} onChange={(e) => setTrackField(tr._uid, "name", e.target.value)} placeholder="Classic Capital Loop" /></FormField>
-                    <FormField id={"trk-tag-" + tr._uid} label="Tag" optional help="Short label under the name."><Input value={tr.tag} onChange={(e) => setTrackField(tr._uid, "tag", e.target.value)} placeholder="Heritage & Food · half day" /></FormField>
+                    <FormField id={"trk-name-" + tr._uid} label="Track name" required><Input value={tr.name} onChange={(e) => setTrackField(tr._uid, "name", e.target.value)} /></FormField>
+                    <FormField id={"trk-tag-" + tr._uid} label="Tag" optional help="Short label under the name."><Input value={tr.tag} onChange={(e) => setTrackField(tr._uid, "tag", e.target.value)} /></FormField>
                   </div>
-                  <FormField id={"trk-dur-" + tr._uid} label="Duration" optional><Input value={tr.duration} onChange={(e) => setTrackField(tr._uid, "duration", e.target.value)} placeholder="Half day · 3–4 hrs" /></FormField>
-                  <FormField id={"trk-blurb-" + tr._uid} label="Overview" optional><Textarea rows={2} value={tr.blurb} onChange={(e) => setTrackField(tr._uid, "blurb", e.target.value)} placeholder="What makes this route worth it?" /></FormField>
+                  <FormField id={"trk-dur-" + tr._uid} label="Duration" optional><Input value={tr.duration} onChange={(e) => setTrackField(tr._uid, "duration", e.target.value)} /></FormField>
+                  <FormField id={"trk-blurb-" + tr._uid} label="Overview" optional><Textarea rows={2} value={tr.blurb} onChange={(e) => setTrackField(tr._uid, "blurb", e.target.value)} /></FormField>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                    <FormField id={"trk-stops-" + tr._uid} label="Stops" optional help="One per line."><Textarea rows={4} value={tr.stops} onChange={(e) => setTrackField(tr._uid, "stops", e.target.value)} placeholder={"Hotel pickup\nBlack Star Gate\nMakola Market"} /></FormField>
-                    <FormField id={"trk-inc-" + tr._uid} label="Included" optional help="One per line."><Textarea rows={4} value={tr.includes} onChange={(e) => setTrackField(tr._uid, "includes", e.target.value)} placeholder={"Private transport\nProfessional guide"} /></FormField>
+                    <FormField id={"trk-stops-" + tr._uid} label="Stops" optional help="One per line."><Textarea rows={4} value={tr.stops} onChange={(e) => setTrackField(tr._uid, "stops", e.target.value)} /></FormField>
+                    <FormField id={"trk-inc-" + tr._uid} label="Included" optional help="One per line."><Textarea rows={4} value={tr.includes} onChange={(e) => setTrackField(tr._uid, "includes", e.target.value)} /></FormField>
                   </div>
                   <div>
                     <span className="tk-caption" style={{ fontWeight: 600 }}>Group pricing (per person, USD)</span>
@@ -495,7 +496,7 @@ function DeparturesAdmin({ go, state, setState }) {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-4)" }}>
           <FormField id="dep-cap" label="Capacity" hint="Max travellers on this date."><Input id="dep-cap" type="number" min="1" value={form.capacity} onChange={(e) => upd("capacity", +e.target.value)} /></FormField>
           <FormField id="dep-price" label="Price per person" optional hint={fromPrice ? "Tour default: $" + fromPrice : undefined}>
-            <Input id="dep-price" type="number" min="0" value={form.price} placeholder={fromPrice ? String(fromPrice) : ""} onChange={(e) => upd("price", e.target.value)} />
+            <Input id="dep-price" type="number" min="0" value={form.price} onChange={(e) => upd("price", e.target.value)} />
           </FormField>
         </div>
         <FormField id="dep-guide" label="Lead guide" optional hint={<>Manage the roster in <a href="#" onClick={(e) => { e.preventDefault(); go("guides"); }} style={{ color: "var(--brand-ink)", fontWeight: 600 }}>Guides</a>.</>}><Select id="dep-guide" value={form.guide} onChange={(e) => { if (e.target.value === "__add") { go("guides"); setTimeout(() => window.dispatchEvent(new CustomEvent("tk-add-guide")), 60); return; } upd("guide", e.target.value); }} options={[{ value: "", label: "Assign later" }, ...((A.guides || []).filter(g => g.status === "active").map(g => ({ value: g.id, label: g.name + " · " + g.base }))), { value: "__add", label: "＋ Add a new guide…" }]} /></FormField>
@@ -503,7 +504,7 @@ function DeparturesAdmin({ go, state, setState }) {
           <span style={{ maxWidth: "38ch" }}><strong style={{ fontSize: 14, color: "var(--text-strong)" }}>Repeat weekly</strong><p className="tk-body-sm tk-muted" style={{ margin: "2px 0 0" }}>Also create this departure for the next 8 weeks.</p></span>
           <Switch id="dep-repeat" checked={form.repeat} onChange={(e) => upd("repeat", e.target.checked)} />
         </div>
-        <FormField id="dep-notes" label="Internal note" optional><Textarea id="dep-notes" rows={2} value={form.notes} placeholder="Only staff see this." onChange={(e) => upd("notes", e.target.value)} /></FormField>
+        <FormField id="dep-notes" label="Internal note" optional><Textarea id="dep-notes" rows={2} value={form.notes} onChange={(e) => upd("notes", e.target.value)} /></FormField>
         {chosenTour && form.capacity > 0 && <Alert tone="info" title="Ready to publish">Opens {form.capacity} spots on {chosenTour.title}{form.date ? " for " + form.date : ""} at ${form.price || fromPrice || 0}/person.</Alert>}
       </Drawer>
       <Modal open={!!endDep} title="End departure & request reviews"

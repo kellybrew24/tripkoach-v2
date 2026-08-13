@@ -26,6 +26,41 @@ function bookingDateFilters() {
   ];
 }
 
+// TRI-1097: shared client-side row sort. The DS DataTable is presentational — it renders
+// the sort chevron/aria-sort and reports header clicks via onSortChange, but it NEVER
+// reorders rows. Every admin table therefore has to sort its own rows from the {key,dir}
+// state before handing them to DataTable; historically none did, so the sort headers on
+// Bookings/Tours flipped the chevron but never moved a row, and Customers/Guides never even
+// wired the state. This helper is defined once here (screens-bookings.jsx loads before
+// tours/more) and re-used cross-file via the build's window re-export (same pattern as
+// exportBookingsCsv). Type is inferred per-column so the formatted date strings
+// ("Sat 22 Aug 2026", not ISO) sort chronologically instead of lexicographically, and
+// money/count columns sort numerically. Returns a new array; empty rows/no sort → passthrough.
+function tkSortRows(rows, sort) {
+  if (!sort || !sort.key || !Array.isArray(rows) || rows.length < 2) return rows;
+  const key = sort.key, dir = sort.dir === "desc" ? -1 : 1;
+  const vals = rows.map(r => r && r[key]).filter(v => v != null && v !== "");
+  const asNum = (v) => typeof v === "number" ? v : parseFloat(String(v).replace(/[^0-9.\-]/g, ""));
+  // Column is numeric only if EVERY non-empty value is a real number or a purely
+  // numeric/currency string ("$1,240", "12") — this keeps ref codes like "TK-4821" (letters)
+  // out of the numeric path so they sort as text.
+  const allNum = vals.length > 0 && vals.every(v => typeof v === "number" || (/^[-+]?[\d.,\s$₵%]+$/.test(String(v).trim()) && !isNaN(asNum(v))));
+  // Otherwise date if every non-empty value parses to a valid date (formatted date strings do).
+  const allDate = !allNum && vals.length > 0 && vals.every(v => !isNaN(new Date(v).getTime()));
+  const keyOf = (v) => {
+    if (v == null || v === "") return allNum || allDate ? -Infinity : "";
+    if (allNum) return asNum(v);
+    if (allDate) return new Date(v).getTime();
+    return String(v).toLowerCase();
+  };
+  return rows.slice().sort((a, b) => {
+    const ka = keyOf(a && a[key]), kb = keyOf(b && b[key]);
+    if (ka < kb) return -dir;
+    if (ka > kb) return dir;
+    return 0;
+  });
+}
+
 // TRI-968: CSV export of the bookings list. Client-side (all rows are already hydrated into TK_ADMIN),
 // RFC-4180-ish quoting so a customer name with a comma doesn't break the columns.
 function bookingsCsvCell(v) {
@@ -78,6 +113,7 @@ function BookingsAdmin({ go, state, setState }) {
   if (dateF) { const f = dateFilters.find(x => x.id === dateF); if (f) rows = rows.filter(b => f.test(parseBookingDate(b.date))); }
   if (tourF) rows = rows.filter(b => b.tour === tourF);
   if (payF) rows = rows.filter(b => b.payment === payF);
+  rows = tkSortRows(rows, sort); // TRI-1097: apply the header sort the DataTable only tracks.
 
   const counts = { all: A.bookings.length };
   ["pending", "confirmed", "cancelled"].forEach(s => counts[s] = A.bookings.filter(b => b.status === s).length);
