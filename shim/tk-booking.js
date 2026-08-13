@@ -71,6 +71,10 @@
       departureLabel: pick(body.departureLabel, body.departure_label, dep.label, dep.date && dep.time ? dep.date + ", " + dep.time : dep.date),
       email: pick(body.email, body.leadEmail, body.lead_email, body.lead && body.lead.email),
       reservationExpiresAt: pick(body.reservationExpiresAt, body.reservation_expires_at),
+      // TRI-1095: 128-bit capability token minted by POST /bookings. The checkout
+      // stashes it and threads it (?t= / body.token) into every later lookup so a
+      // guest can reopen THIS booking without the short ref being guessable.
+      publicToken: pick(body.publicToken, body.public_token),
       raw: body,
     };
   }
@@ -176,21 +180,25 @@
       return api.post("/bookings", payload).then(mapBooking);
     },
 
-    // Initialize a Paystack transaction for a reserved booking.
+    // Initialize a Paystack transaction for a reserved booking. `body` may carry
+    // the TRI-1095 capability token so the (now token-gated) booking is authorised.
     initPayment: function (ref, body) {
       return api.post("/bookings/" + encodeURIComponent(ref) + "/payment/init", body || {}).then(mapInit);
     },
 
-    // Verify a returned Paystack transaction reference server-side.
-    verify: function (ref, reference) {
+    // Verify a returned Paystack transaction reference server-side. `token` (TRI-1095)
+    // authorises the guest to verify their own booking.
+    verify: function (ref, reference, token) {
       return api
-        .post("/bookings/" + encodeURIComponent(ref) + "/payment/verify", { reference: reference })
+        .post("/bookings/" + encodeURIComponent(ref) + "/payment/verify", { reference: reference, token: token || undefined })
         .then(mapBooking);
     },
 
-    // Fetch current booking state.
-    get: function (ref) {
-      return api.get("/bookings/" + encodeURIComponent(ref)).then(mapBooking);
+    // Fetch current booking state. TRI-1095: `token` is the ?t= capability token;
+    // required for a guest reading a token_required booking (owner uses the cookie).
+    get: function (ref, token) {
+      var qs = token ? ("?t=" + encodeURIComponent(token)) : "";
+      return api.get("/bookings/" + encodeURIComponent(ref) + qs).then(mapBooking);
     },
 
     // Hand off to Paystack's hosted checkout (full-page redirect).
@@ -209,8 +217,9 @@
       opts = opts || {};
       var tries = opts.tries || 6;
       var delay = opts.delay || 1500;
+      var token = opts.token; // TRI-1095 capability token, threaded into verify + poll
       var start = reference
-        ? this.verify(ref, reference).catch(function () {
+        ? this.verify(ref, reference, token).catch(function () {
             return null;
           })
         : Promise.resolve(null);
@@ -218,7 +227,7 @@
       return start.then(function (afterVerify) {
         if (isPaid(afterVerify) || isFailed(afterVerify)) return afterVerify;
         var attempt = function (n, lastSeen) {
-          return self.get(ref).then(
+          return self.get(ref, token).then(
             function (bk) {
               if (isPaid(bk) || isFailed(bk) || n <= 0) return bk;
               return wait(delay).then(function () {

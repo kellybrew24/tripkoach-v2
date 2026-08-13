@@ -69,14 +69,32 @@ function randomCode(n: number): string {
   return s;
 }
 
+// ── TRI-1095: unguessable capability token for the guest booking-lookup link ──
+// The human ref (TK-XXXXXX, ~30 bits) is display-only and enumerable; this token
+// (16 random bytes → 32 hex chars = 128 bits) is what actually gates the
+// UNAUTHENTICATED GET /bookings/:ref. Carried in the email/receipt link as ?t=.
+function newPublicToken(): string {
+  return randomBytes(16).toString('hex');
+}
+function tokenMatches(supplied: string | null | undefined, stored: string | null | undefined): boolean {
+  if (!supplied || !stored) return false;
+  const a = Buffer.from(String(supplied));
+  const b = Buffer.from(String(stored));
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+// TRI-1095: how a caller proves it may see a booking. `token` = the ?t= capability
+// token from the guest link; `viewerUserId` = the resolved consumer session (owner).
+export interface BookingViewOpts { token?: string | null; viewerUserId?: string | null }
+
 export interface BookingService {
   create(input: CreateBookingInput, opts?: { userId?: string | null }): Promise<any>;
   /** Pre-payment price preview (TRI-1013): prices the booking + optional promo WITHOUT creating a
    *  booking or claiming a redemption. Throws BookingError (422) if the promo is invalid. */
   previewQuote(input: QuoteInput): Promise<any>;
-  getByRef(ref: string): Promise<any | null>;
-  initPayment(ref: string, opts?: { channel?: string }): Promise<any>;
-  verifyPayment(ref: string, reference?: string): Promise<any>;
+  getByRef(ref: string, opts?: BookingViewOpts): Promise<any | null>;
+  initPayment(ref: string, opts?: { channel?: string } & BookingViewOpts): Promise<any>;
+  verifyPayment(ref: string, reference?: string, opts?: BookingViewOpts): Promise<any>;
   handleWebhook(rawBody: string | Buffer, signature: string | undefined): Promise<{ received: boolean }>;
   expireHolds(now?: Date): Promise<{ released: number; refs: string[] }>;
   /** Resolve the USD→GHS charge rate: env override → settings.charge_rate → settings.display_rate. */
@@ -316,17 +334,20 @@ export function createBookingService(
       const total = subtotal - (promo?.discountMinor ?? 0);
       const expires = new Date(Date.now() + cfg.reservationHoldMinutes * 60_000);
 
+      // TRI-1095: mint the 128-bit lookup token now; token_required=true so this
+      // new booking can ONLY be read by ref+token (or its authenticated owner).
+      const bookingToken = newPublicToken();
       const bk = await insertUniqueRef('TK', 6, async (ref) => {
         const r = await q.query(
           `INSERT INTO booking
              (ref, tour_id, departure_id, package_id, party_size, unit_price_minor, total_minor,
               currency, status, payment_state, reservation_expires_at, special_requests, agreed_terms_at,
-              promo_code_id, discount_minor, user_id)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'reserved','unpaid',$9,$10, now(),$11,$12,$13)
+              promo_code_id, discount_minor, user_id, public_token, token_required)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'reserved','unpaid',$9,$10, now(),$11,$12,$13,$14, true)
            RETURNING id, ref`,
           [ref, tour.id, dep.id, packageId, partySize, unit, total, currency,
            expires.toISOString(), input.specialRequests ?? null,
-           promo?.id ?? null, promo?.discountMinor ?? 0, opts?.userId ?? null]);
+           promo?.id ?? null, promo?.discountMinor ?? 0, opts?.userId ?? null, bookingToken]);
         return r.rows[0];
       });
 
@@ -389,8 +410,20 @@ export function createBookingService(
         },
         tour: { slug: tour.slug, title: tour.title },
         departure: { id: dep.id, date: dep.date_label, time: dep.time_label ?? '' },
+        // TRI-1095: the capability token the FE threads into the confirm/receipt
+        // link (?t=) so guest lookups of this new (token_required) booking resolve.
+        publicToken: bookingToken,
       };
     });
+  }
+
+  // TRI-1095: may this caller see this booking? Owner (session) always; otherwise a
+  // valid ?t= token; legacy rows (token_required=false, pre-migration) keep resolving
+  // by ref alone so already-sent confirmation links don't break.
+  function canView(b: any, opts?: BookingViewOpts): boolean {
+    if (opts?.viewerUserId && b.user_id && String(b.user_id) === String(opts.viewerUserId)) return true;
+    if (tokenMatches(opts?.token, b.public_token)) return true;
+    return !b.token_required;
   }
 
   // ── Read a booking (+ payment) by ref for the FE polling / confirmation screen ──
@@ -462,9 +495,12 @@ export function createBookingService(
     };
   }
 
-  async function getByRef(ref: string): Promise<any | null> {
+  async function getByRef(ref: string, opts?: BookingViewOpts): Promise<any | null> {
     const b = await loadBooking(db, ref);
     if (!b) return null;
+    // TRI-1095: a wrong/absent token on a token_required booking is indistinguishable
+    // from "not found" (same null → 404) so the endpoint is not an existence oracle.
+    if (!canView(b, opts)) return null;
     const trav = await db.query(`SELECT name, email, phone, is_lead FROM booking_traveller
       WHERE booking_id = $1 ORDER BY is_lead DESC, created_at`, [b.id]);
     const pay = await latestPayment(db, b.id);
@@ -472,9 +508,11 @@ export function createBookingService(
   }
 
   // ── Initialise a Paystack transaction: create the payment row (GHS), call Paystack initialize ──
-  async function initPayment(ref: string, opts?: { channel?: string }): Promise<any> {
+  async function initPayment(ref: string, opts?: { channel?: string } & BookingViewOpts): Promise<any> {
     const b = await loadBooking(db, ref);
     if (!b) throw new BookingError('not_found', `booking "${ref}" not found`, 404);
+    // TRI-1095: only the owner or the token-holder may start a payment for a booking.
+    if (!canView(b, opts)) throw new BookingError('not_found', `booking "${ref}" not found`, 404);
     if (b.payment_state === 'paid' || b.status === 'confirmed') {
       throw new BookingError('not_payable', 'Booking is already paid', 409);
     }
@@ -600,9 +638,11 @@ export function createBookingService(
   }
 
   // ── Server-side verify (FE calls after checkout; fallback to the webhook when it lands first) ──
-  async function verifyPayment(ref: string, reference?: string): Promise<any> {
+  async function verifyPayment(ref: string, reference?: string, opts?: BookingViewOpts): Promise<any> {
     const b = await loadBooking(db, ref);
     if (!b) throw new BookingError('not_found', `booking "${ref}" not found`, 404);
+    // TRI-1095: gate verify on the same capability as read/init.
+    if (!canView(b, opts)) throw new BookingError('not_found', `booking "${ref}" not found`, 404);
 
     const pay = await latestPayment(db, b.id);
     const payRef = reference || pay?.ref;

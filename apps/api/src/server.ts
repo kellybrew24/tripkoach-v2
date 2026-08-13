@@ -195,25 +195,36 @@ export function buildServer(db: Db, cfg: Config, paystack?: PaystackClient, stor
       } catch (e) { return sendBookingError(reply, e); }
     });
 
+    // TRI-1095: resolve the optional consumer session so a signed-in OWNER can read
+    // their own booking on the shared /booking/:ref view without a ?t= token.
+    const viewerId = async (req: any): Promise<string | null> => {
+      const sid = req.cookies?.[cfg.consumer.cookieName];
+      const account = sid ? await resolveUserSession(db, cfg, sid).catch(() => null) : null;
+      return account?.id ?? null;
+    };
+
     api.get('/bookings/:ref', async (req, reply) => {
       const { ref } = req.params as { ref: string };
-      const out = await bookings.getByRef(ref);
+      // TRI-1095: the guest link carries the 128-bit capability token as ?t=; without
+      // it (and without an owning session) a token_required booking reads as not-found.
+      const token = (req.query as { t?: string } | undefined)?.t ?? null;
+      const out = await bookings.getByRef(ref, { token, viewerUserId: await viewerId(req) });
       return out ?? notFound(reply, `booking "${ref}" not found`);
     });
 
     api.post('/bookings/:ref/payment/init', async (req, reply) => {
       try {
         const { ref } = req.params as { ref: string };
-        const body = (req.body ?? {}) as { channel?: string };
-        return await bookings.initPayment(ref, { channel: body.channel });
+        const body = (req.body ?? {}) as { channel?: string; token?: string };
+        return await bookings.initPayment(ref, { channel: body.channel, token: body.token ?? null, viewerUserId: await viewerId(req) });
       } catch (e) { return sendBookingError(reply, e); }
     });
 
     api.post('/bookings/:ref/payment/verify', async (req, reply) => {
       try {
         const { ref } = req.params as { ref: string };
-        const body = (req.body ?? {}) as { reference?: string };
-        return await bookings.verifyPayment(ref, body.reference);
+        const body = (req.body ?? {}) as { reference?: string; token?: string };
+        return await bookings.verifyPayment(ref, body.reference, { token: body.token ?? null, viewerUserId: await viewerId(req) });
       } catch (e) { return sendBookingError(reply, e); }
     });
 

@@ -148,8 +148,8 @@ function ReviewModal({ tour, token, onClose, onSubmitted }) {
       <div style={{ display: "grid", gap: "var(--space-4)" }}>
         {err && <Alert tone="danger" title="We couldn't submit your review">{err}</Alert>}
         <div><span className="tk-label" style={{ display: "block", marginBottom: 4 }}>Your rating</span><StarInput value={rating} onChange={setRating} /></div>
-        <FormField id="rv-title" label="Title" optional><Input id="rv-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Sum it up in a few words" /></FormField>
-        <FormField id="rv-text" label="Your review" required hint="At least 10 characters. Please keep it about the tour."><Textarea id="rv-text" rows={4} value={text} onChange={(e) => setText(e.target.value)} placeholder="What did you enjoy? How was your guide?" /></FormField>
+        <FormField id="rv-title" label="Title" optional><Input id="rv-title" value={title} onChange={(e) => setTitle(e.target.value)} /></FormField>
+        <FormField id="rv-text" label="Your review" required hint="At least 10 characters. Please keep it about the tour."><Textarea id="rv-text" rows={4} value={text} onChange={(e) => setText(e.target.value)} /></FormField>
       </div>
     </Modal>
   );
@@ -273,8 +273,8 @@ function ReviewInviteLive({ go, token }) {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", background: "var(--success-bg)", borderRadius: "var(--radius-md)" }}><Icon name="shield-check" size={16} style={{ color: "var(--success-fg)" }} /><span className="tk-body-sm">Verified traveller — only you can use this private link.</span></div>
           <div><span className="tk-label" style={{ display: "block", marginBottom: 4 }}>Your rating</span><StarInput value={rating} onChange={setRating} /></div>
-          <FormField id="iv-title" label="Title" optional><Input id="iv-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Sum it up in a few words" /></FormField>
-          <FormField id="iv-text" label="Your review" required hint="At least 10 characters."><Textarea id="iv-text" rows={5} value={text} onChange={(e) => setText(e.target.value)} placeholder="What did you enjoy? How was your guide?" /></FormField>
+          <FormField id="iv-title" label="Title" optional><Input id="iv-title" value={title} onChange={(e) => setTitle(e.target.value)} /></FormField>
+          <FormField id="iv-text" label="Your review" required hint="At least 10 characters."><Textarea id="iv-text" rows={5} value={text} onChange={(e) => setText(e.target.value)} /></FormField>
           {submitErr && <Alert tone="error" title="We couldn't submit that">{submitErr}</Alert>}
           <Button size="lg" block disabled={!ok || submitting} iconStart="check" onClick={onSubmit}>{submitting ? "Submitting…" : "Submit review"}</Button>
           <p className="tk-caption" style={{ textAlign: "center", margin: 0 }}>Only you can use this link. Reviews are checked before they appear publicly.</p>
@@ -310,8 +310,8 @@ function ReviewInvitePage({ go, token }) {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", background: "var(--success-bg)", borderRadius: "var(--radius-md)" }}><Icon name="shield-check" size={16} style={{ color: "var(--success-fg)" }} /><span className="tk-body-sm">Verified — you travelled on <strong>{inv.date}</strong> (booking {inv.ref}).</span></div>
           <div><span className="tk-label" style={{ display: "block", marginBottom: 4 }}>Your rating</span><StarInput value={rating} onChange={setRating} /></div>
-          <FormField id="iv-title" label="Title" optional><Input id="iv-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Sum it up in a few words" /></FormField>
-          <FormField id="iv-text" label="Your review" required hint="At least 10 characters."><Textarea id="iv-text" rows={5} value={text} onChange={(e) => setText(e.target.value)} placeholder="What did you enjoy? How was your guide?" /></FormField>
+          <FormField id="iv-title" label="Title" optional><Input id="iv-title" value={title} onChange={(e) => setTitle(e.target.value)} /></FormField>
+          <FormField id="iv-text" label="Your review" required hint="At least 10 characters."><Textarea id="iv-text" rows={5} value={text} onChange={(e) => setText(e.target.value)} /></FormField>
           <Button size="lg" block disabled={!ok} iconStart="check" onClick={() => setDone(true)}>Submit review</Button>
           <p className="tk-caption" style={{ textAlign: "center", margin: 0 }}>Only you can use this link. Reviews are checked before they appear publicly.</p>
         </div></div>
@@ -727,7 +727,7 @@ function DateInterestForm({ tourId, packageId }) {
   return (
     <div className="tk-stack" style={{ gap: "var(--space-3)" }}>
       <FormField id="ti-email" label="Email" error={phase === "error" ? err : undefined}>
-        <Input id="ti-email" type="email" placeholder="you@example.com" value={email}
+        <Input id="ti-email" type="email" value={email}
           onChange={(e) => { setEmail(e.target.value); if (phase === "error") setPhase("idle"); }}
           onKeyDown={(e) => { if (e.key === "Enter") submit(); }} />
       </FormField>
@@ -1009,9 +1009,13 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
         ref: bk.ref, tourTitle: t.title, packageName: t0.packages ? t.packageName : null,
         departureLabel: d ? (d.date + (d.time ? ", " + d.time : "")) : "",
         partySize: pax, totalUsd: bk.totalUsd != null ? bk.totalUsd : total, email: lead.email, payMode: mode,
+        // TRI-1095: stash the capability token so the confirm page (which recovers
+        // the ref from sessionStorage after the Paystack redirect) can reload the
+        // now token-gated booking. Not persisted anywhere durable — sessionStorage only.
+        publicToken: bk.publicToken || null,
       });
       if (mode === "now") {
-        const init = await window.TK_BOOKING.initPayment(bk.ref, { callbackUrl: window.location.origin + "/confirm?ref=" + encodeURIComponent(bk.ref) });
+        const init = await window.TK_BOOKING.initPayment(bk.ref, { callbackUrl: window.location.origin + "/confirm?ref=" + encodeURIComponent(bk.ref), token: bk.publicToken || undefined });
         if (!window.TK_BOOKING.redirect(init)) throw new Error("Payment could not be started. Please try again.");
         return; // full-page redirect to Paystack — SPA unloads here
       }
@@ -1053,7 +1057,7 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
                 <FormField id="w-name" label="Full name" required>{liveAuth ? <Input value={leadInfo.name} onChange={leadField("name")} /> : <Input defaultValue="Ama Mensah" />}</FormField>
                 <FormField id="w-email" label="Email address" required>{liveAuth ? <Input value={leadInfo.email} onChange={leadField("email")} /> : <Input defaultValue="ama@example.com" />}</FormField>
                 <FormField id="w-phone" label="Phone number" required>{liveAuth ? <Input value={leadInfo.phone} onChange={leadField("phone")} /> : <Input defaultValue="024 555 0142" />}</FormField>
-                <FormField id="w-id" label="ID number" optional>{liveAuth ? <Input value={leadInfo.idNumber} onChange={leadField("idNumber")} placeholder="Ghana Card or passport" /> : <Input placeholder="Ghana Card or passport" />}</FormField>
+                <FormField id="w-id" label="ID number" optional>{liveAuth ? <Input value={leadInfo.idNumber} onChange={leadField("idNumber")} /> : <Input />}</FormField>
               </div>
             </div></div>
             {live
@@ -1062,19 +1066,19 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
                   <span className="tk-overline">{pax === 2 ? "Traveller 2" : "Travellers 2–" + pax}</span>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-4)" }}>
                     {Array.from({ length: pax - 1 }, (_, i) => (
-                      <FormField key={i} id={"w-t" + (i + 2)} label={"Traveller " + (i + 2)} required><Input placeholder="Full name" /></FormField>
+                      <FormField key={i} id={"w-t" + (i + 2)} label={"Traveller " + (i + 2)} required><Input /></FormField>
                     ))}
                   </div>
                 </div></div>)
               : <div className="tk-card"><div className="tk-card__body" style={{ gap: "var(--space-4)", padding: "var(--space-5)" }}>
                   <span className="tk-overline">Travellers 2–4</span>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-4)" }}>
-                    <FormField id="w-t2" label="Traveller 2" required><Input placeholder="Full name" /></FormField>
+                    <FormField id="w-t2" label="Traveller 2" required><Input /></FormField>
                     <FormField id="w-t3" label="Traveller 3" required error="Enter a name for traveller 3"><Input /></FormField>
-                    <FormField id="w-t4" label="Traveller 4" required><Input placeholder="Full name" /></FormField>
+                    <FormField id="w-t4" label="Traveller 4" required><Input /></FormField>
                   </div>
                 </div></div>}
-            <FormField id="w-notes" label="Special requests" optional><Textarea rows={3} placeholder="Dietary needs, mobility, celebrations…" /></FormField>
+            <FormField id="w-notes" label="Special requests" optional><Textarea rows={3} /></FormField>
           </>}
           {step === 2 && <>
             <h1 className="tk-h2">Check everything over</h1>
@@ -1196,13 +1200,26 @@ function ConfirmWebLive({ go, currency = "USD" }) {
   const ref = params.get("ref") || window.TK_BOOKING.lastRef();
   const reference = params.get("reference") || params.get("trxref") || "";
   const ctx = window.TK_BOOKING.loadCtx(ref) || {};
+  // TRI-1095: capability token — from the URL (?t=) or the stashed checkout ctx —
+  // so the guest can reload their now token-gated booking after the redirect.
+  const token = params.get("t") || ctx.publicToken || "";
   const [bk, setBk] = React.useState(null);
   const [phase, setPhase] = React.useState(ref ? "loading" : "pending");
+  // TRI-1095 (part 2): only offer the account-scoped "my bookings" list to a
+  // signed-in user. A guest checkout has no account, so surfacing it would imply
+  // one they don't have (and strand them at /login) — they use the receipt link.
+  const [authed, setAuthed] = React.useState(null);
+  React.useEffect(() => {
+    let alive = true;
+    if (window.TK_AUTH && window.TK_AUTH.me) window.TK_AUTH.me().then((u) => { if (alive) setAuthed(!!u); }, () => { if (alive) setAuthed(false); });
+    else setAuthed(false);
+    return () => { alive = false; };
+  }, []);
   React.useEffect(() => {
     let alive = true;
     if (!ref) return;
     const settle = (b) => { if (!alive) return; setBk(b); setPhase(window.TK_BOOKING.isPaid(b) ? "paid" : window.TK_BOOKING.isFailed(b) ? "failed" : "pending"); };
-    const p = reference ? window.TK_BOOKING.settle(ref, reference) : window.TK_BOOKING.get(ref);
+    const p = reference ? window.TK_BOOKING.settle(ref, reference, { token: token }) : window.TK_BOOKING.get(ref, token);
     p.then(settle, () => { if (alive) setPhase("pending"); });
     return () => { alive = false; };
   }, []);
@@ -1224,11 +1241,14 @@ function ConfirmWebLive({ go, currency = "USD" }) {
         actions={<>
           {failed
             ? <Button size="lg" onClick={() => go("checkout")}>Try paying again</Button>
-            : <Button size="lg" onClick={() => go("bookings")}>View in my bookings</Button>}
-          {/* Only offer a receipt/download when we actually have a booking ref;
-              with no ref there's nothing to download, so drop the dead stub. */}
-          {ref
-            ? <Button variant="secondary" iconStart="download" onClick={() => go("booking", ref)}>View &amp; download receipt</Button>
+            : ref
+            ? <Button size="lg" iconStart="download" onClick={() => go("booking", ref)}>View &amp; download receipt</Button>
+            : null}
+          {/* The "my bookings" list is an account feature — only for a signed-in
+              user (TRI-1095 part 2). Guests reach their booking via the receipt
+              button above (token-scoped), never a login wall implying an account. */}
+          {!failed && authed
+            ? <Button variant="secondary" onClick={() => go("bookings")}>View in my bookings</Button>
             : null}
         </>}>
         <div className="tk-card" style={{ width: "100%", textAlign: "start" }}><div className="tk-card__body" style={{ padding: "var(--space-5)" }}>
@@ -1398,13 +1418,30 @@ function tkOpenReceipt(d) {
 }
 
 function BookingDetailWeb({ go, currency = "USD", bref }) {
-  const ref = bref || (new URLSearchParams(window.location.search || "").get("ref")) || (window.TK_BOOKING && window.TK_BOOKING.lastRef && window.TK_BOOKING.lastRef()) || "";
+  const params = new URLSearchParams(window.location.search || "");
+  const ref = bref || params.get("ref") || (window.TK_BOOKING && window.TK_BOOKING.lastRef && window.TK_BOOKING.lastRef()) || "";
+  // TRI-1095: guest email/receipt link is /booking/:ref?t=<128-bit token>. The token
+  // authorises the unauthenticated lookup; a signed-in owner is authorised by cookie
+  // (no token in the URL) and still resolves. Fall back to the stashed checkout ctx.
+  const ctxTok = (window.TK_BOOKING && window.TK_BOOKING.loadCtx && (window.TK_BOOKING.loadCtx(ref) || {})) || {};
+  const token = params.get("t") || ctxTok.publicToken || "";
   const [dto, setDto] = React.useState(null);
   const [phase, setPhase] = React.useState(ref ? "loading" : "empty");
+  // TRI-1095 (part 2): back-navigation target depends on whether this is a signed-in
+  // user (→ their bookings list) or a guest reached via the token link (→ home, since
+  // they have no account/list). `null` while resolving so we don't flash the wrong one.
+  const [authed, setAuthed] = React.useState(null);
+  React.useEffect(() => {
+    let alive = true;
+    if (window.TK_AUTH && window.TK_AUTH.me) window.TK_AUTH.me().then((u) => { if (alive) setAuthed(!!u); }, () => { if (alive) setAuthed(false); });
+    else setAuthed(false);
+    return () => { alive = false; };
+  }, []);
+  const backTo = authed ? { screen: "bookings", label: "My bookings" } : { screen: "home", label: "Home" };
   React.useEffect(() => {
     if (!ref || !window.TK_BOOKING) return;
     let alive = true;
-    window.TK_BOOKING.get(ref).then(
+    window.TK_BOOKING.get(ref, token).then(
       (bk) => { if (!alive) return; const raw = (bk && bk.raw) || null; setDto(raw); setPhase(raw ? "ready" : "missing"); },
       () => { if (alive) setPhase("missing"); }
     );
@@ -1435,8 +1472,8 @@ function BookingDetailWeb({ go, currency = "USD", bref }) {
   );
   if (phase !== "ready" || !dto) return (
     <Wrap>
-      <EmptyState title="Booking not found" description={ref ? ("We couldn't find booking " + ref + ".") : "No booking reference was provided."}
-        action={<Button variant="secondary" onClick={() => go("bookings")}>Back to my bookings</Button>} />
+      <EmptyState title="Booking not found" description={ref ? ("We couldn't find booking " + ref + ". If you followed a link from your email, make sure you copied the whole address.") : "No booking reference was provided."}
+        action={<Button variant="secondary" onClick={() => go(backTo.screen)}>{authed ? "Back to my bookings" : "Back to home"}</Button>} />
     </Wrap>
   );
 
@@ -1455,7 +1492,7 @@ function BookingDetailWeb({ go, currency = "USD", bref }) {
     <Wrap>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <Button variant="ghost" size="sm" iconStart="arrow-left" onClick={() => go("bookings")}>My bookings</Button>
+          <Button variant="ghost" size="sm" iconStart="arrow-left" onClick={() => go(backTo.screen)}>{backTo.label}</Button>
           <StatusBadge status={paid ? "confirmed" : (dto.status === "cancelled" || dto.status === "expired" ? "cancelled" : "pending")} />
         </div>
         <Button variant="secondary" size="sm" iconStart="download" onClick={download}>Download receipt</Button>
