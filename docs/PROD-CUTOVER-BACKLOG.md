@@ -84,9 +84,14 @@ Migration source of truth for reversibility: [docs/rollback.md](./rollback.md).
   required-field 422s inside the `!opts?.adminCreated` branch (preserves TRI-1137
   admin leniency). A naive canonical-repo branch may carry a flat CONSUMER-ONLY
   variant. At cutover apply the **adminCreated-aware** form and patch changed lines
-  only (prod is at older code/mig state). ⚠ **This work (TRI-1157) is currently an
-  UNCOMMITTED working-tree diff on `tri-1155-remove-dashes` — not committed to any
-  branch. TRI-1163 commits it before it can be lost.**
+  only (prod is at older code/mig state). ✅ **NOW IN VCS (TRI-1171):** committed on
+  branch `tri-1157-booking-required-fields` (off `main`, two files only), pushed;
+  the committed BE **is** the adminCreated-aware variant (strict consumer 422s nested
+  in `!opts?.adminCreated`). ⚠ The original worktree diff **was lost** on a branch
+  switch before TRI-1171 — BE recovered from dev-host source; FE (`screens-web.jsx`)
+  reconstructed from the dev-host dist and compile-verified byte-identical. FE
+  intentionally omits `TkTermsDisclosure` (TRI-1150) + companion-placeholder removal
+  (TRI-1092) — layer those in at cutover. PR opens from the pushed branch.
 - [ ] **`enquiries.ts`** — TRI-1141 (24h-SLA ack email) and TRI-1142 (72h min-lead
   server guard) are additive, non-overlapping regions of the same file; keep both.
 - [ ] **Dev host src is a SUPERSET of every branch** — always diff host-vs-branch and
