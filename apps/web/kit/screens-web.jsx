@@ -1368,7 +1368,8 @@ function tkReceiptHtml(d) {
     "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1E1C1A;margin:0;background:#F5F3F0;padding:24px}" +
     ".sheet{max-width:640px;margin:0 auto;background:#fff;border:1px solid #E7E2DB;border-radius:16px;overflow:hidden}" +
     ".head{display:flex;justify-content:space-between;align-items:flex-start;padding:28px 32px;border-bottom:2px solid #1E1C1A}" +
-    ".brand{font-size:22px;font-weight:800;letter-spacing:-.02em}" +
+    ".brand{display:flex;align-items:center;gap:12px;font-size:22px;font-weight:800;letter-spacing:-.02em}" +
+    ".brand img{width:38px;height:38px;display:block;flex-shrink:0}" +
     ".brand small{display:block;font-size:12px;font-weight:600;color:#8A8378;letter-spacing:0;margin-top:4px}" +
     ".doc{text-align:right}.doc .t{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#8A8378}" +
     ".doc .r{font-size:16px;font-weight:800;margin-top:4px}" +
@@ -1387,7 +1388,7 @@ function tkReceiptHtml(d) {
     "@media print{body{background:#fff;padding:0}.sheet{border:none;border-radius:0;max-width:none}.noprint{display:none}}" +
     "</style></head><body>" +
     "<div class=\"sheet\">" +
-    "<div class=\"head\"><div class=\"brand\">" + tkEsc(co.name || "TripKoach") + "<small>" + tkEsc(co.location || "") + "</small></div>" +
+    "<div class=\"head\"><div class=\"brand\"><img src=\"" + (window.location.origin + "/assets/logo-badge.png") + "\" alt=\"TripKoach\"><div>" + tkEsc(co.name || "TripKoach") + "<small>" + tkEsc(co.location || "") + "</small></div></div>" +
     "<div class=\"doc\"><div class=\"t\">Receipt</div><div class=\"r\">" + tkEsc(d.ref || "") + "</div></div></div>" +
     "<div class=\"body\">" +
     "<h2>Booking details</h2><table class=\"info\">" + infoRows + "</table>" +
