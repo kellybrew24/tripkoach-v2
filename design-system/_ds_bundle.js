@@ -2337,9 +2337,9 @@ function Rating({
     className: "tk-num"
   }, value.toFixed(1)), count != null && /*#__PURE__*/React.createElement("span", {
     className: "tk-rating__count"
-  }, "(", count, ")"), /*#__PURE__*/React.createElement("span", {
+  }, "(", count, ")"), count != null && /*#__PURE__*/React.createElement("span", {
     className: "tk-sr-only"
-  }, "out of 5, from ", count, " reviews"));
+  }, "out of 5, from ", count, " review", count === 1 ? "" : "s"));
 }
 Object.assign(__ds_scope, { Rating });
 })(); } catch (e) { __ds_ns.__errors.push({ path: "components/data-display/Rating.jsx", error: String((e && e.message) || e) }); }
