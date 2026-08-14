@@ -6,7 +6,24 @@ import { createDb, type Db } from './db.ts';
 import { loadFixtures, type Fixtures } from './fixtures.ts';
 import { toMinor, slugify, categoryEnum, parseDisplayDate } from './util.ts';
 
+// Pre-prod guard (TRI-1116): seed() TRUNCATES the catalogue + every review. Running it against prod would
+// wipe real customer reviews/bookings-linked data and re-inject demo fixtures. Refuse unless the operator
+// explicitly opts in. Trips on NODE_ENV=production OR a DATABASE_URL whose db name ends in `_prod`.
+export function assertSeedAllowed(env = process.env): void {
+  if (env.ALLOW_DESTRUCTIVE_SEED === 'true') return;
+  const nodeEnv = env.NODE_ENV || 'development';
+  const dbName = (() => { try { return new URL(env.DATABASE_URL || '').pathname.replace(/^\//, ''); } catch { return ''; } })();
+  const looksProd = nodeEnv === 'production' || /(^|[_-])prod(uction)?$/.test(dbName);
+  if (looksProd) {
+    throw new Error(
+      `seed(): refusing to wipe/re-seed what looks like a production database ` +
+      `(NODE_ENV=${nodeEnv}, db="${dbName || 'unknown'}"). This deletes tour/review/departure/region rows. ` +
+      `Set ALLOW_DESTRUCTIVE_SEED=true only if you truly intend to reset it.`);
+  }
+}
+
 export async function seed(db: Db, fx: Fixtures = loadFixtures(), log: (m: string) => void = () => {}): Promise<void> {
+  assertSeedAllowed();
   // Wipe in FK-safe order (Phase 1 seeds catalogue + reviews only).
   await db.query('DELETE FROM review');
   await db.query('DELETE FROM departure');
