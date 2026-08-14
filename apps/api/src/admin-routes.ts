@@ -14,6 +14,7 @@ import {
   verifyTrustedDevice, issueTrustedDevice, sessionWasTrusted,
   revokeTrustedDevices, setTrustCookie, clearTrustCookie,
   accountLockedUntil, recordFailedLogin, resetFailedLogins,
+  recordMfaFailure, lockoutMessage,
 } from './auth.ts';
 import { createAdminService, AdminError, ValidationError } from './admin.ts';
 import type { NotificationService } from './notifications.ts';
@@ -199,13 +200,26 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
       if (!pending) {
         return reply.code(401).send({ error: { code: 'no_challenge', message: 'No pending sign-in to verify. Please sign in again.' } });
       }
+      // TRI-1061: an account already locked (by password or prior MFA failures) must not be able to keep
+      // guessing 6-digit codes — reject before spending a verify.
+      const preLock = accountLockedUntil(pending.staff);
+      if (preLock) {
+        return reply.code(423).send({ error: { code: 'account_locked', message: lockoutMessage(preLock) } });
+      }
       const b = (req.body ?? {}) as Record<string, unknown>;
       const code = typeof b.code === 'string' ? b.code : '';
       const ok = await staffSvc.verifyChallenge(pending.staffId, code);
       if (!ok) {
-        await audit(db, { actorId: pending.staffId, action: 'staff.mfa_failed', targetType: 'staff_user', targetId: pending.staffId, ip: req.ip ?? null });
+        // TRI-1061: cap wrong codes per pending session AND feed the per-account lockout so a spray across
+        // fresh sessions still locks the account (immune to IP rotation, which the per-IP limiter is not).
+        const cap = await recordMfaFailure(db, pending.sessionId);
+        const justLocked = await recordFailedLogin(db, pending.staff);
+        await audit(db, { actorId: pending.staffId, action: 'staff.mfa_failed', targetType: 'staff_user', targetId: pending.staffId, after: { attempts: cap.count, sessionRevoked: cap.revoked, locked: !!justLocked }, ip: req.ip ?? null });
+        if (justLocked) return reply.code(423).send({ error: { code: 'account_locked', message: lockoutMessage(justLocked) } });
+        if (cap.revoked) return reply.code(401).send({ error: { code: 'mfa_attempts_exceeded', message: 'Too many incorrect codes. Please sign in again.' } });
         return reply.code(401).send({ error: { code: 'invalid_code', message: "That code didn't match or has expired." } });
       }
+      await resetFailedLogins(db, pending.staffId); // full login completed — clear password/MFA lockout counter
       await clearMfaPending(db, pending.sessionId);
       // TRI-983: the operator ticked "Trust this device for 30 days" at login — now that the factor has
       // verified, mint a trusted-device token and drop it in the long-lived tk_admin_trust cookie so the

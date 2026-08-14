@@ -14,7 +14,9 @@ import { createConsumerMfaService } from './consumer-mfa.ts';
 import {
   createUserSession, revokeUserSession, setUserCookie, clearUserCookie, makeRequireUser, resolveUserSession,
   resolvePendingUserSession, clearUserMfaPending,
+  accountLockedUntil, recordFailedUserLogin, resetFailedUserLogins,
 } from './consumer-auth.ts';
+import { recordMfaFailure, lockoutMessage } from './auth.ts';
 import { createMediaService, MediaError } from './media.ts';
 import { createStorage, type Storage } from './storage.ts';
 import { createAvatarService, AvatarError, AVATAR_MAX_BYTES } from './avatar.ts';
@@ -106,11 +108,22 @@ export function registerConsumer(app: FastifyInstance, db: Db, cfg: Config, stor
       if (!pending) {
         return reply.code(401).send({ error: { code: 'no_challenge', message: 'No pending sign-in to verify. Please sign in again.' } });
       }
+      // TRI-1061: reject a locked account before spending a verify (password or prior-MFA lockout).
+      const preLock = accountLockedUntil(pending.account);
+      if (preLock) {
+        return reply.code(423).send({ error: { code: 'account_locked', message: lockoutMessage(preLock) } });
+      }
       const b = (body(req) ?? {}) as { code?: unknown };
       const ok = await mfaSvc.verifyChallenge(pending.userId, String(b.code ?? ''));
       if (!ok) {
+        // TRI-1061: cap wrong codes per pending session AND feed the per-account lockout (mirrors admin).
+        const cap = await recordMfaFailure(db, pending.sessionId);
+        const justLocked = await recordFailedUserLogin(db, pending.account);
+        if (justLocked) return reply.code(423).send({ error: { code: 'account_locked', message: lockoutMessage(justLocked) } });
+        if (cap.revoked) return reply.code(401).send({ error: { code: 'mfa_attempts_exceeded', message: 'Too many incorrect codes. Please sign in again.' } });
         return reply.code(401).send({ error: { code: 'invalid_code', message: 'That code did not match. Try again, or use a recovery code.' } });
       }
+      await resetFailedUserLogins(db, pending.userId); // full login completed — clear password/MFA lockout counter
       await clearUserMfaPending(db, cfg, pending.sessionId);
       return svc.completeMfaLogin(pending.userId, ipOf(req));
     });

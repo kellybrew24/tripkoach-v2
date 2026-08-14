@@ -62,8 +62,19 @@ export async function verifyPassword(password: string, encodedHash: string | nul
 // spoof-resistant half of SEC-H2 — the per-IP @fastify/rate-limit on the login route is the other.
 export const LOGIN_MAX_ATTEMPTS = 5;
 export const LOGIN_LOCK_MINUTES = 15;
+// TRI-1061 (reconciled onto the TRI-1065 lockout split for the TRI-1057 cutover): wrong /auth/mfa codes
+// tolerated on a single pending session before it is revoked (forcing a full re-login). MFA failures ALSO
+// feed the per-account lockout above (recordFailedLogin / recordFailedUserLogin), so five failures lock
+// the account regardless of source IP — the per-IP @fastify/rate-limit is the other, spoofable half.
+export const MFA_MAX_ATTEMPTS = 5;
 
 type LockableRow = { failed_login_count?: number | null; locked_until?: string | Date | null };
+
+/** User-facing "account locked, try again in N minutes" copy for a lock expiry (shared by both realms). */
+export function lockoutMessage(until: Date): string {
+  const mins = Math.max(1, Math.ceil((until.getTime() - Date.now()) / 60_000));
+  return `Too many failed attempts — this account is locked. Try again in about ${mins} minute${mins === 1 ? '' : 's'}.`;
+}
 
 /** The active lock expiry for this staff row, or null when it is not currently locked. */
 export function accountLockedUntil(u: LockableRow | null | undefined): Date | null {
@@ -99,6 +110,26 @@ export async function resetFailedLogins(db: Db, staffId: string): Promise<void> 
       WHERE id = $1 AND (failed_login_count <> 0 OR locked_until IS NOT NULL)`,
     [staffId],
   );
+}
+
+/** TRI-1061: record a wrong /auth/mfa code against a pending session. Atomically increments the
+ *  per-session counter (session.mfa_failed_count, migration 030 superset) and, on reaching
+ *  MFA_MAX_ATTEMPTS, revokes the session in the same statement so the half-auth cookie is dead and the
+ *  client must sign in again. Returns the new count + whether the session was (or already is) revoked.
+ *  Realm-neutral — the `session` table is shared by staff and consumer half-auth logins. */
+export async function recordMfaFailure(db: Db, sessionId: string): Promise<{ count: number; revoked: boolean }> {
+  const { rows } = await db.query<{ mfa_failed_count: number; revoked_at: Date | null }>(
+    `UPDATE session
+        SET mfa_failed_count = mfa_failed_count + 1,
+            revoked_at = CASE WHEN mfa_failed_count + 1 >= $2 THEN now() ELSE revoked_at END
+      WHERE id = $1 AND revoked_at IS NULL
+      RETURNING mfa_failed_count, revoked_at`,
+    [sessionId, MFA_MAX_ATTEMPTS],
+  );
+  const r = rows[0];
+  // No live row → it was already revoked/expired concurrently; treat as capped.
+  if (!r) return { count: MFA_MAX_ATTEMPTS, revoked: true };
+  return { count: r.mfa_failed_count, revoked: r.revoked_at != null };
 }
 
 // ── Permission resolution ────────────────────────────────────────────────────
@@ -139,10 +170,13 @@ export async function revokeSession(db: Db, sessionId: string): Promise<void> {
  *  session is live (not expired/revoked), its staff user is active, AND it is still mfa_pending. */
 export async function resolvePendingSession(
   db: Db, sessionId: string,
-): Promise<{ sessionId: string; staffId: string; trustedDevice: boolean } | null> {
+): Promise<{ sessionId: string; staffId: string; trustedDevice: boolean; staff: { id: string } & LockableRow } | null> {
   if (!sessionId) return null;
   const { rows } = await db.query<any>(
-    `SELECT s.id AS session_id, u.id AS staff_id, u.status, s.trusted_device
+    // TRI-1061: also surface the account lockout state so /auth/mfa can reject a locked account before
+    // spending a verify and feed MFA failures into the same failed_login_count as password failures.
+    `SELECT s.id AS session_id, u.id AS staff_id, u.status, s.trusted_device,
+            u.failed_login_count, u.locked_until
        FROM session s JOIN staff_user u ON u.id = s.subject_id
       WHERE s.id = $1 AND s.subject_type = 'staff'
         AND s.revoked_at IS NULL AND s.expires_at > now() AND s.mfa_pending = true`,
@@ -150,7 +184,10 @@ export async function resolvePendingSession(
   );
   const r = rows[0];
   if (!r || r.status !== 'active') return null;
-  return { sessionId: r.session_id, staffId: r.staff_id, trustedDevice: !!r.trusted_device };
+  return {
+    sessionId: r.session_id, staffId: r.staff_id, trustedDevice: !!r.trusted_device,
+    staff: { id: r.staff_id, failed_login_count: r.failed_login_count, locked_until: r.locked_until },
+  };
 }
 
 /** Promote a pending session to fully authenticated once the second factor has verified. */
