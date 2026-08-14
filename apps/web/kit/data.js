@@ -23,6 +23,25 @@ window.TK_SIZES = {
   hero: "100vw",
   gallery: "(max-width: 720px) 92vw, 560px",
 };
+// Homepage hero slider (TRI-1132). Mirrors the exact image set + order the LIVE
+// apex tripkoach.com hero carousel serves — dedicated slider frames under
+// cdn.tripkoach.com/img/hero/slider/<base>-<w>.{jpg} (NOT the per-tour heroes).
+// Verified live: every base exists at each TK_IMG_WIDTHS width. `pos` matches
+// the apex background-position so faces/subjects stay framed on crop.
+window.TK_HERO_IMG = function (base, w) {
+  return "https://cdn.tripkoach.com/img/hero/slider/" + base + "-" + w + ".jpg";
+};
+window.TK_HERO_SRCSET = function (base) {
+  return window.TK_IMG_WIDTHS
+    .map(function (w) { return window.TK_HERO_IMG(base, w) + " " + w + "w"; })
+    .join(", ");
+};
+window.TK_HERO_SLIDES = [
+  { base: "canopy-walk",       pos: "center 38%", alt: "Travelers crossing the canopy walkway above the rainforest at Kakum National Park." },
+  { base: "smiles",            pos: "center 30%", alt: "Local koaches and visitors laughing together on a Ghana tour." },
+  { base: "north-dance",       pos: "center",     alt: "Traditional drummers and dancers performing in northern Ghana." },
+  { base: "independence-arch", pos: "center 55%", alt: "Independence Arch at Black Star Square in Accra at golden hour." },
+];
 window.TK_DATA = {
   tours: [
     { id:"accra-city-tour", title:"Accra City Tour", region:"Greater Accra", duration:"3 to 4 hrs · Half day",

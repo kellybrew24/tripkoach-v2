@@ -1,6 +1,5 @@
 const NS = window.TripKoachDesignSystem_c9e4af;
 const { Button, Icon, TourCard, SearchField, Rating, Badge } = NS;
-const HERO = "https://cdn.tripkoach.com/img/tours/discover-ghana-in-10-days/hero-1440.jpg";
 const IMG = (slug) => "https://cdn.tripkoach.com/img/tours/" + slug + "/hero-480.jpg";
 
 const REGIONS = [
@@ -28,6 +27,110 @@ const TESTIMONIALS = [
 
 function Section({ children, style }) {
   return <section className="tk-container" style={{ maxWidth: 1200, paddingBlock: "var(--space-14)", ...style }}>{children}</section>;
+}
+
+// Homepage hero carousel (TRI-1132). Cross-fades the same CDN image set the
+// LIVE apex hero slider uses (window.TK_HERO_SLIDES). Auto-advances, pauses on
+// hover/focus and honours prefers-reduced-motion; fully keyboard operable —
+// prev/next buttons + a dot tablist (Left/Right/Home/End). Inactive slides are
+// aria-hidden; the active slide carries alt text. All frames hotlink
+// cdn.tripkoach.com via TK_HERO_SRCSET (responsive 480/960/1440, TRI-1117).
+function HeroSlider() {
+  const slides = window.TK_HERO_SLIDES || [];
+  const [index, setIndex] = React.useState(0);
+  const [paused, setPaused] = React.useState(false);
+  const dotsRef = React.useRef(null);
+  const n = slides.length;
+  const go = React.useCallback((i) => setIndex(((i % n) + n) % n), [n]);
+
+  // Auto-advance ~6s, unless paused (hover/focus) or the user prefers reduced motion.
+  React.useEffect(() => {
+    if (n < 2 || paused) return;
+    const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduce) return;
+    const id = setInterval(() => setIndex((p) => (p + 1) % n), 6000);
+    return () => clearInterval(id);
+  }, [n, paused]);
+
+  const onDotKey = (e) => {
+    let next = null;
+    if (e.key === "ArrowRight") next = (index + 1) % n;
+    else if (e.key === "ArrowLeft") next = (index - 1 + n) % n;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = n - 1;
+    if (next === null) return;
+    e.preventDefault();
+    setIndex(next);
+    const btns = dotsRef.current && dotsRef.current.querySelectorAll("[role=tab]");
+    if (btns && btns[next]) btns[next].focus();
+  };
+
+  if (!n) return null;
+
+  const navBtn = {
+    position: "absolute", top: "50%", transform: "translateY(-50%)", zIndex: 3,
+    width: 44, height: 44, borderRadius: "50%", border: "1px solid rgba(255,255,255,.35)",
+    background: "rgba(20,19,18,.32)", backdropFilter: "blur(6px)", color: "var(--n-0)",
+    display: "grid", placeItems: "center", cursor: "pointer",
+  };
+
+  return (
+    <div
+      aria-roledescription="carousel" aria-label="Ghana highlights"
+      onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}
+      onFocusCapture={() => setPaused(true)} onBlurCapture={() => setPaused(false)}
+      style={{ position: "absolute", inset: 0 }}
+    >
+      {slides.map((s, i) => (
+        <img
+          key={s.base}
+          src={window.TK_HERO_IMG(s.base, 1440)}
+          srcSet={window.TK_HERO_SRCSET(s.base)}
+          sizes={window.TK_SIZES.hero}
+          alt={i === index ? s.alt : ""}
+          aria-hidden={i === index ? undefined : "true"}
+          fetchpriority={i === 0 ? "high" : undefined}
+          loading={i === 0 ? "eager" : "lazy"}
+          style={{
+            position: "absolute", inset: 0, width: "100%", height: "100%",
+            objectFit: "cover", objectPosition: s.pos, opacity: i === index ? 0.9 : 0,
+            transition: "opacity 900ms var(--ease-standard)",
+          }}
+        />
+      ))}
+
+      {n > 1 && (
+        <React.Fragment>
+          <button type="button" aria-label="Previous slide" onClick={() => go(index - 1)} style={{ ...navBtn, left: "var(--space-5)" }}>
+            <Icon name="chevron-left" size={22} />
+          </button>
+          <button type="button" aria-label="Next slide" onClick={() => go(index + 1)} style={{ ...navBtn, right: "var(--space-5)" }}>
+            <Icon name="chevron-right" size={22} />
+          </button>
+          <div
+            ref={dotsRef} role="tablist" aria-label="Choose hero slide" onKeyDown={onDotKey}
+            style={{ position: "absolute", zIndex: 3, left: 0, right: 0, bottom: "var(--space-5)", display: "flex", justifyContent: "center", gap: 10 }}
+          >
+            {slides.map((s, i) => (
+              <button
+                key={s.base} type="button" role="tab"
+                aria-selected={i === index ? "true" : "false"}
+                aria-label={"Show slide " + (i + 1) + " of " + n}
+                tabIndex={i === index ? 0 : -1}
+                onClick={() => setIndex(i)}
+                style={{
+                  width: i === index ? 30 : 10, height: 10, padding: 0, borderRadius: 999,
+                  border: "1px solid rgba(255,255,255,.55)", cursor: "pointer",
+                  background: i === index ? "var(--gold-400)" : "rgba(255,255,255,.28)",
+                  transition: "width var(--dur-slow) var(--ease-standard), background var(--dur-slow) var(--ease-standard)",
+                }}
+              />
+            ))}
+          </div>
+        </React.Fragment>
+      )}
+    </div>
+  );
 }
 
 function HomeWeb({ go }) {
@@ -62,9 +165,9 @@ function HomeWeb({ go }) {
     <div>
       {/* ── HERO ────────────────────────────────────────── */}
       <section style={{ position: "relative", minHeight: "min(90vh, 760px)", display: "flex", alignItems: "flex-end", overflow: "hidden", background: "var(--n-900)" }}>
-        <img src={HERO} srcSet={window.TK_SRCSET("discover-ghana-in-10-days", "hero")} sizes={window.TK_SIZES.hero} alt="" fetchpriority="high" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", opacity: 0.9 }} />
-        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(20,19,18,.35) 0%, rgba(20,19,18,.15) 40%, rgba(20,19,18,.82) 100%)" }} />
-        <div className="tk-container" style={{ position: "relative", maxWidth: 1200, paddingBottom: "var(--space-12)", paddingTop: "var(--space-16)", color: "var(--n-0)" }}>
+        <HeroSlider />
+        <div style={{ position: "absolute", inset: 0, zIndex: 1, pointerEvents: "none", background: "linear-gradient(180deg, rgba(20,19,18,.35) 0%, rgba(20,19,18,.15) 40%, rgba(20,19,18,.82) 100%)" }} />
+        <div className="tk-container" style={{ position: "relative", zIndex: 2, maxWidth: 1200, paddingBottom: "var(--space-12)", paddingTop: "var(--space-16)", color: "var(--n-0)" }}>
           <div style={{ display: "inline-flex", alignItems: "center", gap: 10, padding: "6px 14px", borderRadius: 999, background: "rgba(255,255,255,.14)", backdropFilter: "blur(6px)", border: "1px solid rgba(255,255,255,.24)", marginBottom: "var(--space-5)" }}>
             <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--gold-400)" }} />
             <span style={{ fontSize: 12.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase" }}>A smarter way to travel Africa</span>
