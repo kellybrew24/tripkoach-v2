@@ -31,6 +31,7 @@ the cutover, not before:
 - [ ] `PROD_DEST_ROOT` / `PROD_PUBLIC_URL` provided by CEO/DevOps (unblocks TRI-1057)
 - [ ] Leave `PAYSTACK_USD_TO_GHS_RATE` **UNSET** on prod (FX convergence, TRI-873/876)
 - [ ] Confirm `config.js` on prod static has `USE_LIVE_API:true` (never resurrect a flag-off config on rollback)
+- [ ] `SITE_URL=https://<prod-public-host>` set when running `build:prod` — TRI-1114. The web build bakes absolute canonical/OG/JSON-LD URLs from `SITE_URL` (defaults to `https://dev.tripkoach.com`). If unset at prod build, social/canonical tags point at dev. Runtime per-route tags self-correct from `window.location.origin`, but non-JS scrapers read the static ones — so this must be set for the prod dist.
 - [ ] R2 media token valid — **see item 10 / [SECRETS-ROTATION.md](./SECRETS-ROTATION.md); token expires 2026-08-24, gates media/avatar on prod**
 
 ## ⚠ Migration reconciliation (do FIRST, before any `migrate` on prod)
@@ -91,6 +92,7 @@ DNS/infra as noted. All items DONE on dev unless flagged.
 - [ ] TRI-1099 booking-receipt logo — web page C `ed01ff4` (1103)
 - [ ] TRI-1099 booking-receipt logo — email C `167cb9e` (1102) — **awaits CEO sign-off**
 - [ ] TRI-1097 — fix broken table sort (`tkSortRows` across Bookings/Tours/Customers/Guides) — FE, C `48fdb75`
+- [ ] TRI-1114 — SEO & shareability: per-route meta/OG/JSON-LD + real anchor links — FE, C `12cfe2b`. **At cutover set `SITE_URL` (see env checklist above) before `build:prod`.** Admin dist now ships `noindex,nofollow`.
 
 ### D. UX / content cleanups
 
