@@ -819,7 +819,9 @@ function DateInterestForm({ tourId, packageId }) {
   const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
   const isRequest = requestEnabled && !!date;          // a chosen date ⇒ intent "request"
   const dateOk = !date || date >= minDate;             // blank is fine (notify); else must clear lead
-  const canSubmit = emailOk && dateOk && (!isRequest || pax >= 1) && phase !== "submitting";
+  // Enable once there's something to submit; submit() runs the real validation and surfaces the invalid
+  // state inline (bad email / sub-lead date), rather than leaving the button perpetually disabled.
+  const canSubmit = email.trim().length > 0 && phase !== "submitting";
 
   function clearTransient() {
     if (phase === "error" || phase === "duplicate") setPhase("idle");
