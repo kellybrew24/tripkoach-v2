@@ -102,6 +102,7 @@ DNS/infra as noted. All items DONE on dev unless flagged.
 ### D. UX / content cleanups
 
 - [ ] TRI-1092/1088 — remove input placeholders (67 across 10 kit files) — FE
+- [ ] TRI-1132 — homepage hero image slider (child of TRI-1131): replaced the single static hero image with an accessible cross-fade carousel of the exact CDN image set + order the LIVE apex hero uses (`img/hero/slider/{canopy-walk,smiles,north-dance,independence-arch}`), all hotlinking `cdn.tripkoach.com` via a new `TK_HERO_SRCSET` (480/960/1440, per TRI-1117). Auto-advance (6s, pauses on hover/focus, honours prefers-reduced-motion) + prev/next buttons + dot tablist (Arrow/Home/End keys), per-slide alt text, aria-hidden on inactive slides. `apps/web/kit/data.js` + `screens-home.jsx`. FE, NO mig, C `ce5c90f`. Browser-verified on dev.tripkoach.com (4 imgs load from CDN, controls + auto-advance work). Prod counterpart is the v2 SPA (app.tripkoach.com), NOT the apex — the apex already ships this slider.
 - [ ] TRI-1090/1093/1096 — tour-badge removal (cleared tags, home rail copy) — FE + dev DB/seed, C `6e8c294`
 - [ ] TRI-1074 — Boti Falls blog → dev CMS — content, C `d9160254` (⚠ prod v2 blog DB EMPTY — needs content load at cutover)
 
