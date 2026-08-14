@@ -80,17 +80,20 @@ export function buildServer(db: Db, cfg: Config, paystack?: PaystackClient, stor
       let displayRate = 12;
       let currencyOfRecord = 'USD';
       let secondaryDisplayCurrency = 'GHS';
+      let dateRequestsEnabled = false;
       try {
-        const { rows } = await db.query<{ display: string | null; cor: string | null; sdc: string | null }>(
+        const { rows } = await db.query<{ display: string | null; cor: string | null; sdc: string | null; flags: Record<string, unknown> | null }>(
           `SELECT usd_to_ghs_display_rate AS display, currency_of_record AS cor,
-                  secondary_display_currency AS sdc FROM settings WHERE singleton = true`);
+                  secondary_display_currency AS sdc, flags FROM settings WHERE singleton = true`);
         const r = rows[0];
         const d = r?.display != null ? Number(r.display) : NaN;
         if (Number.isFinite(d) && d > 0) displayRate = d;
         if (r?.cor) currencyOfRecord = r.cor;
         if (r?.sdc) secondaryDisplayCurrency = r.sdc;
+        if (r?.flags?.date_requests_enabled === true) dateRequestsEnabled = true;
       } catch { /* settings unreadable → keep safe defaults */ }
-      return { usdToGhsDisplayRate: displayRate, currencyOfRecord, secondaryDisplayCurrency };
+      // minRequestLeadDays: 72h minimum lead time before a requested date (CEO decision, TRI-1133).
+      return { usdToGhsDisplayRate: displayRate, currencyOfRecord, secondaryDisplayCurrency, dateRequestsEnabled, minRequestLeadDays: 3 };
     });
 
     api.get('/regions', async () => ({ regions: await listRegions(db) }));

@@ -161,13 +161,18 @@ export async function submitEnquiry(
 // tour returns the existing lead without inserting a duplicate or re-notifying (the empty-state form can
 // be re-tapped without spamming ops).
 
-export type InterestIntent = 'notify' | 'waitlist';
-const INTEREST_INTENTS: readonly InterestIntent[] = ['notify', 'waitlist'];
+export type InterestIntent = 'notify' | 'waitlist' | 'request';
+const INTEREST_INTENTS: readonly InterestIntent[] = ['notify', 'waitlist', 'request'];
 
 export interface InterestInput {
   intent?: string;
   email?: string | null;
   packageId?: string | null;
+  /** TRI-1136: custom-date request fields (intent='request' only). */
+  requestedDate?: string | null;
+  partySize?: number | null;
+  phone?: string | null;
+  note?: string | null;
 }
 
 export interface InterestResult {
@@ -201,33 +206,62 @@ export async function submitTourInterest(
 
   const packageId = clean(input.packageId, 100);
 
-  // Idempotency: an existing 'interest' row for the same (tour, email, intent) short-circuits. Keeps the
-  // empty-state form safe to re-tap and stops repeat ops emails for the same standing interest.
-  const existing = await db.query<{ id: string }>(
-    `SELECT id FROM enquiry
-      WHERE type = 'interest'
-        AND lower(email) = lower($1)
-        AND payload->>'tourId' = $2
-        AND payload->>'intent' = $3
-      ORDER BY created_at DESC LIMIT 1`,
-    [email, row.id, intent]);
+  // TRI-1136: request intent has its own dedupe key — per (tour, email, requestedDate).
+  // notify/waitlist still dedupe on (tour, email, intent) as before.
+  const requestedDate = intent === 'request' ? clean(input.requestedDate, 20) : null;
+  const partySize = intent === 'request' && input.partySize != null ? Math.max(1, Math.min(99, Number(input.partySize) | 0)) : null;
+  const phone = intent === 'request' ? clean(input.phone, 60) : null;
+  const note = intent === 'request' ? clean(input.note, 2000) : null;
+
+  const dedupeQuery = intent === 'request'
+    ? db.query<{ id: string }>(
+        `SELECT id FROM enquiry
+          WHERE type = 'interest'
+            AND lower(email) = lower($1)
+            AND payload->>'tourId' = $2
+            AND payload->>'intent' = 'request'
+            AND payload->>'requestedDate' = $3
+          ORDER BY created_at DESC LIMIT 1`,
+        [email, row.id, requestedDate ?? ''])
+    : db.query<{ id: string }>(
+        `SELECT id FROM enquiry
+          WHERE type = 'interest'
+            AND lower(email) = lower($1)
+            AND payload->>'tourId' = $2
+            AND payload->>'intent' = $3
+          ORDER BY created_at DESC LIMIT 1`,
+        [email, row.id, intent]);
+
+  const existing = await dedupeQuery;
   if (existing.rows[0]) {
     opts.log?.(`[interest] duplicate ${intent} for ${row.slug} <${email}> → ${existing.rows[0].id}`);
     return { id: existing.rows[0].id, created: false };
   }
 
-  const payload: Record<string, string> = { tourId: row.id, tourSlug: row.slug, tourName: row.title, intent };
+  const payload: Record<string, string | number> = { tourId: row.id, tourSlug: row.slug, tourName: row.title, intent };
   if (packageId) payload.packageId = packageId;
-  const label = intent === 'waitlist' ? 'Waitlist' : 'Notify when dates open';
+  if (requestedDate) payload.requestedDate = requestedDate;
+  if (partySize != null) payload.partySize = partySize;
+  if (note) payload.note = note;
+
+  let label: string;
+  if (intent === 'waitlist') label = 'Waitlist';
+  else if (intent === 'request') label = requestedDate ? `Date request — ${requestedDate}` : 'Date request';
+  else label = 'Notify when dates open';
 
   const ins = await db.query<{ id: string }>(
     `INSERT INTO enquiry (type, subject, name, email, phone, payload, consent)
-     VALUES ('interest', $1, NULL, $2, NULL, $3, true) RETURNING id`,
-    [`${label} — ${row.title}`, email, JSON.stringify(payload)]);
+     VALUES ('interest', $1, NULL, $2, $3, $4, true) RETURNING id`,
+    [`${label} — ${row.title}`, email, phone, JSON.stringify(payload)]);
   const id = ins.rows[0].id;
 
   try {
     const to = await resolveNotifyRecipient(db, cfg);
+    const detailFields: Record<string, string> = { Tour: row.title, Request: label };
+    if (requestedDate) detailFields['Requested date'] = requestedDate;
+    if (partySize != null) detailFields['Group size'] = String(partySize);
+    if (packageId) detailFields['Package'] = packageId;
+    if (note) detailFields['Note'] = note;
     await sendEmail(db, cfg, {
       to,
       replyTo: email,
@@ -236,9 +270,9 @@ export async function submitTourInterest(
         enquiryType: TYPE_LABEL.interest,
         name: '—',
         email,
-        phone: '—',
+        phone: phone ?? '—',
         subject: `${label} — ${row.title}`,
-        details: formatDetails({ Tour: row.title, Request: label, ...(packageId ? { Package: packageId } : {}) }),
+        details: formatDetails(detailFields),
       },
       relatedType: 'enquiry',
       relatedId: id,

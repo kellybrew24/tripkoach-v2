@@ -480,6 +480,21 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
       });
     });
 
+    // ── TRI-1136/1137: Requests inbox — date-interest enquiries ────────────────
+    // GET  /requests          list (filter: ?status=new|contacted|…, ?tourId=)
+    // PATCH /requests/:id/status  update status chip
+    admin.get('/requests', perm('bookings.view'), async (req) => {
+      const q = query(req);
+      return svc.listRequests({ status: qStr(q, 'status'), tourId: qStr(q, 'tourId'), limit: qNum(q, 'limit'), offset: qNum(q, 'offset') });
+    });
+    admin.patch('/requests/:id/status', perm('bookings.manage'), async (req) => {
+      return svc.updateRequestStatus((req.params as any).id, body(req), actorOf(req));
+    });
+    // POST /departures/:id/private-link — mint 72h-hold reserved booking for an unlisted departure
+    admin.post('/departures/:id/private-link', perm('bookings.manage'), async (req, reply) => {
+      return reply.code(201).send(await svc.createPrivateBookingLink((req.params as any).id, body(req), actorOf(req)));
+    });
+
     // ── Dashboard aggregates (A15) ───────────────────────────────────────────────
     admin.get('/dashboard', perm('bookings.view'), async (req) => svc.getDashboard({ range: qStr(query(req), 'range'), from: qStr(query(req), 'from'), to: qStr(query(req), 'to') }));
   }, { prefix: cfg.adminPrefix });

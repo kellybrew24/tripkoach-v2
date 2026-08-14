@@ -476,6 +476,7 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
       packageId: r.package_slug ?? null, date: r.date_label, departOn: r.depart_on, time: r.time_label ?? '',
       price: fromMinor(r.price_minor), currency: r.currency, capacity: seatsTotal, seatsTotal,
       booked: seatsReserved, spotsLeft: Math.max(0, seatsTotal - seatsReserved), status: r.status,
+      visibility: r.visibility ?? 'public',
       guideId: r.guide_id ?? null, guide: r.guide_name ?? null, notes: r.notes_internal ?? null,
     };
   }
@@ -535,15 +536,16 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     const price = optMoney(body, 'price');
     const currency = (optStr(body, 'currency', 3) ?? tour.currency ?? 'USD').toUpperCase();
     const status = optEnum(body, 'status', ['scheduled', 'sold_out', 'completed', 'cancelled'] as const) ?? 'scheduled';
+    const visibility = optEnum(body, 'visibility', ['public', 'unlisted'] as const) ?? 'public';
     const guideId = (await resolveGuideId(body)) ?? null;
     const notes = optStr(body, 'notes', 4000) ?? null;
 
     const { rows } = await db.query(
       `INSERT INTO departure (tour_id, package_id, guide_id, depart_on, date_label, time_label, price_minor,
-          currency, seats_total, seats_reserved, status, notes_internal)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,0,$10,$11) RETURNING id`,
-      [tour.id, packageId, guideId, dateIso, dateLabel, time, price != null ? toMinor(price) : null, currency, capacity, status, notes]);
-    await audit(db, { actorId: actor.id, action: 'departure.create', targetType: 'departure', targetId: rows[0].id, after: { tour: tour.slug, date: dateLabel, capacity, status }, ip: actor.ip });
+          currency, seats_total, seats_reserved, status, notes_internal, visibility)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,0,$10,$11,$12) RETURNING id`,
+      [tour.id, packageId, guideId, dateIso, dateLabel, time, price != null ? toMinor(price) : null, currency, capacity, status, notes, visibility]);
+    await audit(db, { actorId: actor.id, action: 'departure.create', targetType: 'departure', targetId: rows[0].id, after: { tour: tour.slug, date: dateLabel, capacity, status, visibility }, ip: actor.ip });
     return (await getDeparture(rows[0].id))!;
   }
 
@@ -564,6 +566,7 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     if (body.time !== undefined) set('time_label', optStr(body, 'time', 120) ?? null);
     if (body.dateLabel !== undefined) set('date_label', reqStr(body, 'dateLabel', 120));
     if (body.status !== undefined) set('status', optEnum(body, 'status', ['scheduled', 'sold_out', 'completed', 'cancelled'] as const));
+    if (body.visibility !== undefined) set('visibility', optEnum(body, 'visibility', ['public', 'unlisted'] as const) ?? 'public');
     if (body.guideId !== undefined) set('guide_id', (await resolveGuideId(body)) ?? null);
     if (body.notes !== undefined) set('notes_internal', optStr(body, 'notes', 4000) ?? null);
     if (!sets.length) throw new ValidationError('no updatable fields provided');
@@ -2121,6 +2124,97 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     return { ok: true };
   }
 
+  // ── TRI-1136/1137: Requests inbox — interest enquiries with intent 'request' or 'notify'/'waitlist' ──
+  // Lists enquiry rows of type 'interest', newest first. Supports filtering by status chip and tour.
+  // Status is stored in enquiry.payload->>'status'; default = 'new' for rows without it.
+  const REQUEST_STATUSES = ['new', 'contacted', 'scheduled', 'booked', 'closed'] as const;
+  type RequestStatus = typeof REQUEST_STATUSES[number];
+
+  async function listRequests(opts: { status?: string; tourId?: string; limit?: number; offset?: number }) {
+    const params: unknown[] = [];
+    const where: string[] = [`e.type = 'interest'`];
+    if (opts.status && REQUEST_STATUSES.includes(opts.status as RequestStatus)) {
+      params.push(opts.status);
+      where.push(`COALESCE(e.payload->>'status','new') = $${params.length}`);
+    }
+    if (opts.tourId) {
+      params.push(opts.tourId);
+      where.push(`e.payload->>'tourId' = $${params.length}`);
+    }
+    const limit = Math.min(opts.limit ?? 50, 200);
+    const offset = opts.offset ?? 0;
+    params.push(limit, offset);
+    const { rows } = await db.query(
+      `SELECT e.id, e.email, e.phone, e.created_at,
+              e.payload->>'tourId'       AS "tourId",
+              e.payload->>'tourName'     AS "tourName",
+              e.payload->>'tourSlug'     AS "tourSlug",
+              e.payload->>'intent'       AS intent,
+              e.payload->>'requestedDate' AS "requestedDate",
+              (e.payload->>'partySize')::int AS "partySize",
+              e.payload->>'note'         AS note,
+              COALESCE(e.payload->>'status','new') AS status
+       FROM enquiry e
+       WHERE ${where.join(' AND ')}
+       ORDER BY e.created_at DESC
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params);
+    const { rows: [{ total }] } = await db.query<{ total: string }>(
+      `SELECT COUNT(*)::text AS total FROM enquiry e WHERE ${where.join(' AND ')}`,
+      params.slice(0, params.length - 2));
+    return { requests: rows, total: Number(total), limit, offset };
+  }
+
+  async function updateRequestStatus(id: string, body: unknown, actor: Actor) {
+    if (!isPlainObject(body)) throw new ValidationError('body must be an object');
+    const status = optEnum(body, 'status', REQUEST_STATUSES);
+    if (!status) throw new ValidationError('status is required and must be one of: ' + REQUEST_STATUSES.join(', '), 'status');
+    const cur = (await db.query<{ id: string; payload: Record<string, unknown> }>(
+      `SELECT id, payload FROM enquiry WHERE id = $1 AND type = 'interest'`, [id])).rows[0];
+    if (!cur) throw notFound('request');
+    const newPayload = { ...cur.payload, status };
+    await db.query(`UPDATE enquiry SET payload = $1, updated_at = now() WHERE id = $2`, [JSON.stringify(newPayload), id]);
+    await audit(db, { actorId: actor.id, action: 'request.status_update', targetType: 'enquiry', targetId: id, before: { status: cur.payload.status ?? 'new' }, after: { status }, ip: actor.ip });
+    return { id, status };
+  }
+
+  // createPrivateBookingLink: for an unlisted departure, mint a 72h-hold reserved-seat booking
+  // and return the ?t= secure link. The admin calls this after creating the departure; the link
+  // is sent to the requesting customer. CEO decision: 72h hold for human-closed loop (TRI-1133).
+  async function createPrivateBookingLink(departureId: string, body: unknown, actor: Actor) {
+    if (!isPlainObject(body)) throw new ValidationError('body must be an object');
+    const partySize = optInt(body, 'partySize', 1) ?? 1;
+    const { rows: [dep] } = await db.query(
+      `SELECT d.id, d.tour_id, d.price_minor, d.currency, d.seats_total, d.seats_reserved, d.status, d.visibility,
+              t.slug AS tour_slug
+       FROM departure d JOIN tour t ON t.id = d.tour_id WHERE d.id = $1`, [departureId]);
+    if (!dep) throw notFound('departure');
+    if (dep.visibility !== 'unlisted') throw new ValidationError('departure must be unlisted to generate a private booking link', 'departureId');
+    if (dep.status !== 'scheduled') throw new ValidationError('departure must be in scheduled status', 'departureId');
+    const available = Number(dep.seats_total) - Number(dep.seats_reserved);
+    if (available < partySize) throw conflict(`only ${available} seat(s) available`);
+
+    const token = randomBytes(16).toString('hex');
+    // 72h hold — longer than standard checkout (30 min) since a human closes the loop.
+    const expiresAt = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString();
+    const unitPrice = dep.price_minor != null ? Number(dep.price_minor) : 0;
+    const total = unitPrice * partySize;
+    const ref = `TKP${randomBytes(3).toString('hex').toUpperCase()}`;
+
+    await db.query(
+      `INSERT INTO booking (ref, tour_id, departure_id, package_id, party_size, unit_price_minor, total_minor,
+          currency, status, payment_state, reservation_expires_at, agreed_terms_at, public_token, token_required)
+       VALUES ($1,$2,$3,NULL,$4,$5,$6,$7,'reserved','unpaid',$8,now(),$9,true)`,
+      [ref, dep.tour_id, dep.id, partySize, unitPrice, total, dep.currency ?? 'USD', expiresAt, token]);
+
+    await db.query(
+      `UPDATE departure SET seats_reserved = seats_reserved + $1, updated_at = now() WHERE id = $2`,
+      [partySize, dep.id]);
+
+    await audit(db, { actorId: actor.id, action: 'booking.private_link_created', targetType: 'booking', targetId: ref, after: { departureId: dep.id, partySize, expiresAt }, ip: actor.ip });
+    return { ref, token, expiresAt };
+  }
+
   return {
     listRegions, createRegion, updateRegion, deleteRegion,
     listTours, getTour, createTour, updateTour, setTourPublished, deleteTour,
@@ -2137,6 +2231,7 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     listAuditLog,
     getDashboard,
     listBlog, getBlog, createBlog, updateBlog, setBlogPublished, deleteBlog,
+    listRequests, updateRequestStatus, createPrivateBookingLink,
   };
 }
 

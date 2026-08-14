@@ -110,7 +110,7 @@ export async function listTours(db: Db, query: ToursQuery): Promise<TourListDTO>
   const { rows } = await db.query(
     `SELECT t.slug, t.title, r.name AS region, t.duration, t.category_label, t.currency,
             t.base_price_minor, t.rating_cached, t.review_count_cached, t.spots_left_hint, t.tag, t.image,
-            EXISTS (SELECT 1 FROM departure d WHERE d.tour_id = t.id AND ${BOOKABLE_DEPARTURE_SQL}) AS has_upcoming
+            EXISTS (SELECT 1 FROM departure d WHERE d.tour_id = t.id AND ${BOOKABLE_DEPARTURE_SQL} AND COALESCE(d.visibility,'public')='public') AS has_upcoming
      FROM tour t JOIN region r ON r.id = t.region_id
      WHERE ${whereSql}
      ORDER BY ${sort}
@@ -240,7 +240,9 @@ async function departuresForTour(db: Db, tourId: string) {
             p.slug AS package_slug, p.name AS package_name
      FROM departure d
      LEFT JOIN tour_package p ON p.id = d.package_id
-     WHERE d.tour_id = $1 AND ${BOOKABLE_DEPARTURE_SQL} ORDER BY d.depart_on NULLS LAST, d.created_at`, [tourId]);
+     WHERE d.tour_id = $1 AND ${BOOKABLE_DEPARTURE_SQL}
+       AND COALESCE(d.visibility, 'public') = 'public'
+     ORDER BY d.depart_on NULLS LAST, d.created_at`, [tourId]);
   return rows.map(departureDTO);
 }
 
