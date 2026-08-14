@@ -1,0 +1,123 @@
+name: prod-uptime
+
+# =============================================================================
+# TripKoach v2 — external (off-box) uptime & health monitor.  TRI-1111 / TRI-1109.
+#
+# WHY GH ACTIONS (the sanctioned "or equivalent" to UptimeRobot):
+#   The monitor MUST NOT live on the box it monitors (monitoring-proposal.md) —
+#   a self-hosted probe can't alert when the whole box dies. GitHub-hosted
+#   runners are off-box, free, and need no third-party account or new infra.
+#   Every 5 min they probe the ALREADY-LIVE prod endpoints; a failing job
+#   emails the repo account (GitHub's built-in failure notification = the email
+#   channel) and, if NTFY_TOPIC is set, pushes to ntfy.sh (the push channel).
+#
+# TARGETS (corrected — the apex tripkoach.com is the separate Astro marketing
+#   site on Cloudflare, NOT the v2 app; its /api/health 404s. The v2 prod plane
+#   is app.tripkoach.com + admin.tripkoach.com behind Caddy, same-origin /api):
+#     - keyword '"status":"ok"' on https://app.tripkoach.com/api/health
+#     - HTTP 200 on https://app.tripkoach.com/        (consumer SPA)
+#     - HTTP 200 on https://admin.tripkoach.com/      (admin SPA)
+#     - TLS expiry >= 14 days on both hosts
+#
+# OPTIONAL SECRETS (repo → Settings → Secrets → Actions). All optional; the
+#   workflow is fully functional (GitHub failure email) with none set:
+#     NTFY_TOPIC   unguessable ntfy.sh topic -> phone push on failure/recovery
+#     NTFY_SERVER  ntfy base (default https://ntfy.sh)
+# =============================================================================
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'      # every 5 minutes (GitHub's minimum granularity)
+  workflow_dispatch: {}         # manual "run now"
+  push:
+    paths:
+      - '.github/workflows/uptime.yml'   # runs once on merge to verify wiring
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prod-uptime
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe prod endpoints
+        id: probe
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          NTFY_SERVER: ${{ secrets.NTFY_SERVER }}
+        run: |
+          set -uo pipefail
+          API="https://app.tripkoach.com/api/health"
+          WEB="https://app.tripkoach.com/"
+          ADMIN="https://admin.tripkoach.com/"
+          TLS_HOSTS="app.tripkoach.com admin.tripkoach.com"
+          TLS_MIN_DAYS=14
+
+          fails=()
+
+          # curl with a few retries so a single transient blip doesn't page us.
+          C() { curl -fsS --max-time 15 --retry 3 --retry-delay 4 --retry-all-errors "$@"; }
+
+          echo "::group::API health keyword check ($API)"
+          if body="$(C "$API")"; then
+            echo "$body"
+            if printf '%s' "$body" | grep -q '"status":"ok"'; then
+              echo "OK: health keyword present"
+            else
+              echo "FAIL: 200 but keyword '\"status\":\"ok\"' missing (degraded)"
+              fails+=("API health degraded (no status:ok): $API")
+            fi
+          else
+            fails+=("API health unreachable: $API")
+          fi
+          echo "::endgroup::"
+
+          for url in "$WEB" "$ADMIN"; do
+            echo "::group::HTTP 200 check ($url)"
+            code="$(curl -s -o /dev/null --max-time 15 --retry 3 --retry-delay 4 --retry-all-errors -w '%{http_code}' "$url" || echo 000)"
+            echo "status=$code"
+            [ "$code" = "200" ] || fails+=("SPA not 200 ($code): $url")
+            echo "::endgroup::"
+          done
+
+          for h in $TLS_HOSTS; do
+            echo "::group::TLS expiry check ($h)"
+            end="$(echo | openssl s_client -servername "$h" -connect "$h:443" 2>/dev/null | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)"
+            if [ -z "$end" ]; then
+              fails+=("TLS handshake failed: $h")
+            else
+              end_ts="$(date -d "$end" +%s)"
+              now_ts="$(date +%s)"
+              days=$(( (end_ts - now_ts) / 86400 ))
+              echo "$h expires $end ($days days)"
+              [ "$days" -ge "$TLS_MIN_DAYS" ] || fails+=("TLS expiring in ${days}d (<${TLS_MIN_DAYS}): $h")
+            fi
+            echo "::endgroup::"
+          done
+
+          if [ "${#fails[@]}" -eq 0 ]; then
+            echo "ALL CHECKS PASSED"
+            exit 0
+          fi
+
+          msg="TripKoach prod monitor FAILED:"$'\n'"$(printf ' - %s\n' "${fails[@]}")"
+          echo "$msg"
+
+          # Push channel (optional): ntfy.sh. No-op if NTFY_TOPIC unset.
+          if [ -n "${NTFY_TOPIC:-}" ]; then
+            srv="${NTFY_SERVER:-https://ntfy.sh}"
+            curl -fsS --max-time 15 \
+              -H "Title: TripKoach prod DOWN" \
+              -H "Priority: urgent" \
+              -H "Tags: rotating_light" \
+              -d "$msg" \
+              "$srv/${NTFY_TOPIC}" >/dev/null || echo "warn: ntfy push failed"
+          fi
+
+          # Fail the job -> GitHub emails the repo account (email channel).
+          exit 1
