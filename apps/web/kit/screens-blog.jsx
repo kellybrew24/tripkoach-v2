@@ -82,8 +82,12 @@ function BlogIndex({ go }) {
   const [featured, ...rest] = shown;
   return (
     <div>
-      <section style={{ background: "var(--n-900)", color: "var(--n-0)" }}>
-        <div className="tk-container" style={{ maxWidth: 1200, paddingBlock: "var(--space-12)" }}>
+      {/* TRI-1148: AboutPage hero-background treatment — dark base + image at
+          opacity .32 + gradient keep the Stories heading/intro AA-legible. */}
+      <section style={{ position: "relative", overflow: "hidden", background: "var(--n-900)", color: "var(--n-0)" }}>
+        <img src={window.TK_HERO_IMG("smiles", 1440)} srcSet={window.TK_HERO_SRCSET("smiles")} sizes={window.TK_SIZES.hero} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", objectPosition: "center 30%", opacity: 0.32 }} />
+        <span style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(20,19,18,.4), rgba(20,19,18,.82))" }} />
+        <div className="tk-container" style={{ position: "relative", maxWidth: 1200, paddingBlock: "var(--space-12)" }}>
           <span className="tk-overline" style={{ color: "var(--gold-400)" }}>Stories · field notes &amp; guides</span>
           <h1 style={{ fontFamily: "var(--font-display)", fontWeight: 800, letterSpacing: "-0.035em", lineHeight: 1.0, fontSize: "clamp(38px,5vw,68px)", margin: "12px 0 0", maxWidth: "18ch" }}>
             Ghana, written from the ground.

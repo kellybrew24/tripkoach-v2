@@ -49,10 +49,13 @@ function tkSendEnquiry(body, ids, btn) {
     .then(function () { if (btn) btn.disabled = false; });
 }
 
-function PageHero({ overline, title, sub, children, dark = true, image }) {
+// image: single fallback src. imageSrcSet/imagePos (optional) opt the hero into
+// the responsive TK_SRCSET convention + object-position framing. Overlay/opacity
+// replicate the AboutPage hero treatment (AA-legible over any frame). TRI-1148.
+function PageHero({ overline, title, sub, children, dark = true, image, imageSrcSet, imagePos }) {
   return (
     <section style={{ position: "relative", overflow: "hidden", background: dark ? "var(--n-900)" : "var(--brand-wash)", color: dark ? "var(--n-0)" : "var(--text-strong)", borderBottom: dark ? "none" : "1px solid var(--border-subtle)" }}>
-      {image && <><img src={image} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", opacity: 0.32 }} /><span style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(20,19,18,.4), rgba(20,19,18,.82))" }} /></>}
+      {image && <><img src={image} srcSet={imageSrcSet || undefined} sizes={imageSrcSet ? window.TK_SIZES.hero : undefined} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", objectPosition: imagePos || "center", opacity: 0.32 }} /><span style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(20,19,18,.4), rgba(20,19,18,.82))" }} /></>}
       <div className="tk-container" style={{ position: "relative", maxWidth: 1200, paddingBlock: "var(--space-12)" }}>
         <span className="tk-overline" style={{ color: dark ? "var(--gold-400)" : "var(--gold-700)" }}>{overline}</span>
         <h1 style={{ fontFamily: "var(--font-display)", fontWeight: 800, letterSpacing: "-0.035em", lineHeight: 1.0, fontSize: "clamp(38px,5vw,68px)", margin: "12px 0 0", maxWidth: "18ch", textWrap: "balance" }}>{title}</h1>
@@ -97,6 +100,7 @@ function RegionsPage({ go }) {
   return (
     <div>
       <PageHero overline="Where to go" title={n + " regions of Ghana, more to come."}
+        image={window.TK_HERO_IMG("independence-arch", 1440)} imageSrcSet={window.TK_HERO_SRCSET("independence-arch")} imagePos="center 55%"
         sub={"Ghana has sixteen administrative regions. TripKoach runs tours in " + n + " of them today — pick one to see who hosts there and which trips are running this season."} />
       <Wrap>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "var(--space-5)" }}>
@@ -366,6 +370,7 @@ function MarketplacePage({ go }) {
   return (
     <div>
       <PageHero overline="Marketplace" title="Ghanaian craft, coming to the shop."
+        image={window.TK_HERO_IMG("north-dance", 1440)} imageSrcSet={window.TK_HERO_SRCSET("north-dance")} imagePos="center 40%"
         sub="A curated marketplace of Ghanaian craft, cloth and provisions — kente, adinkra, shea and more, shipped or waiting for you on arrival. It launches in an upcoming phase." />
       <Wrap>
         <EmptyState icon="ticket" title="The shop isn't open yet"

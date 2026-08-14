@@ -731,12 +731,23 @@ function BrowseWeb({ go, currency, view, initialRegion, initialQuery }) {
           so it gets a slim, listing-specific header (title + subtitle + search)
           instead of repeating the full-height home hero, which pushed the tour
           grid ~700px down (worse on mobile). The epic hero stays on home only. */}
-      <section style={{ borderBottom: "1px solid var(--border-subtle)", background: "var(--brand-wash)" }}>
-        <div className="tk-container" style={{ paddingBlock: "var(--space-8)", display: "flex", flexDirection: "column", gap: "var(--space-4)", maxWidth: 1200 }}>
+      {/* TRI-1148: listing header gains the AboutPage hero-background treatment —
+          dark base + image at opacity .32 + top-to-bottom gradient so the
+          title/subtitle/search stay AA-legible.
+          TRI-1151: once this became a full photographic hero (not the old plain
+          wash utility header of TRI-1118), it must share the same vertical frame
+          as its siblings — Regions/Stories/Marketplace all use space-12. Bumped
+          space-8 → space-12 so the four page heroes read as one consistent band.
+          The ~64px cost to grid position is negligible (TRI-1118's ~700px-pushdown
+          concern was against the full home hero, not this header). */}
+      <section style={{ position: "relative", overflow: "hidden", background: "var(--n-900)", color: "var(--n-0)" }}>
+        <img src={window.TK_HERO_IMG("canopy-walk", 1440)} srcSet={window.TK_HERO_SRCSET("canopy-walk")} sizes={window.TK_SIZES.hero} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", objectPosition: "center 38%", opacity: 0.32 }} />
+        <span style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(20,19,18,.4), rgba(20,19,18,.82))" }} />
+        <div className="tk-container" style={{ position: "relative", paddingBlock: "var(--space-12)", display: "flex", flexDirection: "column", gap: "var(--space-4)", maxWidth: 1200 }}>
           <div className="tk-stack" style={{ gap: "var(--space-2)" }}>
-            <span className="tk-overline" style={{ color: "var(--gold-700)" }}>Ghana · {window.TK_REGION_COUNT()} regions</span>
-            <h1 className="tk-h1" style={{ margin: 0 }}>Browse tours</h1>
-            <p className="tk-body" style={{ margin: 0, maxWidth: "56ch", color: "var(--text-muted)" }}>
+            <span className="tk-overline" style={{ color: "var(--gold-400)" }}>Ghana · {window.TK_REGION_COUNT()} regions</span>
+            <h1 className="tk-h1" style={{ margin: 0, color: "var(--n-0)" }}>Browse tours</h1>
+            <p className="tk-body" style={{ margin: 0, maxWidth: "56ch", color: "rgba(255,255,255,.85)" }}>
               Guided day trips and multi-day journeys with local guides. Reserve your spot now and pay before you travel.
             </p>
           </div>
