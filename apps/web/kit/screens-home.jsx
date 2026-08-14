@@ -135,6 +135,14 @@ function HeroSlider() {
 
 function HomeWeb({ go }) {
   const tours = window.TK_DATA.tours;
+  // Hero search box (TRI-1146). Previously this field was rendered controlled at
+  // a hard-coded value="" with a no-op onChange, so React reset every keystroke
+  // and the input silently rejected all typed text. It is now stateful; Enter or
+  // the Explore button carries the query to /browse?q=… where BrowseWeb applies
+  // it as its live text filter (no separate search backend — browse filters the
+  // already-loaded catalogue client-side).
+  const [q, setQ] = React.useState("");
+  const search = () => go("browse", q.trim() ? { q: q.trim() } : undefined);
   // Rating + review totals derived from the live catalogue — each tour carries
   // its cached rating and review count (tk-boot mapTourSummary). Weight the
   // average by review volume so a 200-review 4.8 outweighs an 18-review 4.9;
@@ -176,9 +184,15 @@ function HomeWeb({ go }) {
           </p>
           <div style={{ display: "flex", gap: 12, marginTop: "var(--space-7)", flexWrap: "wrap", maxWidth: 680 }}>
             <div style={{ flex: "1 1 320px", minWidth: 260 }}>
-              <SearchField value="" onChange={() => {}} placeholder="Search tours, regions, experiences" />
+              <SearchField
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                onClear={() => setQ("")}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); search(); } }}
+                placeholder="Search tours, regions, experiences"
+              />
             </div>
-            <Button size="lg" iconEnd="arrow-right" onClick={() => go("browse")}>Explore tours</Button>
+            <Button size="lg" iconEnd="arrow-right" onClick={search}>Explore tours</Button>
           </div>
           <div style={{ display: "flex", gap: "var(--space-6)", marginTop: "var(--space-7)", flexWrap: "wrap", fontSize: 14 }}>
             {[["star", ratingStr ? ratingStr + " average across " + reviewTotal + " reviews" : "Loved by travelers across Ghana"], ["shield-check", "Verified local guides"], ["wifi", "Free 5GB eSIM on arrival"]].map(([ic, tx]) => (

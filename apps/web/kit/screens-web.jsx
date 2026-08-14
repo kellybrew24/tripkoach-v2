@@ -667,14 +667,20 @@ function FilterPanel({ tours, filters, toggle, onClear, open = false }) {
   );
 }
 
-function BrowseWeb({ go, currency, view, initialRegion }) {
+function BrowseWeb({ go, currency, view, initialRegion, initialQuery }) {
   const tours = window.TK_DATA.tours;
   // Seed the region filter from a /browse?region=<name> deep link (TRI-940). Only
   // apply it when it names a real tour region so a stale/unknown slug is ignored
   // (shown filter always corresponds to actual data) rather than yielding 0 tours.
   const seedRegion = initialRegion && tours.some(t => t.region === initialRegion) ? [initialRegion] : [];
   const [filters, setFilters] = React.useState({ region: seedRegion, price: [], duration: [], category: [] });
-  const [query, setQuery] = React.useState("");
+  // Seed the text filter from a /browse?q=<term> deep link (TRI-1146), e.g. the
+  // home hero search. Plain browse nav passes no query, so this stays "".
+  const [query, setQuery] = React.useState(initialQuery || "");
+  // Keep the text filter in sync with the deep link across in-place route changes
+  // (BrowseWeb stays mounted between /browse and /browse?q=…). Fires only when the
+  // deep-link value actually changes, so it never clobbers in-progress typing.
+  React.useEffect(() => { setQuery(initialQuery || ""); }, [initialQuery]);
   // Keep the region filter in sync with the deep link across in-place route
   // changes (browser back/forward between /browse and /browse?region=…), where
   // BrowseWeb stays mounted and the state initializer above does not re-run.

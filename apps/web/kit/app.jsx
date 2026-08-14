@@ -64,10 +64,17 @@ function routeFromPath(pathname, search) {
   // Deep-link region filter (TRI-940): /browse?region=<name> pre-applies that
   // region on the Tours screen. Only the browse route reads it; elsewhere null.
   let region = null;
+  let query = null;
   if (screen === "browse") {
-    try { region = new URLSearchParams(search || "").get("region") || null; } catch (_) { region = null; }
+    try {
+      const sp = new URLSearchParams(search || "");
+      region = sp.get("region") || null;
+      // Free-text hero search deep link (TRI-1146): /browse?q=<term> pre-applies
+      // the query as the browse text filter. Read only on the browse route.
+      query = sp.get("q") || null;
+    } catch (_) { region = null; query = null; }
   }
-  return { screen, slug: null, region };
+  return { screen, slug: null, region, query };
 }
 
 // In-page loader shown while a tour detail hydrates from the API (TRI-888). Kept
@@ -209,6 +216,9 @@ function WebApp() {
   // Active region filter for the Tours screen, driven by /browse?region=<name>
   // deep links from the home + regions grids (TRI-940). null ⇒ no pre-filter.
   const [browseRegion, setBrowseRegion] = React.useState(first.region || null);
+  // Active free-text filter for the Tours screen, driven by /browse?q=<term>
+  // deep links from the home hero search (TRI-1146). null ⇒ no pre-filter.
+  const [browseQuery, setBrowseQuery] = React.useState(first.query || null);
   // Review-invite token, only set when the URL is a `/reviews/redeem/:token`
   // deep link (TRI-894). Off that route it stays null and the invite page falls
   // back to the fixture demo, so nothing else is affected.
@@ -226,18 +236,27 @@ function WebApp() {
     // Tour nav carries a slug only in live mode; flag off drops it, so the URL
     // stays /tour and TourWeb falls back to tours[0] (byte-identical prototype).
     const tourSlug = s === "tour" ? (LIVE_API() ? payload || null : null) : null;
-    // Browse nav carries an optional region name to pre-apply as a filter (TRI-940).
-    const region = s === "browse" ? (payload || null) : null;
+    // Browse nav carries an optional region name to pre-apply as a filter (TRI-940)
+    // and/or a free-text query from the home hero search (TRI-1146). The payload is
+    // either a plain region string (region grids) or an object { region?, q? }.
+    const region = s === "browse" ? (typeof payload === "string" ? (payload || null) : (payload && payload.region) || null) : null;
+    const query = s === "browse" && payload && typeof payload === "object" ? (payload.q || null) : null;
     // Booking detail carries the booking ref as its slug (TRI-938).
     const nextSlug = s === "post" ? payload : s === "tour" ? tourSlug : s === "booking" ? (payload || null) : slug;
     if (s === "post") setSlug(payload);
     else if (s === "tour") setSlug(tourSlug);
     else if (s === "booking") setSlug(payload || null);
-    if (s === "browse") setBrowseRegion(region);
+    if (s === "browse") { setBrowseRegion(region); setBrowseQuery(query); }
     setScreen(s === "post" ? "post" : s);
     let url = pathForScreen(s, nextSlug);
-    if (s === "browse" && region) url += "?region=" + encodeURIComponent(region);
-    if (url !== window.location.pathname + window.location.search) window.history.pushState({ screen: s, slug: nextSlug, region }, "", url);
+    if (s === "browse") {
+      const qs = new URLSearchParams();
+      if (region) qs.set("region", region);
+      if (query) qs.set("q", query);
+      const qstr = qs.toString();
+      if (qstr) url += "?" + qstr;
+    }
+    if (url !== window.location.pathname + window.location.search) window.history.pushState({ screen: s, slug: nextSlug, region, query }, "", url);
     window.scrollTo({ top: 0 });
   };
   React.useEffect(() => {
@@ -246,6 +265,7 @@ function WebApp() {
       setScreen(r.screen);
       setSlug(r.slug);
       setBrowseRegion(r.region || null);
+      setBrowseQuery(r.query || null);
       setReviewToken(r.token || null);
       window.scrollTo({ top: 0 });
     };
@@ -292,7 +312,7 @@ function WebApp() {
     );
   const body = {
     home: <HomeWeb go={go} />,
-    browse: <BrowseWeb go={go} currency={currency} view={view} initialRegion={browseRegion} />,
+    browse: <BrowseWeb go={go} currency={currency} view={view} initialRegion={browseRegion} initialQuery={browseQuery} />,
     tour: tourBody,
     checkout: <CheckoutWeb go={go} step={step} setStep={setStep} currency={currency} />,
     confirm: <ConfirmWeb go={go} currency={currency} />,
