@@ -71,7 +71,7 @@ function randomCode(n: number): string {
 }
 
 export interface BookingService {
-  create(input: CreateBookingInput, opts?: { userId?: string | null }): Promise<any>;
+  create(input: CreateBookingInput, opts?: { userId?: string | null; adminCreated?: boolean }): Promise<any>;
   /** Pre-payment price preview (TRI-1013): prices the booking + optional promo WITHOUT creating a
    *  booking or claiming a redemption. Throws BookingError (422) if the promo is invalid. */
   previewQuote(input: QuoteInput): Promise<any>;
@@ -249,22 +249,50 @@ export function createBookingService(
   }
 
   // ── CREATE + RESERVE (single transaction) ──
-  async function create(input: CreateBookingInput, opts?: { userId?: string | null }): Promise<any> {
+  async function create(input: CreateBookingInput, opts?: { userId?: string | null; adminCreated?: boolean }): Promise<any> {
     const partySize = Number(input.partySize);
     if (!Number.isInteger(partySize) || partySize < 1) {
       throw new BookingError('validation', 'partySize must be an integer >= 1', 422);
     }
-    if (input.agreedTerms !== true) {
+    // An admin-created private reservation is agreed on the customer's behalf by the operator (TRI-1137),
+    // so it bypasses the consumer terms gate; every consumer path still requires the explicit tick.
+    if (!opts?.adminCreated && input.agreedTerms !== true) {
       throw new BookingError('validation', 'Terms must be agreed before booking', 422);
     }
     const travellers = Array.isArray(input.travellers) ? input.travellers : [];
     const lead = travellers.find((t) => t.isLead) ?? travellers[0];
-    if (!lead || !lead.name) {
-      throw new BookingError('validation', 'At least one (lead) traveller with a name is required', 422);
+    // TRI-1157: enforce the required contact fields the checkout marks with * (name, email, phone) plus a
+    // name on every additional traveller. Trim first so whitespace counts as blank, and reject a malformed
+    // email so a booking can't be created with an unreachable address. Admin-created private reservations
+    // (TRI-1137) stay lenient — an operator may only hold partial contact info. Values are normalised in
+    // place on the lead so the traveller INSERT + guest-customer upsert persist the cleaned strings.
+    const leadName = (lead?.name ?? '').trim();
+    const leadEmail = (lead?.email ?? '').trim();
+    const leadPhone = (lead?.phone ?? '').trim();
+    if (!lead || !leadName) {
+      throw new BookingError('validation', 'The lead traveller needs a full name', 422);
     }
-    if (!lead.email && !lead.phone) {
-      throw new BookingError('validation', 'The lead traveller must carry an email or phone', 422);
+    if (opts?.adminCreated) {
+      if (!leadEmail && !leadPhone) {
+        throw new BookingError('validation', 'The lead traveller must carry an email or phone', 422);
+      }
+    } else {
+      if (!leadEmail) {
+        throw new BookingError('validation', 'The lead traveller needs an email address', 422);
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(leadEmail)) {
+        throw new BookingError('validation', 'Enter a valid email address for the lead traveller', 422);
+      }
+      if (!leadPhone) {
+        throw new BookingError('validation', 'The lead traveller needs a phone number', 422);
+      }
+      for (let i = 0; i < travellers.length; i++) {
+        if (!((travellers[i]?.name ?? '').trim())) {
+          throw new BookingError('validation', `Traveller ${i + 1} needs a name`, 422);
+        }
+      }
     }
+    if (lead) { lead.name = leadName; lead.email = leadEmail || null; lead.phone = leadPhone || null; }
 
     return db.tx(async (q) => {
       const tourRes = await q.query(

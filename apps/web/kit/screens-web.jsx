@@ -911,6 +911,12 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
   // is false and the DS prototype defaults render unchanged.
   const liveAuth = live && !!window.TK_AUTH;
   const [leadInfo, setLeadInfo] = React.useState({ name: "", email: "", phone: "", idNumber: "" });
+  // TRI-1157: checkout was accepting blank required fields. Track the terms tick + per-field
+  // validation errors so Continue/Pay can gate the step and surface a message inline instead of
+  // silently submitting fake defaults. `fieldErrs.comp` maps a companion index → its error.
+  const [agree, setAgree] = React.useState(false);
+  const [termsErr, setTermsErr] = React.useState(false);
+  const [fieldErrs, setFieldErrs] = React.useState({ comp: {} });
   const leadSeeded = React.useRef(false);
   React.useEffect(() => {
     if (!liveAuth) return undefined;
@@ -921,7 +927,7 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
     else window.TK_AUTH.me().then(seed, () => {});
     return () => { alive = false; };
   }, []);
-  const leadField = (k) => (e) => { const v = e && e.target ? e.target.value : ""; setLeadInfo((s) => ({ ...s, [k]: v })); };
+  const leadField = (k) => (e) => { const v = e && e.target ? e.target.value : ""; setLeadInfo((s) => ({ ...s, [k]: v })); if (fieldErrs[k]) setFieldErrs((fe) => ({ ...fe, [k]: undefined })); };
   // Selected departure: live picks the chosen one, falling back to a real API
   // departure when the prototype default "d2" doesn't exist. Off ⇒ departures[1].
   const d = (live ? t.departures.find(x => x.id === depId) : null) || t.departures[1] || t.departures[0];
@@ -974,14 +980,64 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
 
   const readVal = (id) => { const el = document.getElementById(id); return el && typeof el.value === "string" ? el.value.trim() : ""; };
   const buildTravellers = (lead) => {
-    const out = [{ name: lead.name || "Lead traveller", email: lead.email || undefined, phone: lead.phone || undefined, idNumber: lead.idNumber || undefined, lead: true }];
+    // TRI-1157: send the real field values — no "Lead traveller"/"Traveller N" masks. Blanks must reach
+    // the backend as blanks so its required-field checks (booking.ts) reject them instead of persisting
+    // a fabricated name. validateTravellers() gates this path so a well-formed submit never carries blanks.
+    const out = [{ name: lead.name || "", email: lead.email || undefined, phone: lead.phone || undefined, idNumber: lead.idNumber || undefined, isLead: true, lead: true }];
     // Read exactly pax-1 companion fields (w-t2 … w-t{pax}); the fields are
     // rendered dynamically from pax now (TRI-922) rather than a fixed 3.
-    for (let i = 1; i < pax; i++) out.push({ name: readVal("w-t" + (i + 1)) || ("Traveller " + (i + 1)), lead: false });
+    for (let i = 1; i < pax; i++) out.push({ name: readVal("w-t" + (i + 1)), isLead: false, lead: false });
     return out;
+  };
+  // TRI-1157: mirror the backend's required-field rules on the client so the guest gets an inline error
+  // before a doomed POST. The backend (booking.ts) is authoritative and rejects the same cases with 422.
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const validateTravellers = () => {
+    const name = (live ? leadInfo.name : readVal("w-name")).trim();
+    const email = (live ? leadInfo.email : readVal("w-email")).trim();
+    const phone = (live ? leadInfo.phone : readVal("w-phone")).trim();
+    const errs = { comp: {} };
+    if (!name) errs.name = "Enter the lead traveller's full name.";
+    if (!email) errs.email = "Enter an email address.";
+    else if (!EMAIL_RE.test(email)) errs.email = "Enter a valid email address.";
+    if (!phone) errs.phone = "Enter a phone number.";
+    for (let i = 1; i < pax; i++) {
+      if (!readVal("w-t" + (i + 1))) errs.comp[i + 1] = "Enter a name for this traveller.";
+    }
+    return errs;
+  };
+  const hasErrs = (e) => !!(e.name || e.email || e.phone || (e.comp && Object.keys(e.comp).length));
+  // Primary-button handler: gate each step. Travellers step requires complete contact fields; Review step
+  // requires the terms tick. Only the final step triggers payment. Flag off ⇒ the prototype step advance.
+  const onPrimary = () => {
+    if (!live) {
+      if (step !== 3) { setStep(step + 1); return; }
+      window.__payMode = mode;
+      go("confirm");
+      return;
+    }
+    if (step === 1) {
+      const errs = validateTravellers();
+      setFieldErrs(errs);
+      if (hasErrs(errs)) { if (window.tkToast) window.tkToast("Please complete the required traveller details."); return; }
+      setStep(2);
+      return;
+    }
+    if (step === 2) {
+      if (!agree) { setTermsErr(true); return; }
+      setStep(3);
+      return;
+    }
+    if (step === 3) { onPay(); return; }
+    setStep(step + 1);
   };
   async function onPay() {
     if (busy) return;
+    // Re-check at pay time in case the guest reached step 3 by clicking the stepper (TRI-1157): bounce
+    // back to the offending step rather than submit blanks the backend would 422 on anyway.
+    const gErrs = validateTravellers();
+    if (hasErrs(gErrs)) { setFieldErrs(gErrs); setStep(1); if (window.tkToast) window.tkToast("Please complete the required traveller details."); return; }
+    if (!agree) { setTermsErr(true); setStep(2); return; }
     setErr(null); setBusy(true); setPayState("processing");
     try {
       const lead = liveAuth
@@ -1001,7 +1057,9 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
         // TRI-1013: thread the applied promo code into the booking so the discount is actually charged.
         // The backend re-validates + re-applies it against the live subtotal (authoritative price of record).
         promoCode: (promo.state === "applied" && promo.code) ? promo.code : undefined,
-        agreedTerms: true,
+        // TRI-1157: send the guest's real terms decision (was hardcoded true). onPrimary/onPay above
+        // guarantee `agree` is true before we reach here; the backend also rejects agreedTerms !== true.
+        agreedTerms: agree,
         payMode: mode,
       });
       if (!bk || !bk.ref) throw new Error("We couldn't create your booking. Please try again.");
@@ -1050,9 +1108,9 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
             <div className="tk-card"><div className="tk-card__body" style={{ gap: "var(--space-4)", padding: "var(--space-5)" }}>
               <span className="tk-overline">Lead traveller</span>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-4)" }}>
-                <FormField id="w-name" label="Full name" required>{liveAuth ? <Input value={leadInfo.name} onChange={leadField("name")} /> : <Input defaultValue="Ama Mensah" />}</FormField>
-                <FormField id="w-email" label="Email address" required>{liveAuth ? <Input value={leadInfo.email} onChange={leadField("email")} /> : <Input defaultValue="ama@example.com" />}</FormField>
-                <FormField id="w-phone" label="Phone number" required>{liveAuth ? <Input value={leadInfo.phone} onChange={leadField("phone")} /> : <Input defaultValue="024 555 0142" />}</FormField>
+                <FormField id="w-name" label="Full name" required error={fieldErrs.name}>{liveAuth ? <Input value={leadInfo.name} onChange={leadField("name")} /> : <Input defaultValue="Ama Mensah" />}</FormField>
+                <FormField id="w-email" label="Email address" required error={fieldErrs.email}>{liveAuth ? <Input type="email" value={leadInfo.email} onChange={leadField("email")} /> : <Input defaultValue="ama@example.com" />}</FormField>
+                <FormField id="w-phone" label="Phone number" required error={fieldErrs.phone}>{liveAuth ? <Input type="tel" value={leadInfo.phone} onChange={leadField("phone")} /> : <Input defaultValue="024 555 0142" />}</FormField>
                 <FormField id="w-id" label="ID number" optional>{liveAuth ? <Input value={leadInfo.idNumber} onChange={leadField("idNumber")} placeholder="Ghana Card or passport" /> : <Input placeholder="Ghana Card or passport" />}</FormField>
               </div>
             </div></div>
@@ -1062,7 +1120,7 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
                   <span className="tk-overline">{pax === 2 ? "Traveller 2" : "Travellers 2–" + pax}</span>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-4)" }}>
                     {Array.from({ length: pax - 1 }, (_, i) => (
-                      <FormField key={i} id={"w-t" + (i + 2)} label={"Traveller " + (i + 2)} required><Input placeholder="Full name" /></FormField>
+                      <FormField key={i} id={"w-t" + (i + 2)} label={"Traveller " + (i + 2)} required error={fieldErrs.comp && fieldErrs.comp[i + 2]}><Input placeholder="Full name" onChange={() => { if (fieldErrs.comp && fieldErrs.comp[i + 2]) setFieldErrs((fe) => ({ ...fe, comp: { ...fe.comp, [i + 2]: undefined } })); }} /></FormField>
                     ))}
                   </div>
                 </div></div>)
@@ -1085,7 +1143,8 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
               <div className="tk-summary__line"><span>Travellers</span><span>{pax}</span></div>
               <div className="tk-summary__line"><span>Lead traveller</span><span>{liveAuth ? ((leadInfo.name || "—") + " · " + (leadInfo.email || "—")) : "Ama Mensah · ama@example.com"}</span></div>
             </div></div>
-            <Checkbox id="w-agree" label="I agree to the booking terms and cancellation policy" />
+            <Checkbox id="w-agree" label="I agree to the booking terms and cancellation policy" checked={live ? agree : undefined} onChange={live ? (e) => { setAgree(!!(e.target && e.target.checked)); if (e.target && e.target.checked) setTermsErr(false); } : undefined} />
+            {live && termsErr && <p className="tk-error" role="alert" style={{ marginTop: 4 }}><Icon name="circle-alert" size={14} style={{ marginTop: 1 }} />You must agree to the booking terms to continue.</p>}
           </>}
           {step === 3 && <>
             <h1 className="tk-h2">How would you like to pay?</h1>
@@ -1094,7 +1153,7 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
           </>}
           <div className="tk-row" style={{ gap: 12, justifyContent: "space-between", paddingTop: "var(--space-4)", borderTop: "1px solid var(--border-subtle)" }}>
             <Button variant="secondary" iconStart="arrow-left" onClick={() => setStep(Math.max(0, step - 1))} disabled={step === 0}>Back</Button>
-            <Button size="lg" disabled={live ? busy : undefined} iconEnd={step === 3 && mode === "now" ? "external-link" : undefined} onClick={() => { if (step !== 3) { setStep(step + 1); return; } if (live) { onPay(); return; } window.__payMode = mode; go("confirm"); }}>{live && busy ? "Processing…" : (step === 3 ? (mode === "now" ? "Pay " + money(netTotal, currency) + " with Paystack" : "Confirm booking") : "Continue")}</Button>
+            <Button size="lg" disabled={live ? busy : undefined} iconEnd={step === 3 && mode === "now" ? "external-link" : undefined} onClick={onPrimary}>{live && busy ? "Processing…" : (step === 3 ? (mode === "now" ? "Pay " + money(netTotal, currency) + " with Paystack" : "Confirm booking") : "Continue")}</Button>
           </div>
         </div>
         <OrderSummary sticky lines={[{ label: money(unit, currency) + "/person × " + pax + (pax === 1 ? " traveller" : " travellers"), amount: cvt(total, currency) }]} total={cvt(netTotal, currency)} currency={currency} payMode={mode}
