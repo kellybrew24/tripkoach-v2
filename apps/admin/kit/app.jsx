@@ -55,12 +55,16 @@ function navGroups(role) {
 // TRI-978 #4: build the top-right notifications feed from real hydrated data.
 // Categories mirror what an operator actually needs to see; each row deep-links
 // to the relevant screen. Returns [] when nothing needs attention.
+// TRI-1128: every row carries a STABLE `id` so read-state (below) can key off it
+// and survive re-renders. The id is derived from the underlying record, not the
+// row position, so a notification is "the same" across renders until the
+// operational condition that produced it resolves (and the row disappears).
 function buildNotifications(role, go) {
   const A = window.TK_ADMIN || {};
   const out = [];
   // Bookings awaiting confirmation (held, payment pending).
   (A.bookings || []).filter((b) => b.status === "pending").slice(0, 6).forEach((b) => {
-    out.push({ icon: "ticket", tone: "pending", text: "Booking " + b.ref + " awaiting confirmation — " + b.tour, time: b.created || "", onClick: () => go("bookings", b.ref) });
+    out.push({ id: "pending:" + b.ref, icon: "ticket", tone: "pending", text: "Booking " + b.ref + " awaiting confirmation — " + b.tour, time: b.created || "", onClick: () => go("bookings", b.ref) });
   });
   // Failed payments — skip cancelled bookings (moot) and dedupe by reference.
   const cancelled = new Set((A.bookings || []).filter((b) => b.status === "cancelled").map((b) => b.ref));
@@ -68,7 +72,7 @@ function buildNotifications(role, go) {
   (A.payments || []).filter((p) => p.status === "failed").forEach((p) => {
     if (!p.ref || seen[p.ref] || cancelled.has(p.ref)) return;
     seen[p.ref] = 1;
-    out.push({ icon: "triangle-alert", tone: "failed", text: "Payment failed on " + p.ref, time: "", onClick: () => go("bookings", p.ref) });
+    out.push({ id: "failed:" + p.ref, icon: "triangle-alert", tone: "failed", text: "Payment failed on " + p.ref, time: "", onClick: () => go("bookings", p.ref) });
   });
   // Nearly-full scheduled departures (>=90% booked).
   (A.departures || []).filter((d) => d.status === "scheduled").forEach((d) => {
@@ -76,9 +80,26 @@ function buildNotifications(role, go) {
     const left = d.spotsLeft != null ? Number(d.spotsLeft) : NaN;
     if (!cap || isNaN(left)) return;
     const pct = Math.round((1 - left / cap) * 100);
-    if (pct >= 90) out.push({ icon: "calendar-days", tone: "warning", text: (d.tour || "Departure") + " on " + (d.date || "") + " is " + pct + "% full", time: "", onClick: () => go("departures") });
+    if (pct >= 90) out.push({ id: "full:" + (d.id || (d.tour || "") + "@" + (d.date || "")), icon: "calendar-days", tone: "warning", text: (d.tour || "Departure") + " on " + (d.date || "") + " is " + pct + "% full", time: "", onClick: () => go("departures") });
   });
   return out.slice(0, 12);
+}
+
+// TRI-1128: notification read-state. The feed above is DERIVED from live console
+// data (there is no notifications table), so "read" is per-operator client state
+// keyed by the stable notification id and persisted in localStorage. Marking a
+// row read clears it from the unread badge count; the row itself stays in the
+// panel until the underlying condition resolves. The stored set is pruned to the
+// currently-live ids on every write so it can never grow unbounded.
+const NOTIF_READ_KEY = "tk.admin.notif.read";
+function loadNotifRead() {
+  try {
+    const v = JSON.parse(window.localStorage.getItem(NOTIF_READ_KEY) || "[]");
+    return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+  } catch (_) { return []; }
+}
+function saveNotifRead(ids) {
+  try { window.localStorage.setItem(NOTIF_READ_KEY, JSON.stringify(ids)); } catch (_) {}
 }
 
 // TRI-1010: the dashboard greeting used to hardcode "Wednesday 22 August · Good afternoon"
@@ -177,6 +198,8 @@ function AdminApp() {
     window.addEventListener("tk-admin-mutated", onMutated);
     return () => window.removeEventListener("tk-admin-mutated", onMutated);
   }, []);
+  // TRI-1128: read notification ids (see buildNotifications / loadNotifRead).
+  const [notifRead, setNotifRead] = React.useState(loadNotifRead);
   // Role/user come from the live session when signed in; otherwise the demo/
   // fixture identity (unchanged prototype behaviour).
   const session = tkSession();
@@ -329,12 +352,30 @@ function AdminApp() {
   // TopBar from falling back to its built-in demo notifications when the feed is
   // empty — instead we show an explicit "all caught up" row.
   const notifs = buildNotifications(role, go);
-  const notifCount = notifs.length;
-  const notifItems = notifCount ? notifs
+  // TRI-1128: mark the given ids read and persist, pruned to the live feed so the
+  // stored set stays bounded. Marking read only clears the unread badge — the row
+  // remains actionable in the panel until its underlying condition resolves.
+  const markNotifRead = (ids) => setNotifRead((prev) => {
+    const live = new Set(notifs.map((n) => n.id));
+    const next = Array.from(new Set(prev.concat(ids))).filter((id) => live.has(id));
+    saveNotifRead(next);
+    return next;
+  });
+  const readSet = new Set(notifRead);
+  // Each row: flag unread state and wrap click-through so acting on a notification
+  // also marks it read (then still deep-links). The empty-state row has no id.
+  const notifItems = notifs.length
+    ? notifs.map((n) => ({
+        ...n,
+        unread: !readSet.has(n.id),
+        onClick: n.onClick ? () => { markNotifRead([n.id]); n.onClick(); } : undefined,
+      }))
     : [{ icon: "check", tone: "success", text: "You're all caught up", time: "Nothing needs attention" }];
+  const notifCount = notifs.filter((n) => !readSet.has(n.id)).length; // unread badge
   return (
     <Frame demo={demo} setDemo={setDemo} screen={screen} go={go}>
       <AppShell groups={navGroups(role)} current={navCurrent} onNavigate={go} notifications={notifCount} notificationItems={notifItems}
+        onMarkAllRead={() => markNotifRead(notifs.map((n) => n.id))}
         user={user} onSignOut={signOut} onProfile={() => go("admin-profile")} onPreferences={() => go("admin-prefs")} logoSrc="../../assets/logo-badge.png">
         <PageHeader title={meta.title} subtitle={forbidden ? null : meta.sub} breadcrumbs={crumbs} actions={forbidden ? null : actions} />
         {body}

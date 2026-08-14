@@ -933,6 +933,7 @@ function TopBar({
   searchPlaceholder = "Search bookings, tours, customers…",
   notifications = 0,
   notificationItems = [],
+  onMarkAllRead,
   user,
   onSignOut,
   onProfile,
@@ -1083,7 +1084,17 @@ function TopBar({
     style: {
       marginTop: 2
     }
-  }, n.time)), n.onClick && /*#__PURE__*/React.createElement(__ds_scope.Icon, {
+  }, n.time)), n.unread && /*#__PURE__*/React.createElement("span", {
+    "aria-label": "Unread",
+    style: {
+      flex: "none",
+      alignSelf: "center",
+      width: 8,
+      height: 8,
+      borderRadius: "50%",
+      background: "var(--brand-gold-deep, var(--text-link))"
+    }
+  }), n.onClick && /*#__PURE__*/React.createElement(__ds_scope.Icon, {
     name: "chevron-right",
     size: 14,
     style: {
@@ -1094,11 +1105,14 @@ function TopBar({
   })))), /*#__PURE__*/React.createElement("button", {
     type: "button",
     className: "tk-menu__item",
+    disabled: !notifications,
+    onClick: () => onMarkAllRead && onMarkAllRead(),
     style: {
       justifyContent: "center",
-      color: "var(--text-link)",
+      color: notifications ? "var(--text-link)" : "var(--text-subtle)",
       fontWeight: 600,
-      borderTop: "1px solid var(--border-subtle)"
+      borderTop: "1px solid var(--border-subtle)",
+      cursor: notifications ? "pointer" : "default"
     }
   }, "Mark all as read"))), /*#__PURE__*/React.createElement("button", {
     type: "button",
@@ -1260,6 +1274,7 @@ function AppShell({
   user,
   notifications,
   notificationItems,
+  onMarkAllRead,
   onSignOut,
   onProfile,
   onPreferences,
@@ -1285,6 +1300,7 @@ function AppShell({
     onToggleNav: () => setCollapsed(c => !c),
     notifications: notifications,
     notificationItems: notificationItems,
+    onMarkAllRead: onMarkAllRead,
     user: user,
     onSignOut: onSignOut,
     onProfile: onProfile,

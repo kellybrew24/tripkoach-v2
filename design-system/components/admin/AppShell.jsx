@@ -27,7 +27,7 @@ export function SideNav({ groups = [], current, onNavigate, collapsed, brand = "
   );
 }
 
-export function TopBar({ onToggleNav, searchPlaceholder = "Search bookings, tours, customers…", notifications = 0, notificationItems = [], user, onSignOut, onProfile, onPreferences, children }) {
+export function TopBar({ onToggleNav, searchPlaceholder = "Search bookings, tours, customers…", notifications = 0, notificationItems = [], onMarkAllRead, user, onSignOut, onProfile, onPreferences, children }) {
   const [menu, setMenu] = React.useState(null); // "notif" | "user" | null
   React.useEffect(() => {
     if (!menu) return;
@@ -67,11 +67,12 @@ export function TopBar({ onToggleNav, searchPlaceholder = "Search bookings, tour
                   <button key={i} type="button" onClick={() => { setMenu(null); n.onClick && n.onClick(); }} style={{ display: "flex", gap: 10, padding: "11px 14px", borderTop: i ? "1px solid var(--border-subtle)" : "none", width: "100%", textAlign: "start", background: "transparent", border: 0, cursor: n.onClick ? "pointer" : "default" }}>
                     <span style={{ flex: "none", width: 30, height: 30, borderRadius: "50%", display: "grid", placeItems: "center", background: "var(--" + (n.tone || "info") + "-bg)", color: "var(--" + (n.tone || "info") + "-fg)" }}><Icon name={n.icon} size={15} /></span>
                     <span style={{ minWidth: 0, flex: 1 }}><div style={{ fontSize: 13, color: "var(--text-body)", lineHeight: 1.4 }}>{n.text}</div><div className="tk-caption" style={{ marginTop: 2 }}>{n.time}</div></span>
+                    {n.unread && <span aria-label="Unread" style={{ flex: "none", alignSelf: "center", width: 8, height: 8, borderRadius: "50%", background: "var(--brand-gold-deep, var(--text-link))" }} />}
                     {n.onClick && <Icon name="chevron-right" size={14} style={{ color: "var(--text-subtle)", alignSelf: "center", flex: "none" }} />}
                   </button>
                 ))}
               </div>
-              <button type="button" className="tk-menu__item" style={{ justifyContent: "center", color: "var(--text-link)", fontWeight: 600, borderTop: "1px solid var(--border-subtle)" }}>Mark all as read</button>
+              <button type="button" className="tk-menu__item" disabled={!notifications} onClick={() => onMarkAllRead && onMarkAllRead()} style={{ justifyContent: "center", color: notifications ? "var(--text-link)" : "var(--text-subtle)", fontWeight: 600, borderTop: "1px solid var(--border-subtle)", cursor: notifications ? "pointer" : "default" }}>Mark all as read</button>
             </div>
           )}
         </div>
@@ -127,13 +128,13 @@ export function PageHeader({ title, subtitle, breadcrumbs = [], actions }) {
   );
 }
 
-export function AppShell({ groups, current, onNavigate, user, notifications, notificationItems, onSignOut, onProfile, onPreferences, brand, logoSrc, topbarExtra, children }) {
+export function AppShell({ groups, current, onNavigate, user, notifications, notificationItems, onMarkAllRead, onSignOut, onProfile, onPreferences, brand, logoSrc, topbarExtra, children }) {
   const [collapsed, setCollapsed] = React.useState(false);
   return (
     <div className="tk-shell" data-collapsed={collapsed}>
       <SideNav groups={groups} current={current} onNavigate={onNavigate} collapsed={collapsed} brand={brand} logoSrc={logoSrc} />
       <div className="tk-shell__main">
-        <TopBar onToggleNav={() => setCollapsed(c => !c)} notifications={notifications} notificationItems={notificationItems} user={user} onSignOut={onSignOut} onProfile={onProfile} onPreferences={onPreferences}>{topbarExtra}</TopBar>
+        <TopBar onToggleNav={() => setCollapsed(c => !c)} notifications={notifications} notificationItems={notificationItems} onMarkAllRead={onMarkAllRead} user={user} onSignOut={onSignOut} onProfile={onProfile} onPreferences={onPreferences}>{topbarExtra}</TopBar>
         <div className="tk-page">{children}</div>
       </div>
     </div>
