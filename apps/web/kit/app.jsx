@@ -58,7 +58,9 @@ function routeFromPath(pathname, search) {
   const rv = path.match(/^\/reviews\/redeem\/(.+)$/);
   if (rv) return { screen: "review", slug: null, token: decodeURIComponent(rv[1]) };
   const hit = ROUTES.find(([, p]) => p === path);
-  const screen = hit ? hit[0] : "home";
+  // Unknown paths resolve to a real 404 screen (TRI-1117) instead of silently
+  // rendering home, so a mistyped or dead link is clearly signalled.
+  const screen = hit ? hit[0] : "notfound";
   // Deep-link region filter (TRI-940): /browse?region=<name> pre-applies that
   // region on the Tours screen. Only the browse route reads it; elsewhere null.
   let region = null;
@@ -142,7 +144,8 @@ function tkSetCanonical(href) {
 // Screens kept out of the search index: auth, checkout and anything behind a
 // login. Everything else is indexable marketing/catalogue surface.
 const TK_NOINDEX = ["login", "signup", "forgot", "verify", "checkout", "confirm",
-  "bookings", "booking", "profile", "notifications", "account-settings", "review", "reviews"];
+  "bookings", "booking", "profile", "notifications", "account-settings", "review", "reviews",
+  "notfound"];
 const TK_SCREEN_META = {
   home: { title: "TripKoach — Guided tours across Ghana", desc: TK_DEFAULT_DESC },
   browse: { title: "Browse tours — TripKoach", desc: "Explore guided tour packages across Ghana's regions. Filter by region, compare prices and reserve your spot." },
@@ -154,6 +157,7 @@ const TK_SCREEN_META = {
   about: { title: "About TripKoach", desc: "Why TripKoach exists and how a local koach makes exploring Ghana effortless." },
   contact: { title: "Contact TripKoach", desc: "Plan a trip, ask a question or partner with us — we reply fast." },
   blog: { title: "Stories — TripKoach", desc: "Field notes, destination guides and travel stories from across Ghana." },
+  notfound: { title: "Page not found — TripKoach", desc: "The page you were looking for doesn't exist. Browse guided tours across Ghana instead." },
 };
 function tkOgImage(src, origin) {
   // Only trust absolute (CDN/R2) image URLs for social cards; anything else
@@ -312,7 +316,8 @@ function WebApp() {
     blog: <BlogIndex go={go} />,
     post: (LIVE_API() && slug && postReady !== slug) ? <TourDetailLoading label="Loading story…" /> : <BlogPost go={go} slug={slug} />,
     review: <ReviewInvitePage go={go} token={reviewToken} />,
-  }[screen] || <HomeWeb go={go} />;
+    notfound: <NotFoundWeb go={go} />,
+  }[screen] || <NotFoundWeb go={go} />;
 
   const AUTH = screen === "login" || screen === "signup" || screen === "forgot" || screen === "verify";
   return AUTH ? body : <Shell currency={currency} setCurrency={setCurrency} go={go} screen={screen}>{body}</Shell>;

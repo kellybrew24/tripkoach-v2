@@ -4,6 +4,25 @@
 window.TK_IMG = function (slug, name) {
   return "https://cdn.tripkoach.com/img/tours/" + slug + "/" + (name || "hero-480") + ".jpg";
 };
+// Responsive images (TRI-1117). The CDN bakes named width variants into the
+// path (…/<slug>/<base>-<w>.jpg). These are the ONLY widths it serves — verified
+// live on cdn.tripkoach.com (480 / 960 / 1440; 768/1024/1920 return 404) — so
+// this list is the single source of truth for every srcset the web app emits.
+// Keep it in lock-step with what the media pipeline actually produces.
+window.TK_IMG_WIDTHS = [480, 960, 1440];
+window.TK_SRCSET = function (slug, base) {
+  base = base || "hero";
+  return window.TK_IMG_WIDTHS
+    .map(function (w) { return window.TK_IMG(slug, base + "-" + w) + " " + w + "w"; })
+    .join(", ");
+};
+// `sizes` presets keyed to the layouts that render tour imagery, so browsers on
+// small screens / low-DPR displays fetch 480–960 instead of the 1440 hero.
+window.TK_SIZES = {
+  card: "(max-width: 640px) 92vw, (max-width: 1024px) 46vw, 380px",
+  hero: "100vw",
+  gallery: "(max-width: 720px) 92vw, 560px",
+};
 window.TK_DATA = {
   tours: [
     { id:"accra-city-tour", title:"Accra City Tour", region:"Greater Accra", duration:"3 to 4 hrs · Half day",

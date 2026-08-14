@@ -364,17 +364,30 @@ const TK_GRADS = [
   "linear-gradient(145deg,#5a7d8f 0%,#2f4b58 100%)",
   "linear-gradient(145deg,#a8562f 0%,#5e2c18 100%)",
 ];
-function TourImage({ src, alt, label, gi = 0, showLabel = true }) {
+// Tour imagery with a shared loading / error state (TRI-1117). A branded gradient
+// tile stands in until the photo decodes (loading state) and stays put — with the
+// region label — if it fails or is missing (error state), so a slow or dead CDN
+// image never shows a blank box. `srcSet`/`sizes` make the hero responsive.
+function TourImage({ src, alt, label, gi = 0, showLabel = true, srcSet, sizes }) {
   const [err, setErr] = React.useState(false);
-  if (err || !src) {
-    return (
-      <div aria-label={alt} role="img" style={{ position: "absolute", inset: 0, background: TK_GRADS[gi % TK_GRADS.length], display: "grid", placeItems: "center" }}>
-        <span style={{ position: "absolute", inset: 0, background: "radial-gradient(120% 90% at 20% 15%, rgba(255,255,255,.16), transparent 60%)" }} />
-        {showLabel && <span style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 7, color: "rgba(255,255,255,.94)", fontWeight: 700, fontSize: 13.5, letterSpacing: ".01em", textShadow: "0 1px 4px rgba(0,0,0,.35)" }}><Icon name="map-pin" size={16} />{label || "Ghana"}</span>}
-      </div>
-    );
-  }
-  return <img src={src} alt={alt} loading="lazy" decoding="async" onError={() => setErr(true)} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />;
+  const [loaded, setLoaded] = React.useState(false);
+  const failed = err || !src;
+  const placeholder = (
+    <div aria-label={failed ? alt : undefined} role={failed ? "img" : undefined} aria-hidden={failed ? undefined : true}
+      style={{ position: "absolute", inset: 0, background: TK_GRADS[gi % TK_GRADS.length], display: "grid", placeItems: "center" }}>
+      <span style={{ position: "absolute", inset: 0, background: "radial-gradient(120% 90% at 20% 15%, rgba(255,255,255,.16), transparent 60%)" }} />
+      {showLabel && failed && <span style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 7, color: "rgba(255,255,255,.94)", fontWeight: 700, fontSize: 13.5, letterSpacing: ".01em", textShadow: "0 1px 4px rgba(0,0,0,.35)" }}><Icon name="map-pin" size={16} />{label || "Ghana"}</span>}
+    </div>
+  );
+  if (failed) return placeholder;
+  return (
+    <React.Fragment>
+      {!loaded && placeholder}
+      <img src={src} srcSet={srcSet || undefined} sizes={srcSet ? (sizes || undefined) : undefined} alt={alt} loading="lazy" decoding="async"
+        onLoad={() => setLoaded(true)} onError={() => setErr(true)}
+        style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", opacity: loaded ? 1 : 0, transition: "opacity var(--dur-slow) var(--ease-standard)" }} />
+    </React.Fragment>
+  );
 }
 function tourGallery(t) {
   const caps = (t.highlights && t.highlights.length) ? t.highlights : [t.region + ", Ghana"];
@@ -440,7 +453,7 @@ function TourHero({ t, go }) {
     <>
     <div style={{ borderRadius: "var(--radius-card)", overflow: "hidden", boxShadow: "var(--elev-2)", border: "1px solid var(--border-subtle)" }}>
       <div style={{ position: "relative", aspectRatio: "21/9", minHeight: 320, cursor: "pointer", background: TK_GRADS[0] }} onClick={() => open(0)}>
-        <TourImage src={t.image} alt={t.title} label={t.region + ", Ghana"} gi={0} showLabel={true} />
+        <TourImage src={t.image} srcSet={t.image ? window.TK_SRCSET(t.id, "hero") : null} sizes={window.TK_SIZES.hero} alt={t.title} label={t.region + ", Ghana"} gi={0} showLabel={true} />
         <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(20,19,18,.86) 0%, rgba(20,19,18,.42) 34%, rgba(20,19,18,.05) 60%, rgba(20,19,18,.18) 100%)" }} />
         <div style={{ position: "absolute", insetInline: 0, top: 0, padding: "var(--space-5)", display: "flex", justifyContent: "flex-end" }}>
           <button type="button" onClick={(e) => { e.stopPropagation(); open(0); }}
@@ -1537,7 +1550,7 @@ function BookingDetailWeb({ go, currency = "USD", bref }) {
   );
   if (phase !== "ready" || !dto) return (
     <Wrap>
-      <EmptyState title="Booking not found" description={ref ? ("We couldn't find booking " + ref + ". If you followed a link from your email, make sure you copied the whole address.") : "No booking reference was provided."}
+      <EmptyState icon="search" title="Booking not found" body={ref ? ("We couldn't find booking " + ref + ". If you followed a link from your email, make sure you copied the whole address.") : "No booking reference was provided."}
         action={<Button variant="secondary" onClick={() => go(backTo.screen)}>{authed ? "Back to my bookings" : "Back to home"}</Button>} />
     </Wrap>
   );

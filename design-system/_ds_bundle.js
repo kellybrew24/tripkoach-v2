@@ -2350,12 +2350,25 @@ Object.assign(__ds_scope, { Rating });
 
 // components/commerce/TourCard.jsx
 try { (() => {
+// Derive a width-variant srcset from a CDN image URL that ends in `-<w>.jpg`
+// (TRI-1117). Card thumbs never need the 1440 hero: with `sizes` capped to the
+// card column a browser picks 480/960 and only retina fetches the larger step.
+// URLs without a `-<width>` suffix (e.g. a bare hero.jpg) return null so we never
+// point srcset at a variant the CDN doesn't serve.
+function __tkTourSrcset(u) {
+  if (typeof u !== "string") return null;
+  var m = u.match(/^(.*)-\d+\.jpg$/);
+  if (!m) return null;
+  var stem = m[1];
+  return [480, 960, 1440].map(function (w) { return stem + "-" + w + ".jpg " + w + "w"; }).join(", ");
+}
 function TourCard({
   title,
   region,
   duration,
   image,
   imageAlt = "",
+  imageSizes = "(max-width: 640px) 92vw, (max-width: 1024px) 46vw, 380px",
   price,
   currency = "GHS",
   approxPrice,
@@ -2366,12 +2379,15 @@ function TourCard({
   variant = "grid",
   href = "#"
 }) {
+  var __srcset = __tkTourSrcset(image);
   return /*#__PURE__*/React.createElement("article", {
     className: ["tk-card", "tk-card--interactive", "tk-tourcard", variant === "row" && "tk-tourcard--row"].filter(Boolean).join(" ")
   }, /*#__PURE__*/React.createElement("div", {
     className: "tk-media"
   }, image ? /*#__PURE__*/React.createElement("img", {
     src: image,
+    srcSet: __srcset || undefined,
+    sizes: __srcset ? imageSizes : undefined,
     alt: imageAlt,
     loading: "lazy",
     decoding: "async"

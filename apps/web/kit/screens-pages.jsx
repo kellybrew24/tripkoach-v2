@@ -402,4 +402,26 @@ function ClubPage({ go }) {
     </div>
   );
 }
-Object.assign(window, { RegionsPage, EsimPage, PickupPage, AboutPage, ContactPage, MarketplacePage, ClubPage });
+// 404 — real "page not found" screen (TRI-1117). Before this, any unknown URL
+// silently rendered the home page, so a mistyped or dead link looked like a
+// working homepage with no signal that the address was wrong. Now the router
+// resolves unmatched paths to this screen, which reuses the shared EmptyState
+// state primitive and offers clear ways back into the catalogue.
+function NotFoundWeb({ go }) {
+  return (
+    <div className="tk-container" style={{ paddingBlock: "var(--space-12) var(--space-14)", maxWidth: 720, minHeight: "56vh", display: "grid", placeItems: "center" }}>
+      <EmptyState
+        icon="compass"
+        title="We couldn't find that page"
+        body="The link may be broken or the page may have moved. Let's get you back on the trail."
+        action={
+          <div className="tk-row" style={{ gap: "var(--space-3)", justifyContent: "center", flexWrap: "wrap" }}>
+            <Button variant="primary" onClick={() => go("browse")}>Browse tours</Button>
+            <Button variant="secondary" onClick={() => go("home")}>Back to home</Button>
+          </div>
+        }
+      />
+    </div>
+  );
+}
+Object.assign(window, { RegionsPage, EsimPage, PickupPage, AboutPage, ContactPage, MarketplacePage, ClubPage, NotFoundWeb });

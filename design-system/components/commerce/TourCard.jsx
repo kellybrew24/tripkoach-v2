@@ -5,14 +5,29 @@ import { Rating } from "../data-display/Rating.jsx";
 import { AvailabilityBadge } from "../data-display/AvailabilityBadge.jsx";
 import { Button } from "../actions/Button.jsx";
 
+// Derive a width-variant srcset from a CDN image URL that ends in `-<w>.jpg`
+// (TRI-1117). Card thumbs never need the 1440 hero: with `sizes` capped to the
+// card column a browser picks 480/960 and only retina fetches the larger step.
+// URLs without a `-<width>` suffix return null so srcset never points at a
+// variant the CDN doesn't serve.
+function tourSrcset(u) {
+  if (typeof u !== "string") return null;
+  const m = u.match(/^(.*)-\d+\.jpg$/);
+  if (!m) return null;
+  return [480, 960, 1440].map((w) => `${m[1]}-${w}.jpg ${w}w`).join(", ");
+}
+
 export function TourCard({
-  title, region, duration, image, imageAlt = "", price, currency = "GHS", approxPrice,
+  title, region, duration, image, imageAlt = "",
+  imageSizes = "(max-width: 640px) 92vw, (max-width: 1024px) 46vw, 380px",
+  price, currency = "GHS", approxPrice,
   rating, reviewCount, spotsLeft, tag, variant = "grid", href = "#",
 }) {
+  const srcset = tourSrcset(image);
   return (
     <article className={["tk-card", "tk-card--interactive", "tk-tourcard", variant === "row" && "tk-tourcard--row"].filter(Boolean).join(" ")}>
       <div className="tk-media">
-        {image ? <img src={image} alt={imageAlt} loading="lazy" decoding="async" />
+        {image ? <img src={image} srcSet={srcset || undefined} sizes={srcset ? imageSizes : undefined} alt={imageAlt} loading="lazy" decoding="async" />
                : <span className="tk-media__ph">Tour photo</span>}
         {tag && <span className="tk-media__tag"><span className="tk-badge tk-badge--solid">{tag}</span></span>}
       </div>

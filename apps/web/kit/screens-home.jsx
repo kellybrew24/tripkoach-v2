@@ -62,7 +62,7 @@ function HomeWeb({ go }) {
     <div>
       {/* ── HERO ────────────────────────────────────────── */}
       <section style={{ position: "relative", minHeight: "min(90vh, 760px)", display: "flex", alignItems: "flex-end", overflow: "hidden", background: "var(--n-900)" }}>
-        <img src={HERO} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", opacity: 0.9 }} />
+        <img src={HERO} srcSet={window.TK_SRCSET("discover-ghana-in-10-days", "hero")} sizes={window.TK_SIZES.hero} alt="" fetchpriority="high" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", opacity: 0.9 }} />
         <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(20,19,18,.35) 0%, rgba(20,19,18,.15) 40%, rgba(20,19,18,.82) 100%)" }} />
         <div className="tk-container" style={{ position: "relative", maxWidth: 1200, paddingBottom: "var(--space-12)", paddingTop: "var(--space-16)", color: "var(--n-0)" }}>
           <div style={{ display: "inline-flex", alignItems: "center", gap: 10, padding: "6px 14px", borderRadius: 999, background: "rgba(255,255,255,.14)", backdropFilter: "blur(6px)", border: "1px solid rgba(255,255,255,.24)", marginBottom: "var(--space-5)" }}>
@@ -123,7 +123,7 @@ function HomeWeb({ go }) {
             .map((r, i) => (
             <a key={r.name} href={"/browse?region=" + encodeURIComponent(r.name)} onClick={(e) => { e.preventDefault(); go("browse", r.name); }} className="tk-region"
               style={{ position: "relative", display: "block", borderRadius: "var(--radius-card)", overflow: "hidden", aspectRatio: i === 0 ? "2 / 1.35" : "1 / 1", gridColumn: i === 0 ? "span 2" : "span 1", gridRow: i === 0 ? "span 1" : "auto", textDecoration: "none", background: "var(--n-800)", boxShadow: "var(--elev-1)" }}>
-              <img src={IMG(r.slug)} alt="" loading="lazy" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", transition: "transform var(--dur-slow) var(--ease-standard)" }} />
+              <img src={IMG(r.slug)} srcSet={window.TK_SRCSET(r.slug, "hero")} sizes={window.TK_SIZES.card} alt="" loading="lazy" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", transition: "transform var(--dur-slow) var(--ease-standard)" }} />
               <span style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(20,19,18,0) 30%, rgba(20,19,18,.78) 100%)" }} />
               <span style={{ position: "absolute", left: 16, right: 16, bottom: 14, color: "var(--n-0)" }}>
                 <span style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
@@ -264,7 +264,7 @@ function HomeWeb({ go }) {
       {/* ── CTA ─────────────────────────────────────────── */}
       <Section style={{ paddingTop: 0 }}>
         <div style={{ position: "relative", overflow: "hidden", borderRadius: "var(--radius-2xl)", background: "var(--n-900)", color: "var(--n-0)", padding: "clamp(40px, 6vw, 80px)" }}>
-          <img src={IMG("aburi-akosombo-and-boti-falls")} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", opacity: 0.28 }} />
+          <img src={IMG("aburi-akosombo-and-boti-falls")} srcSet={window.TK_SRCSET("aburi-akosombo-and-boti-falls", "hero")} sizes={window.TK_SIZES.hero} alt="" loading="lazy" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", opacity: 0.28 }} />
           <div style={{ position: "relative", maxWidth: 640 }}>
             <h2 style={{ fontFamily: "var(--font-display)", fontWeight: 800, letterSpacing: "-0.03em", lineHeight: 1.0, fontSize: "clamp(32px,4.4vw,60px)", margin: 0 }}>
               Ready when you are.
