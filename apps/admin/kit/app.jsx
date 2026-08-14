@@ -27,6 +27,9 @@ function navGroups(role) {
       // dashboard's real "Pending confirmation" figure. Drive it off the real,
       // hydrated bookings so it matches — pending = awaiting confirmation.
       { id: "bookings", label: "Bookings", icon: "ticket", badge: ((window.TK_ADMIN && window.TK_ADMIN.bookings) || []).filter(function (b) { return b.status === "pending"; }).length || undefined },
+      // TRI-1139: custom-date requests inbox (TRI-1136 B1, CEO #3). Same RBAC as Bookings
+      // (NOT admin-only) so operators triage them. "New" count drives the live badge.
+      { id: "requests", label: "Requests", icon: "message-square", badge: ((window.TK_ADMIN && window.TK_ADMIN.requests) || []).filter(function (r) { return (r.status || "New") === "New"; }).length || undefined },
       { id: "departures", label: "Departures", icon: "calendar-days" },
       { id: "customers", label: "Customers", icon: "users" },
       { id: "guides", label: "Guides", icon: "user" },
@@ -118,6 +121,7 @@ function dashGreeting(greet) {
 const META = {
   dashboard: { title: "Dashboard", sub: "Your daily overview" },
   bookings: { title: "Bookings", sub: "Manage and confirm customer bookings" },
+  requests: { title: "Requests", sub: "Custom-date enquiries from travellers" },
   departures: { title: "Departures & inventory", sub: "Scheduled departures across every tour" },
   customers: { title: "Customers", sub: "Accounts and booking history" },
   guides: { title: "Guides", sub: "The field team who lead your departures" },
@@ -143,7 +147,7 @@ const AUTH_SCREENS = ["login", "mfa", "mfa-enroll", "reset", "expired"];
 // admin.dev.tripkoach.com serves index.html for any path (SPA fallback) and
 // <base href="/"> keeps asset URLs absolute regardless of route depth.
 const ADMIN_ROUTES = [
-  ["dashboard", "/"], ["bookings", "/bookings"], ["departures", "/departures"],
+  ["dashboard", "/"], ["bookings", "/bookings"], ["requests", "/requests"], ["departures", "/departures"],
   ["customers", "/customers"], ["guides", "/guides"], ["reviews", "/reviews"],
   ["payments", "/payments"], ["tours", "/tours"], ["blog", "/blog"], ["promos", "/promos"],
   ["users", "/staff"], ["audit", "/audit-log"], ["settings", "/settings"], ["admin-profile", "/profile"],
@@ -314,6 +318,7 @@ function AdminApp() {
     forbidden ? <Forbidden go={go} />
     : screen === "dashboard" ? <Dashboard go={go} state={state} role={role} />
     : screen === "bookings" ? <BookingsAdmin go={go} state={state} setState={setState} />
+    : screen === "requests" ? <RequestsAdmin go={go} state={state} setState={setState} />
     : screen === "departures" ? <DeparturesAdmin go={go} state={state} setState={setState} />
     : screen === "customers" ? <CustomersAdmin go={go} state={state} setState={setState} />
     : screen === "guides" ? <GuidesAdmin go={go} />

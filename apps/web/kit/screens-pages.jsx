@@ -215,14 +215,14 @@ function PickupPage({ go }) {
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-4)" }}>
               <FormField id="p-date" label="Arrival date" required><Input type="date" /></FormField>
               <FormField id="p-time" label="Arrival time" required><Input type="time" /></FormField>
-              <FormField id="p-flight" label="Flight number" required><Input placeholder="KP 052" /></FormField>
-              <FormField id="p-party" label="Party size" required><Input inputMode="numeric" placeholder="2" /></FormField>
+              <FormField id="p-flight" label="Flight number" required><Input /></FormField>
+              <FormField id="p-party" label="Party size" required><Input inputMode="numeric" /></FormField>
             </div>
-            <FormField id="p-drop" label="Drop-off area" required><Input placeholder="East Legon, Accra" /></FormField>
-            <FormField id="p-req" label="Special requests" optional><Textarea rows={2} placeholder="Child seat, oversize luggage…" /></FormField>
+            <FormField id="p-drop" label="Drop-off area" required><Input /></FormField>
+            <FormField id="p-req" label="Special requests" optional><Textarea rows={2} /></FormField>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-4)" }}>
               <FormField id="p-name" label="Your name" optional><Input /></FormField>
-              <FormField id="p-email" label="Email" required><Input type="email" placeholder="you@example.com" /></FormField>
+              <FormField id="p-email" label="Email" required><Input type="email" /></FormField>
             </div>
             <Checkbox id="p-agree" label="I agree to be contacted about this inquiry." />
             <Button block size="lg" onClick={(e) => tkSendEnquiry({
@@ -323,11 +323,11 @@ function ContactPage({ go }) {
           <p className="tk-body-sm" style={{ color: "var(--text-muted)", margin: 0 }}>Tell us what you're hoping for and a koach picks it up.</p>
           <FormField id="c-subject" label="Subject"><Select options={[{ value: "general", label: "General" }, { value: "plan", label: "Plan a trip" }, { value: "tour", label: "Tour" }, { value: "shop", label: "Marketplace" }, { value: "club", label: "Tourism Club" }, { value: "press", label: "Press" }]} /></FormField>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-4)" }}>
-            <FormField id="c-name" label="Your name" optional><Input placeholder="Ama Mensah" /></FormField>
-            <FormField id="c-email" label="Email" required><Input type="email" placeholder="you@example.com" /></FormField>
+            <FormField id="c-name" label="Your name" optional><Input /></FormField>
+            <FormField id="c-email" label="Email" required><Input type="email" /></FormField>
           </div>
-          <FormField id="c-phone" label="Phone" optional><Input type="tel" placeholder="+233 24 123 4567" /></FormField>
-          <FormField id="c-msg" label="Tell us a bit more" optional><Textarea rows={4} placeholder="Dates, group size, what you're into…" /></FormField>
+          <FormField id="c-phone" label="Phone" optional><Input type="tel" /></FormField>
+          <FormField id="c-msg" label="Tell us a bit more" optional><Textarea rows={4} /></FormField>
           <Checkbox id="c-agree" label="I agree to be contacted about this inquiry." />
           <Button block size="lg" onClick={(e) => tkSendEnquiry({
             type: "contact",

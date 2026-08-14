@@ -300,6 +300,18 @@
         window.TK_FX = window.TK_FX || { USD: 1, GHS: 12 };
         window.TK_FX.GHS = rate;
       }
+      // TRI-1138 · surface the custom-date-request feature flags (Backend TRI-1137: /config returns
+      // `dateRequestsEnabled` bool + `minRequestLeadDays` number) so the empty-departures Request-a-date
+      // form can gate its date UI and enforce the min lead time. Tolerant: a missing/garbled shape leaves
+      // enabled=false ⇒ the form falls back to the legacy notify-only box, and lead defaults to 3 days.
+      if (c && typeof c === "object" && ("dateRequestsEnabled" in c || "minRequestLeadDays" in c)) {
+        var leadDays = Number(c.minRequestLeadDays);
+        window.TK_FLAGS = window.TK_FLAGS || {};
+        window.TK_FLAGS.customDateRequests = {
+          enabled: c.dateRequestsEnabled === true,
+          minLeadDays: isFinite(leadDays) && leadDays >= 0 ? leadDays : 3,
+        };
+      }
     }, function () { /* keep fallback */ });
   }
 

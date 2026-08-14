@@ -88,5 +88,19 @@
     { id:"green-season-ghana", slug:"green-season-ghana", tag:"Seasons & Weather", status:"draft", published:false, readTime:3, date:"", updated:"11 May 2026", title:"Akwaaba to the green season", excerpt:"Yes, it rains. It is also when Boti Falls runs full and the crowds thin out.", hero:"https://cdn.tripkoach.com/img/posts/green-season-ghana-hero.jpg", author:"TripKoach", bodyText:"Here is what the green season actually looks like, and how TripKoach keeps you covered." },
   ];
 
-  window.TK_ADMIN = { customers:customers, bookings:B, payments:payments, promos:promos, staff:staff, guides:guides, departures:departures, tours:T, blog:blog };
+  // TRI-1139: custom-date requests inbox (TRI-1136 A+B1). Prototype fixture — in
+  // live mode tk-boot.js replaces this with GET /api/admin/requests (interest
+  // enquiries whose intent is 'request', i.e. a traveller asked for a date that
+  // isn't on the schedule). Status flows New → Contacted → Scheduled → Booked → Closed.
+  var reqTours = T.slice(0, 3);
+  function reqTour(i) { return reqTours[i] || tour("accra-city-tour"); }
+  var requests = [
+    { id:"rq1", tourId:reqTour(0).id, tour:reqTour(0).title, requestedDate:"2026-10-18", partySize:4, customerName:"Ama Mensah", email:"ama@example.com", phone:"+233 24 555 0142", receivedAt:"2026-08-13", status:"New", note:"Anniversary trip — hoping for a private group.", indicativeTotalMinor:(reqTour(0).price||0)*4*100, currency:"USD" },
+    { id:"rq2", tourId:reqTour(1).id, tour:reqTour(1).title, requestedDate:"2026-11-02", partySize:2, customerName:"Marcus Bell", email:"marcus@example.co.uk", phone:"+44 7700 900142", receivedAt:"2026-08-12", status:"Contacted", note:"Flexible ±3 days.", indicativeTotalMinor:(reqTour(1).price||0)*2*100, currency:"USD" },
+    { id:"rq3", tourId:reqTour(2).id, tour:reqTour(2).title, requestedDate:"2026-09-27", partySize:6, customerName:"Kojo Asante", email:"kojo.asante@example.com", phone:"+1 416 555 0199", receivedAt:"2026-08-11", status:"Scheduled", note:"", indicativeTotalMinor:(reqTour(2).price||0)*6*100, currency:"USD" },
+    { id:"rq4", tourId:reqTour(0).id, tour:reqTour(0).title, requestedDate:"2026-12-20", partySize:3, customerName:"Lena Fischer", email:"lena.f@example.de", phone:"+49 151 5550 142", receivedAt:"2026-08-09", status:"Booked", note:"Christmas week.", indicativeTotalMinor:(reqTour(0).price||0)*3*100, currency:"USD" },
+    { id:"rq5", tourId:reqTour(1).id, tour:reqTour(1).title, requestedDate:"2026-08-30", partySize:2, customerName:"David Okonkwo", email:"d.okonkwo@example.ng", phone:"+234 803 555 0142", receivedAt:"2026-08-08", status:"Closed", note:"Dates no longer work.", indicativeTotalMinor:(reqTour(1).price||0)*2*100, currency:"USD" },
+  ];
+
+  window.TK_ADMIN = { customers:customers, bookings:B, payments:payments, promos:promos, staff:staff, guides:guides, departures:departures, tours:T, blog:blog, requests:requests };
 })();

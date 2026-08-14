@@ -60,7 +60,7 @@ function BlogHeroField({ post, live, onChange, onError }) {
             </Button>
             {hero && !uploading ? <IconButton icon="trash-2" label="Remove hero image" variant="ghost" size="sm" onClick={() => onChange("")} /> : null}
           </div>
-          <Input id="blog-hero" value={hero} onChange={(e) => onChange(e.target.value)} placeholder="…or paste https://cdn.tripkoach.com/img/posts/…-hero.jpg" iconStart="link" aria-label="Hero image URL" />
+          <Input id="blog-hero" value={hero} onChange={(e) => onChange(e.target.value)} iconStart="link" aria-label="Hero image URL" />
         </div>
       </div>
       <p className="tk-help">Upload a JPG, PNG, WebP, or GIF — it’s stored on the CDN. You can also paste an image URL.</p>
@@ -169,20 +169,20 @@ function BlogAdmin({ go }) {
       <Drawer open={!!edit} title={edit && edit.mode === "edit" ? "Edit story" : "New story"} onClose={() => setEdit(null)}
         footer={<><Button variant="secondary" onClick={() => setEdit(null)}>Cancel</Button><Button onClick={save} disabled={busy}>{edit && edit.mode === "edit" ? "Save story" : "Create story"}</Button></>}>
         {post && <>
-          <FormField id="blog-title" label="Title" required><Input defaultValue={post.title} placeholder="Above the trees at Kakum…" /></FormField>
+          <FormField id="blog-title" label="Title" required><Input defaultValue={post.title} /></FormField>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
             <FormField id="blog-tag" label="Tag"><Select defaultValue={post.tag || BLOG_ADMIN_TAGS[0]} onChange={(e) => setEdit({ ...edit, post: { ...post, tag: e.target.value } })} options={BLOG_ADMIN_TAGS.map(t => ({ value: t, label: t }))} /></FormField>
-            <FormField id="blog-readtime" label="Read time (min)"><Input inputMode="numeric" defaultValue={post.readTime != null ? post.readTime : ""} placeholder="6" /></FormField>
+            <FormField id="blog-readtime" label="Read time (min)"><Input inputMode="numeric" defaultValue={post.readTime != null ? post.readTime : ""} /></FormField>
           </div>
-          <FormField id="blog-slug" label="Slug" help={edit.mode === "edit" ? "Changing the slug changes the story's URL." : "Leave blank to generate from the title."}><Input defaultValue={post.slug || ""} placeholder="kakum-canopy-walk" /></FormField>
-          <FormField id="blog-excerpt" label="Excerpt" help="The summary shown on cards and at the top of the story."><Textarea defaultValue={post.excerpt} rows={3} placeholder="A one-paragraph teaser…" /></FormField>
+          <FormField id="blog-slug" label="Slug" help={edit.mode === "edit" ? "Changing the slug changes the story's URL." : "Leave blank to generate from the title."}><Input defaultValue={post.slug || ""} /></FormField>
+          <FormField id="blog-excerpt" label="Excerpt" help="The summary shown on cards and at the top of the story."><Textarea defaultValue={post.excerpt} rows={3} /></FormField>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
             <BlogHeroField post={post} live={LIVE} onChange={(url) => setEdit({ ...edit, post: { ...post, hero: url } })} onError={(m) => setToast(m)} />
-            <FormField id="blog-author" label="Author"><Input defaultValue={post.author || "TripKoach"} placeholder="TripKoach" /></FormField>
+            <FormField id="blog-author" label="Author"><Input defaultValue={post.author || "TripKoach"} /></FormField>
           </div>
-          <FormField id="blog-heroalt" label="Hero alt text" help="Describe the image for screen readers."><Input defaultValue={post.heroAlt || ""} placeholder="A rope suspension bridge high in the forest canopy…" /></FormField>
+          <FormField id="blog-heroalt" label="Hero alt text" help="Describe the image for screen readers."><Input defaultValue={post.heroAlt || ""} /></FormField>
           <FormField id="blog-body" label="Body" help="One idea per paragraph. Start a line with ## for a heading, - for a bullet, or > for a photo credit.">
-            <Textarea defaultValue={post.bodyText != null ? post.bodyText : ""} rows={16} style={{ fontFamily: "var(--font-mono, ui-monospace, monospace)", fontSize: 13.5, lineHeight: 1.6 }} placeholder={"## What Kakum actually is\n\nAkwaaba. Most people come for the castles…\n\n- Wear closed shoes with grip.\n- Bring water and a small bag.\n\n> Hero photo: … via Wikimedia Commons, CC BY 4.0."} />
+            <Textarea defaultValue={post.bodyText != null ? post.bodyText : ""} rows={16} style={{ fontFamily: "var(--font-mono, ui-monospace, monospace)", fontSize: 13.5, lineHeight: 1.6 }} />
           </FormField>
           <Switch id="blog-published" label="Published (visible on the website)" checked={post.status === "published"} onChange={() => setEdit({ ...edit, post: { ...post, status: post.status === "published" ? "draft" : "published" } })} />
         </>}

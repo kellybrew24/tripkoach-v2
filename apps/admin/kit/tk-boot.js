@@ -176,6 +176,9 @@
       time: d.time || "",
       price: major(d.price, pick(d.priceMinor, d.price_minor)),
       spotsLeft: pick(d.spotsLeft, d.spots_left, d.seatsAvailable),
+      // TRI-1137/1139: public|unlisted so the admin tour-detail departures sub-list can badge a
+      // private/custom-date hold (mig 032). Public reads never carry 'unlisted'; default public.
+      visibility: d.visibility || "public",
     };
   }
   // Full admin departure row (capacity/booked/status) for DeparturesAdmin.
@@ -191,6 +194,34 @@
       price: major(d.price, pick(d.priceMinor, d.price_minor)), currency: d.currency || "USD",
       capacity: cap, booked: pick(d.booked, (typeof cap === "number" ? cap - spots : undefined), 0), spotsLeft: spots,
       status: d.status || (spots <= 0 ? "sold-out" : "scheduled"),
+      // TRI-1139: public|unlisted. Unlisted departures back a custom/private date
+      // request (TRI-1136 B1) — they're bookable only via a secure ?t= link and are
+      // excluded from every public read. The admin list badges them so ops can tell
+      // a private hold apart from a normally-listed date.
+      visibility: d.visibility || "public",
+    };
+  }
+  // TRI-1139: a custom-date request (interest enquiry, intent 'request'). Backs the
+  // admin Requests inbox (TRI-1136 B1). requestedDateRaw keeps the yyyy-mm-dd value
+  // so "Create departure" can prefill the date picker; requestedDate is display-formatted.
+  function mapRequest(r) {
+    var rawDate = pick(r.requestedDate, r.requested_date, r.date);
+    return {
+      id: pick(r.id, r.requestId, r.request_id, r.enquiryId, r.enquiry_id),
+      tourId: pick(r.tourId, r.tourSlug, r.tour_id, r.tour_slug),
+      tour: pick(r.tour, r.tourTitle, r.tour_title) || pick(r.tourId, r.tourSlug, r.tour_id) || "—",
+      requestedDate: fmtDate(rawDate),
+      requestedDateRaw: (typeof rawDate === "string" ? rawDate.slice(0, 10) : ""),
+      partySize: pick(r.partySize, r.party_size, r.pax, r.travellers, 1),
+      customerName: pick(r.customerName, r.name, r.customer_name) || "—",
+      email: pick(r.email, r.customerEmail, r.customer_email) || "",
+      phone: pick(r.phone, r.customerPhone, r.customer_phone) || "",
+      receivedAt: fmtDate(pick(r.receivedAt, r.received_at, r.createdAt, r.created_at)),
+      status: pick(r.status) || "New",
+      note: pick(r.note, r.message, r.notes) || "",
+      indicativeTotalMinor: pick(r.indicativeTotalMinor, r.indicative_total_minor),
+      indicativeLabel: pick(r.indicativeLabel, r.indicative_label),
+      currency: r.currency || "USD",
     };
   }
   function mapBooking(b, tourById) {
@@ -406,6 +437,15 @@
     // TRI-1004: end a departure server-side (status → completed) and issue per-booking review
     // invites (idempotent; sends the review_invite email). Returns { departureStatus, eligible, issued[], skipped[] }.
     requestReviews: function (id) { return req("POST", "/departures/" + encodeURIComponent(id) + "/request-reviews", {}); },
+    // custom-date requests inbox (TRI-1139 FE ↔ TRI-1137 BE, parent TRI-1136 B1)
+    //   GET  /requests            → { requests: [ … ] } (interest enquiries, intent 'request'); perm bookings.view
+    //   PATCH /requests/:id       → advance/dismiss; body { status, reason? }; perm bookings.manage
+    //   POST /requests/:id/secure-link → fulfillment: creates an UNLISTED departure + a
+    //     reserved booking on a 72h hold and mints a 128-bit public token; returns { ref, publicToken }
+    //     so the FE can build /bookings/:ref?t=<publicToken> (TRI-1095 shape).
+    listRequests: function () { return req("GET", "/requests"); },
+    updateRequest: function (id, patch) { return req("PATCH", "/requests/" + encodeURIComponent(id), patch || {}); },
+    createRequestSecureLink: function (id, body) { return req("POST", "/requests/" + encodeURIComponent(id) + "/secure-link", body || {}); },
     // bookings
     listBookings: function () { return req("GET", "/bookings"); },
     getBooking: function (ref) { return req("GET", "/bookings/" + encodeURIComponent(ref)); },
@@ -630,6 +670,9 @@
         safe(function () { return API.listBookings().then(function (b) { setAdmin("bookings", list(b, "bookings").map(function (x) { return mapBooking(x, tourById); })); }); }),
         safe(function () { return API.listPayments().then(function (b) { setAdmin("payments", list(b, "payments").map(mapPayment)); }); }),
         safe(function () { return API.listDepartures().then(function (b) { setAdmin("departures", list(b, "departures").map(function (x) { return mapDepartureRow(x, tourById); })); }); }),
+        // TRI-1139: custom-date requests inbox. Fixture-derived TK_ADMIN.requests stays
+        // in place if the endpoint is missing/not-ready (BE TRI-1137 lands in parallel).
+        safe(function () { return API.listRequests().then(function (b) { setAdmin("requests", list(b, "requests").map(mapRequest)); }); }),
         safe(function () { return API.listPromos().then(function (b) { setAdmin("promos", list(b, "promos").map(mapPromo)); }); }),
         safe(function () { return API.listStaff().then(function (b) { setAdmin("staff", list(b, "staff").map(mapStaff)); }); }),
         // TRI-1041: page through ALL customers (not just the default first 25) so the

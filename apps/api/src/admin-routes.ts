@@ -487,12 +487,17 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
       const q = query(req);
       return svc.listRequests({ status: qStr(q, 'status'), tourId: qStr(q, 'tourId'), limit: qNum(q, 'limit'), offset: qNum(q, 'offset') });
     });
-    admin.patch('/requests/:id/status', perm('bookings.manage'), async (req) => {
+    admin.patch('/requests/:id', perm('bookings.manage'), async (req) => {
       return svc.updateRequestStatus((req.params as any).id, body(req), actorOf(req));
     });
     // POST /departures/:id/private-link — mint 72h-hold reserved booking for an unlisted departure
     admin.post('/departures/:id/private-link', perm('bookings.manage'), async (req, reply) => {
       return reply.code(201).send(await svc.createPrivateBookingLink((req.params as any).id, body(req), actorOf(req)));
+    });
+    // POST /requests/:id/secure-link — FE calls this; body must include departureId of the unlisted departure
+    admin.post('/requests/:id/secure-link', perm('bookings.manage'), async (req, reply) => {
+      const b = body(req) as Record<string, unknown>;
+      return reply.code(201).send(await svc.createPrivateBookingLink(String(b.departureId ?? ''), b, actorOf(req)));
     });
 
     // ── Dashboard aggregates (A15) ───────────────────────────────────────────────

@@ -768,38 +768,152 @@ function pkgTour(t, pkgId) {
 // the built prototype byte-identical.
 const LIVE_INTEREST = () => !!(window.TK_CONFIG && window.TK_CONFIG.USE_LIVE_API && window.TK_ENQUIRY && window.TK_ENQUIRY.interest);
 
-// Inline email-only "Notify me when dates open" form shown inside the booking box when a tour has no
-// upcoming departures (TRI-999 spec: EmptyState + FormField + Input + Button, no new visual language).
-// Persists via POST /tours/:id/interest so ops can schedule a departure; flag-off just toasts thanks.
+// TRI-1138 · custom-date-request feature flags (Backend TRI-1137: /config → `dateRequestsEnabled` +
+// `minRequestLeadDays`, surfaced on window.TK_FLAGS.customDateRequests by tk-boot). When the flag is off —
+// the flag-off prototype, or ops disabling the feature — `enabled` is false and the form degrades to the
+// legacy notify-only box, keeping the built prototype byte-identical. minLeadDays (default 3 / 72h, CEO #1)
+// drives the date picker's `min`.
+function customDateFlags() {
+  const f = (window.TK_FLAGS && window.TK_FLAGS.customDateRequests) || {};
+  const lead = Number(f.minLeadDays);
+  return { enabled: !!f.enabled, minLeadDays: isFinite(lead) && lead >= 0 ? lead : 3 };
+}
+// Earliest requestable calendar date = today + lead days, as a YYYY-MM-DD string for the native date input's
+// `min` and for our client-side guard (the backend also persists the request; this stops the obvious
+// sub-lead pick in the UI). Computed against local midnight so the boundary matches the picker's day cells.
+function minRequestDate(leadDays) {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + leadDays);
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return d.getFullYear() + "-" + mm + "-" + dd;
+}
+function humanLead(leadDays) {
+  return leadDays + (leadDays === 1 ? " day" : " days");
+}
+
+// Empty-departures capture shown inside the booking box when a tour has no upcoming departures.
+// TRI-1138 upgrades this from the email-only "notify me" box (TRI-999) into a full **Request a date**
+// form: a traveller can pick a specific date (min = today + minLeadDays), group size, optional phone +
+// note, and ask ops to open a private departure for them. Leaving the date blank keeps the legacy
+// notify/waitlist behaviour byte-for-byte. Persists via POST /tours/:id/interest (intent "request" vs
+// "notify"); flag-off ⇒ legacy notify box + a toast. Reuses only existing kit primitives (no new visual
+// language): FormField + Input(date/email/tel) + NumberStepper + Textarea + Button + Alert.
 function DateInterestForm({ tourId, packageId }) {
+  const flags = customDateFlags();
+  const requestEnabled = flags.enabled; // CEO #2 — off ⇒ legacy notify-only box, no date UI
+  const minDate = minRequestDate(flags.minLeadDays);
+
   const [email, setEmail] = React.useState("");
-  const [phase, setPhase] = React.useState("idle"); // idle | submitting | done | error
+  const [date, setDate] = React.useState("");   // "" ⇒ legacy notify path
+  const [pax, setPax] = React.useState(1);
+  const [phone, setPhone] = React.useState("");
+  const [note, setNote] = React.useState("");
+  // idle | submitting | done | duplicate | error ; `err`/`fieldErr` carry the invalid-state messaging.
+  const [phase, setPhase] = React.useState("idle");
   const [err, setErr] = React.useState(null);
+  const [fieldErr, setFieldErr] = React.useState({}); // { email?, date? } inline validation
+  const [indicative, setIndicative] = React.useState(null); // tolerant hook if BE ever returns it
+
   const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+  const isRequest = requestEnabled && !!date;          // a chosen date ⇒ intent "request"
+  const dateOk = !date || date >= minDate;             // blank is fine (notify); else must clear lead
+  const canSubmit = emailOk && dateOk && (!isRequest || pax >= 1) && phase !== "submitting";
+
+  function clearTransient() {
+    if (phase === "error" || phase === "duplicate") setPhase("idle");
+    if (fieldErr.email || fieldErr.date) setFieldErr({});
+    setErr(null);
+  }
+
   async function submit() {
-    if (!emailOk || phase === "submitting") return;
+    // Local validation first so the invalid state is instant and never round-trips a doomed request.
+    const fe = {};
+    if (!emailOk) fe.email = "Enter a valid email address.";
+    if (date && !dateOk) fe.date = "Please choose a date at least " + humanLead(flags.minLeadDays) + " from now.";
+    if (Object.keys(fe).length) { setFieldErr(fe); setPhase("idle"); return; }
+    if (phase === "submitting") return;
+
+    // Flag-off / prototype: no live API — toast + success, exactly as the legacy box did.
     if (!LIVE_INTEREST()) { setPhase("done"); window.tkToast && window.tkToast("Thanks! We'll email you when dates open."); return; }
-    setPhase("submitting"); setErr(null);
+
+    setPhase("submitting"); setErr(null); setFieldErr({});
+    const body = isRequest
+      ? { intent: "request", email: email.trim(), requestedDate: date, partySize: pax,
+          phone: phone.trim() || undefined, note: note.trim() || undefined, packageId: packageId || undefined }
+      : { intent: "notify", email: email.trim(), packageId: packageId || undefined };
     try {
-      await window.TK_ENQUIRY.interest(tourId, { intent: "notify", email: email.trim(), packageId: packageId || undefined });
+      const res = await window.TK_ENQUIRY.interest(tourId, body);
+      // Dedupe (CEO #4): BE returns created:false when this (tour,email,date) already exists.
+      if (isRequest && res && res.created === false) { setPhase("duplicate"); return; }
+      if (isRequest && res && res.indicativeTotalMinor != null) setIndicative(res.indicativeTotalMinor);
       setPhase("done");
     } catch (e) {
+      // 422 ⇒ server-side validation (sub-lead date / bad email) — surface inline on the date field.
+      if (e && e.status === 422) {
+        setFieldErr({ date: (e && e.message) || "Please choose a different date." });
+        setPhase("idle");
+        return;
+      }
       setErr((e && e.message) || "Something went wrong. Please try again.");
       setPhase("error");
     }
   }
-  if (phase === "done") return (
-    <Alert tone="success" title="You're on the list">We'll email you the moment a date opens for this experience.</Alert>
+
+  if (phase === "duplicate") return (
+    <Alert tone="info" title="Already requested">You've already requested this date — we'll be in touch.</Alert>
   );
+  // Success + inline-error rendering below reuse the DS Alert (tones: info/success/error/warning) and
+  // FormField's `help`/`error`/`optional` props — no net-new visual language (Designer redline TRI-1140).
+  if (phase === "done") {
+    // Success copy differs by path: a dated request gets the 24h-SLA + secure-link promise (CEO #5,
+    // verbatim); the legacy notify path keeps its "you're on the list" waitlist confirmation.
+    if (isRequest) return (
+      <Alert tone="success" title="Request received">
+        A koach will confirm your date within 24 hours and send a secure link to book.
+        {indicative != null ? <><br /><span className="tk-caption">Estimated {money(indicative / 100, "USD")} — indicative, confirmed on quote.</span></> : null}
+      </Alert>
+    );
+    return (
+      <Alert tone="success" title="You're on the list">We'll email you the moment a date opens for this experience.</Alert>
+    );
+  }
+
+  const submitting = phase === "submitting";
   return (
     <div className="tk-stack" style={{ gap: "var(--space-3)" }}>
-      <FormField id="ti-email" label="Email" error={phase === "error" ? err : undefined}>
+      {requestEnabled ? (
+        <FormField id="ti-date" label="Preferred date" optional error={fieldErr.date}
+          help={"Leave blank to just be notified when any date opens. Earliest bookable date is " + humanLead(flags.minLeadDays) + " out."}>
+          <Input id="ti-date" type="date" value={date} min={minDate}
+            onChange={(e) => { setDate(e.target.value); clearTransient(); }} />
+        </FormField>
+      ) : null}
+      {isRequest ? (
+        <FormField id="ti-pax" label="Group size">
+          <NumberStepper id="ti-pax" value={pax} min={1} max={30} label="travellers" onChange={setPax} />
+        </FormField>
+      ) : null}
+      <FormField id="ti-email" label="Email" error={fieldErr.email}>
         <Input id="ti-email" type="email" value={email}
-          onChange={(e) => { setEmail(e.target.value); if (phase === "error") setPhase("idle"); }}
-          onKeyDown={(e) => { if (e.key === "Enter") submit(); }} />
+          onChange={(e) => { setEmail(e.target.value); clearTransient(); }}
+          onKeyDown={(e) => { if (e.key === "Enter" && !isRequest) submit(); }} />
       </FormField>
-      <Button size="lg" block iconStart="bell" disabled={!emailOk} loading={phase === "submitting"} onClick={submit}>
-        Notify me when dates open
+      {isRequest ? (<>
+        <FormField id="ti-phone" label="Phone" optional help="Helps a koach reach you faster.">
+          <Input id="ti-phone" type="tel" value={phone}
+            onChange={(e) => { setPhone(e.target.value); clearTransient(); }} />
+        </FormField>
+        <FormField id="ti-note" label="Anything we should know?" optional>
+          <Textarea id="ti-note" rows={2} value={note}
+            onChange={(e) => { setNote(e.target.value); clearTransient(); }} />
+        </FormField>
+      </>) : null}
+      {phase === "error" ? <Alert tone="error" title="Couldn't send that">{err}</Alert> : null}
+      <Button size="lg" block iconStart={isRequest ? "calendar-days" : "bell"}
+        disabled={!canSubmit} loading={submitting} onClick={submit}>
+        {isRequest ? "Request this date" : "Notify me when dates open"}
       </Button>
     </div>
   );

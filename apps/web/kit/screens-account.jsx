@@ -290,10 +290,10 @@ function ProfileWeb({ go }) {
         <h2 className="tk-h5" style={{ margin: 0 }}>Travel details</h2>
         <p className="tk-body-sm tk-muted" style={{ marginTop: -8 }}>Optional, but it helps your koach look after you.</p>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-4)" }}>
-          <FormField id="p-emergency-name" label="Emergency contact name" help="Someone we can reach in an emergency"><Input placeholder="Kofi Mensah" onChange={touch} {...(live && me && me.emergencyName ? { defaultValue: me.emergencyName } : {})} /></FormField>
+          <FormField id="p-emergency-name" label="Emergency contact name" help="Someone we can reach in an emergency"><Input onChange={touch} {...(live && me && me.emergencyName ? { defaultValue: me.emergencyName } : {})} /></FormField>
           <FormField id="p-emergency-phone" label="Emergency contact number"><PhoneInput id="p-emergency-phone" onChange={touch} {...phoneProps(live && me ? me.emergencyPhone : "")} /></FormField>
         </div>
-        <FormField id="p-diet" label="Dietary needs" optional><Input placeholder="Vegetarian, no shellfish…" onChange={touch} {...(live && me && me.dietaryNeeds ? { defaultValue: me.dietaryNeeds } : {})} /></FormField>
+        <FormField id="p-diet" label="Dietary needs" optional><Input onChange={touch} {...(live && me && me.dietaryNeeds ? { defaultValue: me.dietaryNeeds } : {})} /></FormField>
       </div></div>
       <div className="tk-card" style={{ borderColor: "var(--danger-border)" }}><div className="tk-card__body" style={{ padding: "var(--space-6)", gap: "var(--space-2)" }}>
         <h2 className="tk-h5" style={{ margin: 0 }}>Delete account</h2>
@@ -382,7 +382,7 @@ function TwoFactorModal({ tfa, setCode, onClose, onVerify, onDisable, onDone }) 
   if (!tfa) return null;
   const codeField = (
     <FormField id="tfa-code" label={tfa.mode === "disable" ? "Authenticator or recovery code" : "6-digit code"}>
-      <Input inputMode="numeric" autoComplete="one-time-code" placeholder="123 456" value={tfa.code}
+      <Input inputMode="numeric" autoComplete="one-time-code" value={tfa.code}
         onChange={(e) => setCode(e.target.value)} iconStart="lock" />
     </FormField>
   );
@@ -639,7 +639,7 @@ function LoginWeb({ go, startCreating }) {
           {mfa.err && <Alert tone="error" title="We couldn't verify that code" style={{ marginBottom: "var(--space-4)" }}>{mfa.err}</Alert>}
           <form className="tk-stack" style={{ gap: "var(--space-4)" }} onSubmit={submitMfa}>
             <FormField id="lg-mfa" label="Authenticator or recovery code">
-              <Input inputMode="numeric" autoComplete="one-time-code" placeholder="123 456" iconStart="lock" autoFocus
+              <Input inputMode="numeric" autoComplete="one-time-code" iconStart="lock" autoFocus
                 value={mfa.code} onChange={(e) => setMfa((m) => ({ ...m, code: e.target.value }))} />
             </FormField>
             <Button block size="lg" type="submit" disabled={mfa.busy || !String(mfa.code || "").trim()}>{mfa.busy ? "Verifying…" : "Verify & sign in"}</Button>
@@ -661,8 +661,8 @@ function LoginWeb({ go, startCreating }) {
           <p className="tk-body-sm tk-muted" style={{ marginTop: 4, marginBottom: "var(--space-6)" }}>{creating ? "Takes a minute — you only need it once." : (returning ? "Welcome back. Enter your details to continue." : "Welcome — sign in to pick up your Ghana trip planning.")}</p>
           {wrong && <Alert tone="error" title={creating ? "We couldn't create your account" : "We couldn't log you in"} style={{ marginBottom: "var(--space-4)" }}>{errMsg || "That email and password don't match. Try again, or reset your password."}</Alert>}
           <form className="tk-stack" style={{ gap: "var(--space-4)" }} onSubmit={submit}>
-            {creating && <FormField id="lg-name" label="Full name"><Input placeholder="Ama Mensah" autoComplete="name" /></FormField>}
-            <FormField id="lg-email" label="Email address"><Input type="email" autoComplete="email" placeholder="you@example.com" defaultValue={creating ? "" : (live ? "" : "ama@example.com")} iconStart="mail" /></FormField>
+            {creating && <FormField id="lg-name" label="Full name"><Input autoComplete="name" /></FormField>}
+            <FormField id="lg-email" label="Email address"><Input type="email" autoComplete="email" defaultValue={creating ? "" : (live ? "" : "ama@example.com")} iconStart="mail" /></FormField>
             <FormField id="lg-pw" label="Password" error={wrong && !creating ? "Check your password" : undefined}>
               {creating
                 ? <PasswordInput id="lg-pw" value={pw} onChange={(e) => setPw(e.target.value)} rules={[{ label: "8+ characters", met: pw.length >= 8 }, { label: "A letter", met: /[a-z]/i.test(pw) }, { label: "A number", met: /\d/.test(pw) }]} />
@@ -751,7 +751,7 @@ function ForgotWeb({ go }) {
         <h1 className="tk-h2">Reset your password</h1>
         <p className="tk-body-sm tk-muted" style={{ marginTop: 4, marginBottom: "var(--space-6)" }}>Enter the email you booked with and we'll send a link to set a new password.</p>
         <form className="tk-stack" style={{ gap: "var(--space-4)" }} onSubmit={submitEmail}>
-          <FormField id="fp-email" label="Email address"><Input type="email" autoComplete="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} iconStart="mail" /></FormField>
+          <FormField id="fp-email" label="Email address"><Input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} iconStart="mail" /></FormField>
           <Button block size="lg" type="submit" disabled={!emailOk || busy}>{busy ? "Sending…" : "Send reset link"}</Button>
         </form>
         <p className="tk-caption" style={{ textAlign: "center", marginTop: "var(--space-5)" }}><a href="#" onClick={(e) => { e.preventDefault(); go("login"); }}>← Back to log in</a></p>

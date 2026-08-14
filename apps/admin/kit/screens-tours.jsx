@@ -419,8 +419,11 @@ function DeparturesAdmin({ go, state, setState }) {
   const [toast, setToast] = React.useState(null);
   const [adding, setAdding] = React.useState(false);
   const tourOpts = A.tours.map(t => ({ value: t.id, label: t.title }));
-  const [form, setForm] = React.useState({ tourId: "", packageId: "", date: "", time: "08:00", capacity: 12, price: "", guide: "", repeat: false, notes: "" });
-  const openAdd = () => { const tid = scoped ? state.editId : (A.tours[0] && A.tours[0].id) || ""; const tt = A.tours.find(t => t.id === tid); setForm({ tourId: tid, packageId: tt ? (tt.defaultPackage || (tt.packages && tt.packages[0] && tt.packages[0].id) || "") : "", date: "", time: "08:00", capacity: 12, price: "", guide: "", repeat: false, notes: "" }); setAdding(true); };
+  const [form, setForm] = React.useState({ tourId: "", packageId: "", date: "", time: "08:00", capacity: 12, price: "", guide: "", repeat: false, notes: "", visibility: "public" });
+  // TRI-1139: openAdd accepts an optional prefill (dispatched from the Requests inbox's
+  // "Create departure" action via the tk-add-departure event detail) — tour + requested
+  // date + capacity ≥ group size + Unlisted visibility. No prefill → the normal blank Add form.
+  const openAdd = (pf) => { pf = pf || {}; const tid = pf.tourId || (scoped ? state.editId : (A.tours[0] && A.tours[0].id) || ""); const tt = A.tours.find(t => t.id === tid); setForm({ tourId: tid, packageId: tt ? (tt.defaultPackage || (tt.packages && tt.packages[0] && tt.packages[0].id) || "") : "", date: pf.date || "", time: "08:00", capacity: pf.capacity != null ? pf.capacity : 12, price: "", guide: "", repeat: false, notes: pf.notes || "", visibility: pf.visibility || "public" }); setAdding(true); };
   const upd = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const setTour = (id) => { const tt = A.tours.find(t => t.id === id); setForm(f => ({ ...f, tourId: id, packageId: tt ? (tt.defaultPackage || (tt.packages && tt.packages[0] && tt.packages[0].id) || "") : "" })); };
   const chosenTour = A.tours.find(t => t.id === form.tourId);
@@ -428,7 +431,7 @@ function DeparturesAdmin({ go, state, setState }) {
   const chosenPkg = chosenTour && chosenTour.packages && chosenTour.packages.find(p => p.id === form.packageId);
   const fromPrice = chosenPkg && chosenPkg.tiers && chosenPkg.tiers.length ? chosenPkg.tiers[chosenPkg.tiers.length - 1].price : (chosenTour && chosenTour.tiers && chosenTour.tiers.length ? chosenTour.tiers[chosenTour.tiers.length - 1].price : (chosenTour && chosenTour.price));
   const canSave = form.tourId && form.date && form.capacity > 0;
-  React.useEffect(() => { const h = () => openAdd(); window.addEventListener("tk-add-departure", h); return () => window.removeEventListener("tk-add-departure", h); });
+  React.useEffect(() => { const h = (e) => openAdd(e && e.detail); window.addEventListener("tk-add-departure", h); return () => window.removeEventListener("tk-add-departure", h); });
   const save = () => {
     const optimistic = () => { setAdding(false); setToast("Departure added — " + (chosenTour ? chosenTour.title : "tour") + (chosenPkg ? " · " + chosenPkg.name : "") + (form.date ? " on " + form.date : "") + (form.repeat ? " (+ weekly repeats)" : "")); };
     window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.createDeparture({
@@ -436,6 +439,9 @@ function DeparturesAdmin({ go, state, setState }) {
       date: form.date, time: form.time, capacity: +form.capacity,
       price: form.price === "" ? undefined : +form.price, guideId: form.guide || undefined,
       repeatWeekly: !!form.repeat, notes: form.notes || undefined, currency: "USD",
+      // TRI-1139: 'public' (listed, bookable by anyone) or 'unlisted' (private hold for a
+      // custom-date request — excluded from public reads, reachable only via a secure ?t= link).
+      visibility: form.visibility || "public",
     }), optimistic);
   };
 
@@ -450,12 +456,17 @@ function DeparturesAdmin({ go, state, setState }) {
       </span>
     );
   };
-  const depStatus = (d) => ended[d.id]
+  const depChip = (d) => ended[d.id]
     ? <span className="tk-badge tk-badge--confirmed" style={{ background: "var(--brand-wash)", color: "var(--brand-ink)" }}>Completed · invites sent</span>
     : d.status === "sold-out"
     ? <Badge tone="neutral">Sold out</Badge>
     : util(d) >= 90 ? <span className="tk-badge tk-badge--pending">Nearly full</span>
     : <span className="tk-badge tk-badge--confirmed">Scheduled</span>;
+  // TRI-1139: flag private-hold departures (custom-date request fulfillment). The BE
+  // returns visibility in the DTO; unlisted rows are excluded from every public read.
+  const depStatus = (d) => d.visibility === "unlisted"
+    ? <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>{depChip(d)}<Badge tone="neutral"><Icon name="eye-off" size={12} style={{ marginInlineEnd: 4, verticalAlign: "-1px" }} />Unlisted</Badge></span>
+    : depChip(d);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -500,12 +511,18 @@ function DeparturesAdmin({ go, state, setState }) {
           </FormField>
         </div>
         <FormField id="dep-guide" label="Lead guide" optional hint={<>Manage the roster in <a href="#" onClick={(e) => { e.preventDefault(); go("guides"); }} style={{ color: "var(--brand-ink)", fontWeight: 600 }}>Guides</a>.</>}><Select id="dep-guide" value={form.guide} onChange={(e) => { if (e.target.value === "__add") { go("guides"); setTimeout(() => window.dispatchEvent(new CustomEvent("tk-add-guide")), 60); return; } upd("guide", e.target.value); }} options={[{ value: "", label: "Assign later" }, ...((A.guides || []).filter(g => g.status === "active").map(g => ({ value: g.id, label: g.name + " · " + g.base }))), { value: "__add", label: "＋ Add a new guide…" }]} /></FormField>
+        {/* TRI-1139: visibility. Off = Public (listed & bookable by anyone); on = Unlisted
+            (private hold for a custom-date request — hidden from the site, secure-link only). */}
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, padding: "12px 14px", background: "var(--bg-sunken)", borderRadius: "var(--radius-md)" }}>
+          <span style={{ maxWidth: "40ch" }}><strong style={{ fontSize: 14, color: "var(--text-strong)" }}>Unlisted (private hold)</strong><p className="tk-body-sm tk-muted" style={{ margin: "2px 0 0" }}>Hidden from the website and search — bookable only via a secure link you share. Use this to fulfil a custom-date request.</p></span>
+          <Switch id="dep-unlisted" checked={form.visibility === "unlisted"} onChange={(e) => upd("visibility", e.target.checked ? "unlisted" : "public")} />
+        </div>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, padding: "12px 14px", background: "var(--bg-sunken)", borderRadius: "var(--radius-md)" }}>
           <span style={{ maxWidth: "38ch" }}><strong style={{ fontSize: 14, color: "var(--text-strong)" }}>Repeat weekly</strong><p className="tk-body-sm tk-muted" style={{ margin: "2px 0 0" }}>Also create this departure for the next 8 weeks.</p></span>
           <Switch id="dep-repeat" checked={form.repeat} onChange={(e) => upd("repeat", e.target.checked)} />
         </div>
         <FormField id="dep-notes" label="Internal note" optional><Textarea id="dep-notes" rows={2} value={form.notes} onChange={(e) => upd("notes", e.target.value)} /></FormField>
-        {chosenTour && form.capacity > 0 && <Alert tone="info" title="Ready to publish">Opens {form.capacity} spots on {chosenTour.title}{form.date ? " for " + form.date : ""} at ${form.price || fromPrice || 0}/person.</Alert>}
+        {chosenTour && form.capacity > 0 && <Alert tone="info" title={form.visibility === "unlisted" ? "Ready to hold privately" : "Ready to publish"}>{form.visibility === "unlisted" ? "Creates a private hold of " : "Opens "}{form.capacity} spots on {chosenTour.title}{form.date ? " for " + form.date : ""} at ${form.price || fromPrice || 0}/person{form.visibility === "unlisted" ? " — reachable only via a secure link." : "."}</Alert>}
       </Drawer>
       <Modal open={!!endDep} title="End departure & request reviews"
         description={endDep ? endDep.tour + " on " + endDep.date + " — " + endDep.booked + " traveller" + (endDep.booked === 1 ? "" : "s") + " travelled." : ""}

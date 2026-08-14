@@ -282,7 +282,7 @@ const APPS = {
     // Load order mirrors ui_kits/admin/index.html exactly. qr.jsx (TRI-911)
     // defines the self-contained MFA QR encoder + <MfaQr> and must load before
     // screens-more.jsx, which renders it in the enrollment drawer.
-    screens: ["qr.jsx", "screens-auth.jsx", "screens-dashboard.jsx", "screens-bookings.jsx", "screens-tours.jsx", "screens-more.jsx", "screens-blog-admin.jsx", "screens-audit.jsx"],
+    screens: ["qr.jsx", "screens-auth.jsx", "screens-dashboard.jsx", "screens-bookings.jsx", "screens-tours.jsx", "screens-requests.jsx", "screens-more.jsx", "screens-blog-admin.jsx", "screens-audit.jsx"],
     app: "app.jsx",
     // data.js (window.TK_DATA) must load before admin-data.js (which reads it).
     data: ["data.js", "admin-data.js"],
