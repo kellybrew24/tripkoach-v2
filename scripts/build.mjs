@@ -38,6 +38,54 @@ const SHIM = join(ROOT, "shim");
 // (it holds the app-specific read wiring) and is copied from each kit dir.
 const SHARED_SHIM = ["config.js", "tk-api.js"];
 
+// --- SEO / social defaults (TRI-1114) --------------------------------------
+// The static index.html carries sitewide meta/OG + JSON-LD for scrapers that
+// never execute JS (Facebook, Twitter, LinkedIn); the app refines title/desc/OG
+// per route at runtime (apps/web/kit/app.jsx → applyHead). SITE_URL is the
+// absolute origin OG/canonical URLs must be built from — it defaults to the dev
+// host and is overridden at prod cutover via the SITE_URL env (see
+// docs/PROD-CUTOVER-BACKLOG.md). Admin ships noindex — it is not public surface.
+const SITE_URL = (process.env.SITE_URL || "https://dev.tripkoach.com").replace(/\/+$/, "");
+const WEB_DESC =
+  "Guided small-group tours across Ghana — festivals, coastline, culture and nature, booked with a local koach.";
+const htmlEsc = (s) =>
+  String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+function webHead(title) {
+  const og = `${SITE_URL}/assets/logo-badge.png`;
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@graph": [
+      { "@type": "Organization", name: "TripKoach", url: SITE_URL, logo: og },
+      {
+        "@type": "WebSite",
+        name: "TripKoach",
+        url: SITE_URL,
+        potentialAction: {
+          "@type": "SearchAction",
+          target: `${SITE_URL}/browse?region={search_term_string}`,
+          "query-input": "required name=search_term_string",
+        },
+      },
+    ],
+  };
+  return [
+    `<meta name="description" content="${htmlEsc(WEB_DESC)}">`,
+    `<link rel="canonical" href="${SITE_URL}/">`,
+    `<meta property="og:type" content="website">`,
+    `<meta property="og:site_name" content="TripKoach">`,
+    `<meta property="og:title" content="${htmlEsc(title)}">`,
+    `<meta property="og:description" content="${htmlEsc(WEB_DESC)}">`,
+    `<meta property="og:url" content="${SITE_URL}/">`,
+    `<meta property="og:image" content="${og}">`,
+    `<meta name="twitter:card" content="summary_large_image">`,
+    `<meta name="twitter:title" content="${htmlEsc(title)}">`,
+    `<meta name="twitter:description" content="${htmlEsc(WEB_DESC)}">`,
+    `<meta name="twitter:image" content="${og}">`,
+    `<script type="application/ld+json">${JSON.stringify(jsonLd)}</script>`,
+  ].join("\n");
+}
+const ADMIN_HEAD = `<meta name="robots" content="noindex,nofollow">`;
+
 const APPS = {
   web: {
     kit: join(ROOT, "apps/web/kit"),
@@ -234,6 +282,10 @@ function buildApp(name) {
   // 5. Production index.html.
   const dataTags = cfg.data.map((d) => `<script src="data/${d}"></script>`).join("\n");
   const extraShimTags = (cfg.extraShim || []).map((f) => `<script src="${f}"></script>`).join("\n");
+  // Sitewide SEO/social head (TRI-1114): web gets meta description, canonical,
+  // Open Graph / Twitter defaults and Organization+WebSite JSON-LD for non-JS
+  // scrapers; admin gets noindex. The SPA refines these per route at runtime.
+  const metaHead = name === "web" ? webHead(cfg.title) : ADMIN_HEAD;
   const html = `<!doctype html>
 <html lang="en">
 <head>
@@ -241,6 +293,7 @@ function buildApp(name) {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <base href="/">
 <title>${cfg.title}</title>
+${metaHead}
 <link rel="preload" href="fonts/manrope-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="styles.css">
 <style>body{margin:0;background:${cfg.bodyBg}}

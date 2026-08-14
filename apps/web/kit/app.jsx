@@ -106,6 +106,98 @@ function postNeedsHydration(slug) {
   return !(p && Array.isArray(p.body));
 }
 
+// --- Per-route SEO & social head (TRI-1114) --------------------------------
+// The web app is a client-rendered SPA (History-API routing, no SSR), so there
+// is no server step to emit a per-route <title>/description/OG. Instead we keep
+// the document head in sync with the router: on every screen change we set the
+// title, meta description, canonical URL, robots directive and Open Graph /
+// Twitter Card tags. JS-executing crawlers (Googlebot) and preview scrapers
+// that run the page pick these up; the static index.html (scripts/build.mjs)
+// ships sitewide defaults + Organization/WebSite JSON-LD for scrapers that
+// never execute JS. Tour and blog-post routes derive richer metadata from the
+// already-loaded fixtures / hydrated data so shared links read well.
+const TK_SITE_NAME = "TripKoach";
+const TK_DEFAULT_DESC =
+  "Guided small-group tours across Ghana — festivals, coastline, culture and nature, booked with a local koach.";
+function tkOrigin() {
+  try { return (window.location.origin || "").replace(/\/+$/, ""); } catch (_) { return ""; }
+}
+function tkUpsertHead(selector, make) {
+  let el = document.head.querySelector(selector);
+  if (!el) { el = make(); document.head.appendChild(el); }
+  return el;
+}
+function tkSetMeta(attr, key, content) {
+  const el = tkUpsertHead(`meta[${attr}="${key}"]`, () => {
+    const m = document.createElement("meta"); m.setAttribute(attr, key); return m;
+  });
+  el.setAttribute("content", content == null ? "" : String(content));
+}
+function tkSetCanonical(href) {
+  const el = tkUpsertHead('link[rel="canonical"]', () => {
+    const l = document.createElement("link"); l.setAttribute("rel", "canonical"); return l;
+  });
+  el.setAttribute("href", href);
+}
+// Screens kept out of the search index: auth, checkout and anything behind a
+// login. Everything else is indexable marketing/catalogue surface.
+const TK_NOINDEX = ["login", "signup", "forgot", "verify", "checkout", "confirm",
+  "bookings", "booking", "profile", "notifications", "account-settings", "review", "reviews"];
+const TK_SCREEN_META = {
+  home: { title: "TripKoach — Guided tours across Ghana", desc: TK_DEFAULT_DESC },
+  browse: { title: "Browse tours — TripKoach", desc: "Explore guided tour packages across Ghana's regions. Filter by region, compare prices and reserve your spot." },
+  regions: { title: "Regions of Ghana — TripKoach", desc: "Nine regions, one koach. Discover the festivals, coastline, culture and nature that make each corner of Ghana worth the trip." },
+  marketplace: { title: "Marketplace — TripKoach", desc: "Travel gear, local crafts and trip add-ons curated for your Ghana adventure." },
+  esim: { title: "Travel eSIM — TripKoach", desc: "Stay connected across Ghana with a data eSIM that works the moment you land." },
+  pickup: { title: "Airport pickup — TripKoach", desc: "Book a vetted driver to meet you at Kotoka and get you to your first stop." },
+  club: { title: "Tourism clubs — TripKoach", desc: "Join a TripKoach tourism club and explore Ghana with a community of travellers." },
+  about: { title: "About TripKoach", desc: "Why TripKoach exists and how a local koach makes exploring Ghana effortless." },
+  contact: { title: "Contact TripKoach", desc: "Plan a trip, ask a question or partner with us — we reply fast." },
+  blog: { title: "Stories — TripKoach", desc: "Field notes, destination guides and travel stories from across Ghana." },
+};
+function tkOgImage(src, origin) {
+  // Only trust absolute (CDN/R2) image URLs for social cards; anything else
+  // falls back to the always-present brand badge so previews never 404.
+  if (typeof src === "string" && /^https?:\/\//.test(src)) return src;
+  return origin + "/assets/logo-badge.png";
+}
+function applyHead(screen, slug) {
+  const origin = tkOrigin();
+  let meta = TK_SCREEN_META[screen] || TK_SCREEN_META.home;
+  let image = origin + "/assets/logo-badge.png";
+  let ogType = "website";
+  if (screen === "tour" && slug) {
+    const t = ((window.TK_DATA && window.TK_DATA.tours) || []).find((x) => x.id === slug || x.slug === slug);
+    if (t) {
+      meta = { title: t.title + " — TripKoach", desc: String(t.blurb || TK_DEFAULT_DESC).slice(0, 180) };
+      image = tkOgImage(t.image, origin);
+      ogType = "product";
+    }
+  } else if (screen === "post" && slug) {
+    const p = (window.TK_BLOG || []).find((x) => x.slug === slug);
+    if (p) {
+      meta = { title: p.title + " — TripKoach Stories", desc: String(p.excerpt || TK_DEFAULT_DESC).slice(0, 180) };
+      image = tkOgImage(p.image || p.cover, origin);
+      ogType = "article";
+    }
+  }
+  const url = origin + pathForScreen(screen, slug);
+  document.title = meta.title;
+  tkSetMeta("name", "description", meta.desc);
+  tkSetMeta("name", "robots", TK_NOINDEX.indexOf(screen) >= 0 ? "noindex,follow" : "index,follow");
+  tkSetCanonical(url);
+  tkSetMeta("property", "og:site_name", TK_SITE_NAME);
+  tkSetMeta("property", "og:type", ogType);
+  tkSetMeta("property", "og:title", meta.title);
+  tkSetMeta("property", "og:description", meta.desc);
+  tkSetMeta("property", "og:url", url);
+  tkSetMeta("property", "og:image", image);
+  tkSetMeta("name", "twitter:card", "summary_large_image");
+  tkSetMeta("name", "twitter:title", meta.title);
+  tkSetMeta("name", "twitter:description", meta.desc);
+  tkSetMeta("name", "twitter:image", image);
+}
+
 function WebApp() {
   const first = routeFromPath(window.location.pathname, window.location.search);
   const [screen, setScreen] = React.useState(first.screen);
@@ -156,6 +248,11 @@ function WebApp() {
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
+  // Keep the document head (title / description / OG / canonical / robots) in
+  // sync with the active route so deep links share richly and JS crawlers index
+  // each screen (TRI-1114). Re-runs when a tour/post finishes hydrating so
+  // late-arriving titles and images are reflected.
+  React.useEffect(() => { applyHead(screen, slug); }, [screen, slug, ready, postReady]);
   // Lazily hydrate any tour whose slug-routed page opens (nav, deep-link or
   // back/forward). The lead tour is pre-hydrated at boot, so it resolves instantly.
   React.useEffect(() => {

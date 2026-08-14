@@ -24,7 +24,7 @@ function cvtDeps(deps, cur) { return (deps || []).map(d => ({ ...d, price: cvt(d
 // "Standard" bucket. A tour with a single group (no tracks, or every departure on
 // one track) renders a plain picker with no selector — so a no-track tour shows no
 // empty section. `packages` (t0.packages) drives track ordering + display names.
-function GroupedDeparturePicker({ departures, value, onChange, currency, packages, legend, activePackageId, onPackageChange }) {
+function GroupedDeparturePicker({ departures, value, onChange, currency, packages, legend, activePackageId, onPackageChange, routeSelectedElsewhere }) {
   const deps = departures || [];
   const groups = [];
   const bySlug = new Map();
@@ -58,6 +58,25 @@ function GroupedDeparturePicker({ departures, value, onChange, currency, package
     // Move the selection into the newly chosen track so Reserve stays valid.
     if (onChange && !g.items.some(d => d.id === value)) onChange(g.items[0].id);
   };
+  // TRI-1118 (#14): when the route is already chosen by the dedicated "Choose your
+  // route" cards in the main column, this booking widget must NOT offer a second,
+  // competing route picker. Reflect the active route READ-ONLY (single source of
+  // truth) and let the widget own only the departure choice for that route.
+  if (routeSelectedElsewhere) {
+    return (
+      <fieldset style={{ border: 0, margin: 0, padding: 0 }}>
+        <legend className="tk-label" style={{ marginBottom: "var(--space-2)" }}>{legend}</legend>
+        <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: "var(--space-3)" }}>
+          <span className="tk-caption" style={{ color: "var(--text-muted)" }}>Route</span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 12px", borderRadius: "var(--radius-pill, 999px)", background: "var(--brand-wash)", border: "1px solid var(--brand-ink)", color: "var(--brand-ink)", fontWeight: 700, fontSize: 13.5 }}>
+            <Icon name="map-pin" size={13} />{active.name}
+          </span>
+          <span className="tk-caption" style={{ color: "var(--text-subtle)" }}>· change under “Choose your route”</span>
+        </div>
+        <DeparturePicker departures={cvtDeps(active.items, currency)} value={value} onChange={onChange} currency={currency} legend={active.name} />
+      </fieldset>
+    );
+  }
   return (
     <fieldset style={{ border: 0, margin: 0, padding: 0 }}>
       <legend className="tk-label" style={{ marginBottom: "var(--space-3)" }}>{legend}</legend>
@@ -321,7 +340,21 @@ function ReviewInvitePage({ go, token }) {
 }
 Object.assign(window, { Stars, StarInput, ReviewCard, ReviewModal, ReviewsSection, ReviewInviteLive, ReviewInvitePage });
 
-const NAV = [{ label: "Tours", href: "#browse" }, { label: "Regions", href: "#regions" }, { label: "Marketplace", href: "#marketplace" }, { label: "Stories", href: "#blog" }, { label: "About", href: "#about" }];
+// Real, crawlable paths for the primary nav/footer destinations (TRI-1114).
+// These mirror app.jsx ROUTES so the DS <Header>/<Footer> emit genuine
+// <a href="/browse"> that search engines index and "open in new tab" / "copy
+// link" honour — previously every nav item was a dead `#browse` anchor. The
+// delegated onNav handler below intercepts same-app clicks for SPA navigation
+// (progressive enhancement): plain clicks stay in the SPA, modified/new-tab
+// clicks fall through to a full load that the History router re-resolves.
+const SCREEN_PATH = {
+  home: "/", browse: "/browse", regions: "/regions", marketplace: "/shop",
+  blog: "/blog", about: "/about", contact: "/contact", esim: "/esim",
+  pickup: "/pickup", club: "/club", bookings: "/bookings", login: "/login",
+};
+const PATH_SCREEN = Object.fromEntries(Object.entries(SCREEN_PATH).map(([s, p]) => [p, s]));
+
+const NAV = [{ label: "Tours", href: SCREEN_PATH.browse }, { label: "Regions", href: SCREEN_PATH.regions }, { label: "Marketplace", href: SCREEN_PATH.marketplace }, { label: "Stories", href: SCREEN_PATH.blog }, { label: "About", href: SCREEN_PATH.about }];
 
 // Warm brand gradients so a broken/absent CDN photo still reads as an intentional, on-brand panel.
 const TK_GRADS = [
@@ -443,14 +476,14 @@ function TourHero({ t, go }) {
   );
 }
 const FOOT = [
-  { title: "Travel", links: [{ label: "Regions", href: "#regions" }, { label: "Tour packages", href: "#browse" }, { label: "Marketplace", href: "#marketplace" }, { label: "eSIM", href: "#esim" }, { label: "Airport pickup", href: "#pickup" }, { label: "Tourism clubs", href: "#club" }] },
-  { title: "Company", links: [{ label: "About", href: "#about" }, { label: "Blog", href: "#blog" }, { label: "Contact", href: "#contact" }] },
+  { title: "Travel", links: [{ label: "Regions", href: SCREEN_PATH.regions }, { label: "Tour packages", href: SCREEN_PATH.browse }, { label: "Marketplace", href: SCREEN_PATH.marketplace }, { label: "eSIM", href: SCREEN_PATH.esim }, { label: "Airport pickup", href: SCREEN_PATH.pickup }, { label: "Tourism clubs", href: SCREEN_PATH.club }] },
+  { title: "Company", links: [{ label: "About", href: SCREEN_PATH.about }, { label: "Blog", href: SCREEN_PATH.blog }, { label: "Contact", href: SCREEN_PATH.contact }] },
 ];
 
 const KNOWN_SCREENS = ["home", "browse", "tour", "checkout", "confirm", "bookings", "reviews", "login", "forgot", "profile", "notifications", "account-settings", "regions", "marketplace", "esim", "pickup", "club", "about", "blog", "contact", "review"];
 
 function MobileMenu({ onClose, go }) {
-  const links = [...NAV, { label: "My bookings", href: "#bookings" }, { label: "Sign in", href: "#login" }];
+  const links = [...NAV, { label: "My bookings", href: SCREEN_PATH.bookings }, { label: "Sign in", href: SCREEN_PATH.login }];
   return (
     <div onClick={(e) => e.target === e.currentTarget && onClose()} style={{ position: "fixed", inset: 0, zIndex: 90, background: "rgba(20,19,18,.45)", backdropFilter: "blur(2px)", display: "flex", justifyContent: "flex-end" }}>
       <nav aria-label="Menu" style={{ width: "min(84vw,320px)", background: "var(--bg-surface)", height: "100%", padding: "var(--space-5)", display: "flex", flexDirection: "column", gap: 2, boxShadow: "var(--elev-4)", overflowY: "auto" }}>
@@ -481,7 +514,7 @@ function AcctItem({ icon, label, tone, onClick }) {
 // Maps the active screen to the nav item that should read as current (TRI-940).
 // Tour detail highlights Tours; a blog post highlights Stories. Screens with no
 // nav home (home, checkout, account…) map to undefined ⇒ no item is marked active.
-const NAV_CURRENT = { browse: "#browse", tour: "#browse", regions: "#regions", marketplace: "#marketplace", blog: "#blog", post: "#blog", about: "#about" };
+const NAV_CURRENT = { browse: SCREEN_PATH.browse, tour: SCREEN_PATH.browse, regions: SCREEN_PATH.regions, marketplace: SCREEN_PATH.marketplace, blog: SCREEN_PATH.blog, post: SCREEN_PATH.blog, about: SCREEN_PATH.about };
 function Shell({ children, currency, setCurrency, go, screen }) {
   const [menu, setMenu] = React.useState(false);
   // Reactive session state (TRI-922). The prototype hardcoded `signedIn` on the
@@ -535,8 +568,25 @@ function Shell({ children, currency, setCurrency, go, screen }) {
     const a = e.target.closest("a");
     if (!a) return;
     if (a.getAttribute("aria-label") === "TripKoach home") { e.preventDefault(); go && go("home"); return; }
+    // Let the browser handle new-tab / modified / download / external-target
+    // clicks so real paths stay genuinely shareable (open in new tab, etc.);
+    // the History router re-resolves them on the fresh load (TRI-1114).
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    if (a.target === "_blank" || a.hasAttribute("download")) return;
     const href = a.getAttribute("href") || "";
-    if (href.startsWith("#") && KNOWN_SCREENS.includes(href.slice(1))) { e.preventDefault(); go && go(href.slice(1)); }
+    // Legacy hash-anchor form kept working as a safety net.
+    if (href.startsWith("#") && KNOWN_SCREENS.includes(href.slice(1))) { e.preventDefault(); go && go(href.slice(1)); return; }
+    // Real in-app paths emitted by the nav/footer/breadcrumbs (/browse, /shop…).
+    if (href.startsWith("/")) {
+      const pathOnly = href.split("?")[0].split("#")[0];
+      const scr = PATH_SCREEN[pathOnly];
+      if (scr === "browse") {
+        let region = null;
+        try { region = new URLSearchParams(href.split("?")[1] || "").get("region"); } catch (_) {}
+        e.preventDefault(); go && go("browse", region || null); return;
+      }
+      if (scr) { e.preventDefault(); go && go(scr); }
+    }
   };
   return (
     <div style={{ background: "var(--bg-page)", minHeight: "100%" }} onClick={onNav}>
@@ -636,18 +686,19 @@ function BrowseWeb({ go, currency, view, initialRegion }) {
   const shown = [...matched].sort(SORTERS[sort] || SORTERS.pop);
   return (
     <>
-      <section style={{ position: "relative", borderBottom: "1px solid var(--border-subtle)", overflow: "hidden", background: "var(--brand-wash)" }}>
-        <img src="https://cdn.tripkoach.com/img/tours/discover-ghana-in-10-days/hero-1440.jpg" alt="" aria-hidden="true"
-          style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
-        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(90deg, rgba(20,19,18,.82) 0%, rgba(20,19,18,.62) 45%, rgba(20,19,18,.28) 100%)" }} />
-        <div className="tk-container" style={{ position: "relative", paddingBlock: "var(--space-12)", display: "flex", flexDirection: "column", gap: "var(--space-5)", maxWidth: 1200 }}>
-          <div className="tk-stack" style={{ gap: "var(--space-3)", maxWidth: "22ch" }}>
-            <span className="tk-overline" style={{ color: "var(--gold-300)" }}>Ghana · {window.TK_REGION_COUNT()} regions</span>
-            <h1 className="tk-display" style={{ color: "#fff" }}>Ghana, shown by the people who live there</h1>
+      {/* TRI-1118 (#13): /browse is a listing page — its job is "see tours fast",
+          so it gets a slim, listing-specific header (title + subtitle + search)
+          instead of repeating the full-height home hero, which pushed the tour
+          grid ~700px down (worse on mobile). The epic hero stays on home only. */}
+      <section style={{ borderBottom: "1px solid var(--border-subtle)", background: "var(--brand-wash)" }}>
+        <div className="tk-container" style={{ paddingBlock: "var(--space-8)", display: "flex", flexDirection: "column", gap: "var(--space-4)", maxWidth: 1200 }}>
+          <div className="tk-stack" style={{ gap: "var(--space-2)" }}>
+            <span className="tk-overline" style={{ color: "var(--gold-700)" }}>Ghana · {window.TK_REGION_COUNT()} regions</span>
+            <h1 className="tk-h1" style={{ margin: 0 }}>Browse tours</h1>
+            <p className="tk-body" style={{ margin: 0, maxWidth: "56ch", color: "var(--text-muted)" }}>
+              Guided day trips and multi-day journeys with local guides. Reserve your spot now and pay before you travel.
+            </p>
           </div>
-          <p className="tk-body-lg" style={{ maxWidth: "52ch", color: "rgba(255,255,255,.9)" }}>
-            Guided day trips and multi-day journeys with local guides. Reserve your spot now and pay before you travel.
-          </p>
           {/* Filtering is live-on-type via the field below; a separate "Search"
               button would be redundant, so it's removed rather than left inert. */}
           <div style={{ maxWidth: 640 }}>
@@ -777,7 +828,7 @@ function TourWeb({ go, currency, slug }) {
   const hasDepartures = (t.departures || []).length > 0;
   return (
     <div className="tk-container" style={{ paddingBlock: "var(--space-6) var(--space-12)", maxWidth: 1200, display: "flex", flexDirection: "column", gap: "var(--space-5)" }}>
-      <Breadcrumbs items={[{ label: "Tours", href: "#" }, { label: t.region, href: "#" }, { label: t.title }]} />
+      <Breadcrumbs items={[{ label: "Tours", href: SCREEN_PATH.browse }, { label: t.region, href: SCREEN_PATH.browse + "?region=" + encodeURIComponent(t.region || "") }, { label: t.title }]} />
       <TourHero t={t} go={go} />
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: "var(--space-10)", alignItems: "start" }}>
@@ -845,7 +896,7 @@ function TourWeb({ go, currency, slug }) {
               {t0.packages ? <span className="tk-caption">{t.packageName} package</span> : null}
             </div>
             {hasDepartures ? (<>
-              <GroupedDeparturePicker departures={t.departures} value={dep} onChange={setDep} currency={currency} packages={t0.packages} legend="Choose a departure" activePackageId={pkgId} onPackageChange={choosePackage} />
+              <GroupedDeparturePicker departures={t.departures} value={dep} onChange={setDep} currency={currency} packages={t0.packages} legend="Choose a departure" activePackageId={pkgId} onPackageChange={choosePackage} routeSelectedElsewhere={!!t0.packages} />
               <Button size="lg" block disabled={!dep} onClick={() => { window.TK_SEL = { tourId: t0.id, apiTourId: t0._apiId, packageId: pkgId, packageName: t.packageName, departureId: dep }; go("checkout"); }}>Reserve my spot</Button>
               <p className="tk-caption" style={{ display: "flex", gap: 6 }}><Icon name="wallet" size={14} />Nothing is charged today. Pay before departure.</p>
             </>) : (
