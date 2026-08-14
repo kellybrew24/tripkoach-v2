@@ -312,6 +312,10 @@
           minLeadDays: isFinite(leadDays) && leadDays >= 0 ? leadDays : 3,
         };
       }
+      // TRI-1150 · canonical Terms & Conditions (admin-set, /config.termsConditions). Both agree-gates
+      // (checkout + sign-up) read this single source. Stays null/empty until Content publishes real copy,
+      // in which case the "Read the full Terms & Conditions" disclosure simply doesn't render (no placeholder).
+      window.TK_TERMS = (c && typeof c.termsConditions === "string" && c.termsConditions.trim() !== "") ? c.termsConditions : null;
     }, function () { /* keep fallback */ });
   }
 

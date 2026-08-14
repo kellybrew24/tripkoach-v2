@@ -803,6 +803,7 @@ function SettingsAdmin({ go }) {
     set("s-cur", data.currencyOfRecord); set("s-disp", data.displayCurrency || "none");
     set("s-rate", data.usdToGhsDisplayRate != null ? data.usdToGhsDisplayRate : (data.fx && data.fx.displayRate && data.fx.displayRate.value));
     set("s-canc", data.cancellationPolicy); set("s-deadline", data.paymentDeadlineDays);
+    set("s-terms", data.termsConditions); // TRI-1150 canonical T&C (empty until Content publishes)
   }, [data, tab]);
   const chargeRate = data && data.fx && data.fx.chargeRate;
   const Section = ({ title, hint, children }) => (
@@ -836,6 +837,13 @@ function SettingsAdmin({ go }) {
             <FormField id="s-canc" label="Policy text"><Textarea rows={4} defaultValue={"Free cancellation until 7 days before departure. Between 7 and 2 days, half the total is held. Inside 48 hours the booking is non-refundable."} /></FormField>
             <FormField id="s-deadline" label="Payment deadline" help="How long before departure payment is due"><Select defaultValue="5" options={[{ value: "3", label: "3 days before departure" }, { value: "5", label: "5 days before departure" }, { value: "7", label: "7 days before departure" }]} /></FormField>
           </Section>
+          {/* TRI-1150: the single canonical Terms & Conditions both agree-gates (checkout + sign-up)
+              read via /config. Distinct from the cancellation blurb above. Leave blank until Content
+              provides the real document — the customer disclosure stays hidden while it's empty, so
+              no placeholder ever ships. */}
+          <Section title="Terms & Conditions" hint="The full T&C customers can read before agreeing at checkout and sign-up. Leave blank until Content has real copy — it won't show to customers while empty.">
+            <FormField id="s-terms" label="Terms & Conditions text" help="Plain text; line breaks and paragraphs are preserved. This is the one source both agree-gates use."><Textarea rows={10} /></FormField>
+          </Section>
         </>}
         {tab === "notify" && <>
           {/* TRI-1009: these are transactional/system emails with no per-toggle backend — the
@@ -857,7 +865,7 @@ function SettingsAdmin({ go }) {
           </Section>
         </>}
       </div>
-      <div className="tk-stickysave"><span className="tk-caption">Changes apply to both the website and the app.</span><Button iconStart="check" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.saveSettings({ businessName: (document.getElementById("s-org") || {}).value, address: (document.getElementById("s-addr") || {}).value, supportPhone: (document.getElementById("s-phone") || {}).value, supportEmail: (document.getElementById("s-email") || {}).value, currencyOfRecord: (document.getElementById("s-cur") || {}).value, displayCurrency: (document.getElementById("s-disp") || {}).value, usdToGhsDisplayRate: +(((document.getElementById("s-rate") || {}).value) || 0) || undefined, cancellationPolicy: (document.getElementById("s-canc") || {}).value, paymentDeadlineDays: +(((document.getElementById("s-deadline") || {}).value) || 0) || undefined }), () => setToast("Settings saved"))}>Save settings</Button></div>
+      <div className="tk-stickysave"><span className="tk-caption">Changes apply to both the website and the app.</span><Button iconStart="check" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.saveSettings({ businessName: (document.getElementById("s-org") || {}).value, address: (document.getElementById("s-addr") || {}).value, supportPhone: (document.getElementById("s-phone") || {}).value, supportEmail: (document.getElementById("s-email") || {}).value, currencyOfRecord: (document.getElementById("s-cur") || {}).value, displayCurrency: (document.getElementById("s-disp") || {}).value, usdToGhsDisplayRate: +(((document.getElementById("s-rate") || {}).value) || 0) || undefined, cancellationPolicy: (document.getElementById("s-canc") || {}).value, paymentDeadlineDays: +(((document.getElementById("s-deadline") || {}).value) || 0) || undefined, termsConditions: (document.getElementById("s-terms") || {}).value }), () => setToast("Settings saved"))}>Save settings</Button></div>
       {toast && <div style={{ position: "fixed", bottom: 20, insetInline: 0, display: "flex", justifyContent: "center", zIndex: 800 }}><Toast tone="success" onClose={() => setToast(null)}>{toast}</Toast></div>}
     </div>
   );

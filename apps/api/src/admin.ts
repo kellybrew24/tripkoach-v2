@@ -1447,6 +1447,10 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
       usdToGhsDisplayRate: displayRate,
       cancellationPolicy: s.cancellation_policy_text ?? null,
       cancellationPolicyText: s.cancellation_policy_text ?? null,
+      // TRI-1150: canonical Terms & Conditions. Stored in the flags jsonb
+      // (no migration) rather than a dedicated column; surfaced as a first-class
+      // admin field so ops edit it beside the cancellation policy. null when unset.
+      termsConditions: (s.flags && typeof s.flags.terms_conditions_text === 'string') ? s.flags.terms_conditions_text : null,
       paymentDeadlineDays: Number(s.payment_deadline_days),
       flags: s.flags ?? {},
       updatedAt: s.updated_at,
@@ -1579,6 +1583,22 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
       const d = optInt(body, 'paymentDeadlineDays');
       if (d == null || ![3, 5, 7].includes(d)) throw new ValidationError('"paymentDeadlineDays" must be one of: 3, 5, 7', 'paymentDeadlineDays');
       set('payment_deadline_days', d);
+    }
+    // TRI-1150: canonical Terms & Conditions, stored inside the flags jsonb (no migration).
+    // Fold it into the flags object when the same PATCH also sends flags (Postgres rejects two
+    // assignments to one column); otherwise jsonb_set/‑subtract just that key so other flags survive.
+    if (body.termsConditions !== undefined) {
+      const raw = optStr(body, 'termsConditions', 100000);
+      const tc = raw && raw.trim() !== '' ? raw : undefined;
+      if (body.flags !== undefined && isPlainObject(body.flags)) {
+        if (tc === undefined) delete (body.flags as Record<string, unknown>).terms_conditions_text;
+        else (body.flags as Record<string, unknown>).terms_conditions_text = tc;
+      } else if (tc === undefined) {
+        sets.push(`flags = coalesce(flags, '{}'::jsonb) - 'terms_conditions_text'`);
+      } else {
+        params.push(JSON.stringify(tc));
+        sets.push(`flags = jsonb_set(coalesce(flags, '{}'::jsonb), '{terms_conditions_text}', $${params.length}::jsonb, true)`);
+      }
     }
     if (body.flags !== undefined) {
       if (!isPlainObject(body.flags)) throw new ValidationError('"flags" must be an object', 'flags');

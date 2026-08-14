@@ -81,6 +81,7 @@ export function buildServer(db: Db, cfg: Config, paystack?: PaystackClient, stor
       let currencyOfRecord = 'USD';
       let secondaryDisplayCurrency = 'GHS';
       let dateRequestsEnabled = false;
+      let termsConditions: string | null = null;
       try {
         const { rows } = await db.query<{ display: string | null; cor: string | null; sdc: string | null; flags: Record<string, unknown> | null }>(
           `SELECT usd_to_ghs_display_rate AS display, currency_of_record AS cor,
@@ -91,9 +92,14 @@ export function buildServer(db: Db, cfg: Config, paystack?: PaystackClient, stor
         if (r?.cor) currencyOfRecord = r.cor;
         if (r?.sdc) secondaryDisplayCurrency = r.sdc;
         if (r?.flags?.date_requests_enabled === true) dateRequestsEnabled = true;
+        // TRI-1150: canonical Terms & Conditions (admin-set, flags.terms_conditions_text).
+        // Read-only, no PII. null when unset so the consumer disclosure stays hidden until
+        // Content publishes real copy (never ship placeholder T&C to prod).
+        const tc = r?.flags?.terms_conditions_text;
+        if (typeof tc === 'string' && tc.trim() !== '') termsConditions = tc;
       } catch { /* settings unreadable → keep safe defaults */ }
       // minRequestLeadDays: 72h minimum lead time before a requested date (CEO decision, TRI-1133).
-      return { usdToGhsDisplayRate: displayRate, currencyOfRecord, secondaryDisplayCurrency, dateRequestsEnabled, minRequestLeadDays: 3 };
+      return { usdToGhsDisplayRate: displayRate, currencyOfRecord, secondaryDisplayCurrency, dateRequestsEnabled, minRequestLeadDays: 3, termsConditions };
     });
 
     api.get('/regions', async () => ({ regions: await listRegions(db) }));

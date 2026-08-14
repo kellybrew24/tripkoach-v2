@@ -1,6 +1,24 @@
 const NS = window.TripKoachDesignSystem_c9e4af;
 const { Button, Icon, FormField, Input, PhoneInput, PasswordInput, Select, Switch, Checkbox, Textarea, Alert, Badge, Modal, Toast, StatusBadge } = NS;
 
+// TRI-1150 · Readable Terms & Conditions disclosure at the sign-up agree-gate. Identical
+// control + canonical source (window.TK_TERMS via /config) as the checkout gate in
+// screens-web.jsx; duplicated here because each kit file is its own module scope. Native
+// <details> keeps it keyboard/screen-reader accessible with no JS or extra network cost.
+// Callers guard on TK_TERMS so it only mounts when real admin copy exists — never placeholder.
+function TkTermsDisclosure() {
+  return (
+    <details className="tk-terms-disclosure" style={{ marginTop: "var(--space-2)" }}>
+      <summary style={{ cursor: "pointer", color: "var(--text-link)", fontSize: 14, fontWeight: 600, width: "fit-content" }}>
+        Read the full Terms &amp; Conditions
+      </summary>
+      <div className="tk-body-sm" role="document" tabIndex={0} style={{ marginTop: "var(--space-3)", maxHeight: 320, overflowY: "auto", whiteSpace: "pre-wrap", border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-md)", padding: "var(--space-4)", background: "var(--brand-wash)", color: "var(--text-muted)" }}>
+        {window.TK_TERMS}
+      </div>
+    </details>
+  );
+}
+
 // TRI-882 — consumer auth live-wiring gate. When window.TK_CONFIG.USE_LIVE_API is
 // OFF (the default build and the DS preview) window.TK_AUTH is inert and every
 // screen below renders exactly the fixture prototype — no API calls. When ON, the
@@ -675,6 +693,10 @@ function LoginWeb({ go, startCreating }) {
               </div>
             )}
             {creating && <Checkbox id="lg-terms" label="I agree to the booking terms and privacy policy" />}
+            {/* TRI-1150: give sign-ups a way to READ the conditions behind the checkbox.
+                Same canonical source + accessible disclosure as checkout (window.TK_TERMS
+                via /config). Hidden until Content publishes real copy — no placeholder. */}
+            {creating && window.TK_TERMS ? <TkTermsDisclosure /> : null}
             <Button block size="lg" type="submit" disabled={live ? busy : undefined}>{busy ? (creating ? "Creating…" : "Signing in…") : (creating ? "Create account" : "Log in")}</Button>
           </form>
           <p className="tk-body-sm" style={{ textAlign: "center", marginTop: "var(--space-5)" }}>

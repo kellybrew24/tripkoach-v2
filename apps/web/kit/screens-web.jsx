@@ -11,6 +11,25 @@ const { Header, Footer, Breadcrumbs, TourCard, SearchField, Chip, Button, Icon, 
    the 12 fallback matches the current board-set rate for the fixtures/flag-off path. */
 const TK_FX = (window.TK_FX = window.TK_FX || { USD: 1, GHS: 12 });
 const TK_SYM = { USD: "$", GHS: "GH₵" };
+
+// TRI-1150 · Readable Terms & Conditions disclosure, shared by the two agree-gates
+// (checkout here + sign-up in screens-account.jsx render an identical control against
+// the same window.TK_TERMS source). Native <details>/<summary> so it's keyboard- and
+// screen-reader-accessible with no JS or extra network cost; the text is admin-authored
+// plain prose (whiteSpace pre-wrap preserves its paragraphs). Callers guard on TK_TERMS,
+// so this only mounts when real copy is published — never a placeholder.
+function TkTermsDisclosure() {
+  return (
+    <details className="tk-terms-disclosure" style={{ marginTop: "var(--space-2)" }}>
+      <summary style={{ cursor: "pointer", color: "var(--text-link)", fontSize: 14, fontWeight: 600, width: "fit-content" }}>
+        Read the full Terms &amp; Conditions
+      </summary>
+      <div className="tk-body-sm" role="document" tabIndex={0} style={{ marginTop: "var(--space-3)", maxHeight: 320, overflowY: "auto", whiteSpace: "pre-wrap", border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-md)", padding: "var(--space-4)", background: "var(--brand-wash)", color: "var(--text-muted)" }}>
+        {window.TK_TERMS}
+      </div>
+    </details>
+  );
+}
 // null is meaningful for tier-priced departures (price varies by party size) — preserve it
 // so the DeparturePicker can hide the per-departure price rather than showing "$0". (TRI-932)
 function cvt(usd, cur) { return usd == null ? null : (cur === "GHS" ? Math.round(usd * TK_FX.GHS) : usd); }
@@ -1320,6 +1339,11 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
               <div className="tk-summary__line"><span>Lead traveller</span><span>{liveAuth ? ((leadInfo.name || "—") + " · " + (leadInfo.email || "—")) : "Ama Mensah · ama@example.com"}</span></div>
             </div></div>
             <Checkbox id="w-agree" label="I agree to the booking terms and cancellation policy" />
+            {/* TRI-1150: let the traveller actually READ what they're agreeing to. Canonical
+                T&C (admin-set, window.TK_TERMS via /config) rendered in a native <details>
+                disclosure — keyboard + screen-reader friendly, zero extra bytes/JS, works on
+                low-bandwidth. Hidden entirely until Content publishes real copy (no placeholder). */}
+            {window.TK_TERMS ? <TkTermsDisclosure /> : null}
           </>}
           {step === 3 && <>
             <h1 className="tk-h2">How would you like to pay?</h1>
