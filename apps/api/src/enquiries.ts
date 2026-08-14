@@ -164,6 +164,25 @@ export async function submitEnquiry(
 export type InterestIntent = 'notify' | 'waitlist' | 'request';
 const INTEREST_INTENTS: readonly InterestIntent[] = ['notify', 'waitlist', 'request'];
 
+// TRI-1142 · Server-side min-lead floor for custom-date requests (CEO #1: 72h). Mirrors the value the
+// /config route publishes as `minRequestLeadDays` (apps/api/src/server.ts) and the consumer FE's own
+// `minRequestDate` guard in screens-web.jsx — kept in sync by hand. Until then this was ONLY enforced
+// client-side, so a direct API call could create a sub-lead request; this constant makes it authoritative.
+const MIN_REQUEST_LEAD_DAYS = 3;
+// A syntactically well-formed calendar date the picker emits.
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Earliest acceptable requested date as YYYY-MM-DD: server-local midnight today + leadDays. Matches the
+ *  FE's minRequestDate() so the boundary the API enforces is exactly the one the date picker renders. */
+function minRequestDate(leadDays: number): string {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + leadDays);
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
 export interface InterestInput {
   intent?: string;
   email?: string | null;
@@ -209,6 +228,22 @@ export async function submitTourInterest(
   // TRI-1136: request intent has its own dedupe key — per (tour, email, requestedDate).
   // notify/waitlist still dedupe on (tour, email, intent) as before.
   const requestedDate = intent === 'request' ? clean(input.requestedDate, 20) : null;
+  // TRI-1142: reject malformed / non-calendar dates and sub-lead picks server-side (CEO #1 72h floor).
+  // The FE guards these client-side too (min= on the date input + dateOk), but a direct/tampered API call
+  // must never create a request inside the lead window. Only enforced when a date is actually supplied —
+  // a dateless 'request' remains a manual ops lead as before.
+  if (intent === 'request' && requestedDate) {
+    const iso = requestedDate.slice(0, 10);
+    const asUtc = new Date(`${iso}T00:00:00Z`);
+    if (!DATE_RE.test(iso) || Number.isNaN(asUtc.getTime()) || asUtc.toISOString().slice(0, 10) !== iso) {
+      throw new BookingError('validation', 'A valid requested date (YYYY-MM-DD) is required', 422);
+    }
+    if (iso < minRequestDate(MIN_REQUEST_LEAD_DAYS)) {
+      throw new BookingError(
+        'validation',
+        `Please choose a date at least ${MIN_REQUEST_LEAD_DAYS} days from now`, 422);
+    }
+  }
   const partySize = intent === 'request' && input.partySize != null ? Math.max(1, Math.min(99, Number(input.partySize) | 0)) : null;
   const phone = intent === 'request' ? clean(input.phone, 60) : null;
   const note = intent === 'request' ? clean(input.note, 2000) : null;

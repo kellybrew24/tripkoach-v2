@@ -80,6 +80,32 @@ ok('omitted intent defaults to notify → 201', di.status === 201 && di.body?.cr
 const dirow = (await db.query<any>(`SELECT payload FROM enquiry WHERE id=$1`, [di.body.id])).rows[0];
 ok('defaulted intent stored as notify', dirow.payload?.intent === 'notify');
 
+// 9. TRI-1142 · Custom-date request min-lead (CEO #1 72h) enforced server-side.
+//    Build date strings relative to today so the test never bit-rots against the wall clock.
+const isoAt = (deltaDays: number) => {
+  const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() + deltaDays);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+// 9a. Sub-lead date (tomorrow, inside the 3-day window) → 422, nothing stored.
+const before = Number((await db.query<{ n: string }>(
+  `SELECT count(*) AS n FROM enquiry WHERE type='interest' AND payload->>'intent'='request'`)).rows[0].n);
+const subLead = await post(tour.id, { intent: 'request', email: 'req@example.com', requestedDate: isoAt(1), partySize: 2 });
+ok('sub-lead request date → 422', subLead.status === 422 && subLead.body?.error?.code === 'validation', JSON.stringify(subLead.body));
+const afterSub = Number((await db.query<{ n: string }>(
+  `SELECT count(*) AS n FROM enquiry WHERE type='interest' AND payload->>'intent'='request'`)).rows[0].n);
+ok('sub-lead request stored nothing', afterSub === before, `${afterSub} vs ${before}`);
+
+// 9b. Malformed / non-calendar date → 422.
+const badDate = await post(tour.id, { intent: 'request', email: 'req@example.com', requestedDate: '2026-02-30' });
+ok('non-calendar request date → 422', badDate.status === 422 && badDate.body?.error?.code === 'validation', JSON.stringify(badDate.body));
+
+// 9c. Boundary date (exactly today + minLeadDays) → 201 created.
+const okDate = await post(tour.id, { intent: 'request', email: 'req@example.com', requestedDate: isoAt(3), partySize: 2 });
+ok('at-lead request date → 201 created', okDate.status === 201 && okDate.body?.created === true, JSON.stringify(okDate.body));
+const okRow = (await db.query<any>(`SELECT payload FROM enquiry WHERE id=$1`, [okDate.body.id])).rows[0];
+ok('request stored with requestedDate + intent', okRow.payload?.intent === 'request' && okRow.payload?.requestedDate === isoAt(3));
+
 console.log(`\n${passed} checks passed`);
 await app.close();
 await db.close?.();
