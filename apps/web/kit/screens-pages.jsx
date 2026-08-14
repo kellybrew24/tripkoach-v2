@@ -54,7 +54,14 @@ function tkSendEnquiry(body, ids, btn) {
 // replicate the AboutPage hero treatment (AA-legible over any frame). TRI-1148.
 function PageHero({ overline, title, sub, children, dark = true, image, imageSrcSet, imagePos }) {
   return (
-    <section style={{ position: "relative", overflow: "hidden", background: dark ? "var(--n-900)" : "var(--brand-wash)", color: dark ? "var(--n-0)" : "var(--text-strong)", borderBottom: dark ? "none" : "1px solid var(--border-subtle)" }}>
+    // TRI-1153: floor the hero band at a shared min-height and vertically centre
+    // its content so content-light heroes (About, Marketplace) don't collapse
+    // shorter than copy-heavy siblings (Regions, Stories). All page heroes share
+    // space-12 padding (TRI-1151), but height was still purely content-driven —
+    // About's 2-line sub rendered ~30px shorter than Regions' 3-line sub. The
+    // 360px floor matches the taller siblings within a few px; heroes whose
+    // content already exceeds it (Regions) grow past it unchanged.
+    <section style={{ position: "relative", overflow: "hidden", minHeight: 360, display: "flex", flexDirection: "column", justifyContent: "center", background: dark ? "var(--n-900)" : "var(--brand-wash)", color: dark ? "var(--n-0)" : "var(--text-strong)", borderBottom: dark ? "none" : "1px solid var(--border-subtle)" }}>
       {image && <><img src={image} srcSet={imageSrcSet || undefined} sizes={imageSrcSet ? window.TK_SIZES.hero : undefined} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", objectPosition: imagePos || "center", opacity: 0.32 }} /><span style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(20,19,18,.4), rgba(20,19,18,.82))" }} /></>}
       <div className="tk-container" style={{ position: "relative", maxWidth: 1200, paddingBlock: "var(--space-12)" }}>
         <span className="tk-overline" style={{ color: dark ? "var(--gold-400)" : "var(--gold-700)" }}>{overline}</span>
