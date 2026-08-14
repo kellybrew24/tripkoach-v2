@@ -13,14 +13,40 @@
 ## 🟠 Cloudflare R2 media token — expiry EXTENDED by account owner (2026-08-14)
 
 **Update 2026-08-14 (TRI-1110):** rather than mint a new token, the board/CEO
-**extended the duration of the existing R2 API token**. If the edit changed only
-the expiry (TTL) and left the permission scope and bucket untouched, then the
-**Access Key ID + Secret are unchanged → no env swap and no DevOps rotation are
-needed**; the credentials already in both EnvironmentFiles keep working past the
+**extended the duration of the existing R2 API token**. The edit changed only the
+expiry (TTL) and left the permission scope and bucket untouched: the **Access Key
+ID + Secret are unchanged (key `…7a94`) → no env swap and no DevOps rotation are
+needed**; the credentials already in the dev EnvironmentFile keep working past the
 old 2026-08-24 date. See "Required token scope — verified from code" below.
-_Action still open:_ (a) confirm the edit did not roll the secret, (b) record the
-**new** expiry date here and reset the T-14d reminder, (c) DevOps confirms an
-upload still round-trips on dev.
+
+**DevOps verification — DONE 2026-08-14 (TRI-1112):**
+- **Dev (`tripkoach-api` :3020) — ✅ live round-trip PASS.** Signed PUT → `200`,
+  public GET via `cdn.tripkoach.com` → `200` (bytes match), DELETE → `204`. Object
+  Read + Write (+Delete) to the media bucket confirmed working; access key
+  unchanged (`…7a94`) → no restart needed. Deadline risk (uploads breaking
+  2026-08-24) is **RETIRED** — the token works today and was extended.
+- **Prod (`tripkoach-api-prod` :3120) — ℹ️ no R2 config.** `tripkoach-v2-prod.env`
+  has **zero `R2_*` keys** → prod media was never wired; nothing to rotate there.
+  Wiring prod R2 is a cutover task under **TRI-1057** (tracked in
+  `PROD-CUTOVER-BACKLOG.md`), not this ticket. Corrects the old premise that
+  uploads break on *both* envs — only dev is wired today.
+
+**⚠ Expiry date is NOT machine-readable from the stored credentials.** The R2 S3
+pair is `Access Key ID` (32-hex = the CF API **token id**) + `Secret` (64-hex =
+**SHA-256 of the token value**, a one-way hash). The only Cloudflare API that
+returns `expires_on` is `GET /user/tokens/verify`, which requires the **raw token
+value** as the bearer — that value is shown once at creation and is **never stored
+on the box** (we hold only its hash). Verified 2026-08-14: presenting the S3 secret
+to the CF API returns `1000 Invalid API Token` / `9109 Invalid access token`.
+⇒ The exact new expiry can only be read from the **Cloudflare dashboard** (R2 →
+*Manage R2 API Tokens* → the token's *Expires* column), or verified programmatically
+if the account owner mints a short-lived CF API token with *API Tokens → Read* and
+hands it over out-of-band. _Pending: CEO to record the exact date here + reset T-14d._
+
+_Durable fix for the alert gap below:_ add an R2 write/read/delete round-trip probe
+to the on-box health cron (`scripts/health-check-prod.sh`, TRI-1113) so a token
+lapse (or any creds failure) auto-alerts instead of silently 503-ing — this makes
+the exact-date dependency non-critical.
 
 **Impact if it lapses:** media + avatar uploads break on **both dev and prod**.
 The storage layer is safe-when-unconfigured, so an expired/invalid token doesn't
