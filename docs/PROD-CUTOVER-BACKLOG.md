@@ -110,6 +110,22 @@ DNS/infra as noted. All items DONE on dev unless flagged.
 - [ ] TRI-1053 — Caddy security headers — infra (`Caddyfile.tripkoach`)
 - [ ] TRI-1054 — admin login rate-limit + lockout — BE, **mig 029**, C `f752615`
 - [ ] TRI-1055 — consumer auth rate-limit — BE, C `6804d7e`
+  - [ ] **TRI-1173 — the register+trustProxy that makes TRI-1055 actually fire.** The SEC-H3
+    per-IP throttle config was inert on `origin/main`/branches because `server.ts` never registered
+    `@fastify/rate-limit` and built Fastify without `trustProxy` (TRI-1160 H-1; caught by the TRI-1165
+    smoke gate). **On the live dev HOST this is already fixed** (TRI-1164 host re-injection) — verified
+    2026-08-14: `/api/v1/auth/login` → 401×10 then **429 at attempt 11**; full `security-smoke.sh dev`
+    PASS. Git encoding landed at **`8fed3ba`** (branch `tri-1161-process-audit`): `import rateLimit` +
+    `app.register(rateLimit,{global:false})` + `trustProxy:true`; per-route `authRateLimit` on
+    login/signup/register/mfa/password-reset; 429→`rate_limited` envelope passthrough; declared the dep;
+    config-driven `authRateLimitMax` (10) + standalone `test/ratelimit.ts` regression guard. ⚠ **The
+    host superset is the CANONICAL, FULLER implementation** — it also carries the TRI-1063 guest-lookup
+    throttle (100/min), the TRI-1124 per-IP+per-target mail gate, and `rate-gate.ts`, none of which are
+    in `8fed3ba`. At cutover / superset→git reconcile (the reconcile child of TRI-1165 `6e9d9e7f` +
+    TRI-1170), **prefer the host `server.ts`/`consumer-routes.ts` over `8fed3ba`**; treat `8fed3ba` as a
+    minimal reference for the register+trustProxy subset only, never merged blind over the host version.
+    Deploy of `8fed3ba` was intentionally SKIPPED — the host is already correct and a wholesale
+    git-archive deploy would REVERT the superset controls (per the host `DEPLOYED_REF` warning).
 - [ ] TRI-1056 — session cookie hardening (`__Host-` + SameSite=strict) — BE, C `cddbfba`
 - [ ] TRI-1059 — post-logout back/bfcache auth leak — FE, C `bc392fd`
 - [ ] TRI-1061 — MFA brute-force throttle + lockout — BE, **mig 030** (collision ↑), C `2330e96`
