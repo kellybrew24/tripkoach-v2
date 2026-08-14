@@ -24,9 +24,9 @@ export function TourCard({
         <h3 className="tk-tourcard__title">
           <a href={href} style={{ color: "inherit", textDecoration: "none" }}>{title}</a>
         </h3>
-        <div className="tk-row" style={{ gap: "var(--space-3)", flexWrap: "wrap" }}>
-          {rating != null && <Rating value={rating} count={reviewCount} />}
-          {spotsLeft != null && <AvailabilityBadge spotsLeft={spotsLeft} />}
+        <div className="tk-tourcard__stats">
+          <span style={{ marginInlineEnd: "auto" }}>{rating != null ? <Rating value={rating} count={reviewCount} /> : null}</span>
+          {spotsLeft != null ? <AvailabilityBadge spotsLeft={spotsLeft} /> : null}
         </div>
         <div className="tk-tourcard__foot">
           <Price amount={price} currency={currency} approxAmount={approxPrice} from unit="per person" />

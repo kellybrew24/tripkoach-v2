@@ -17,6 +17,11 @@
   min-height:calc(var(--text-h5-size) * var(--text-h5-lh) * 2)}
 .tk-tourcard__meta{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-1) var(--space-3);
   font-size:var(--text-body-sm-size);color:var(--text-muted)}
+/* TRI-1118: reserve a fixed rating/availability slot so cards keep a consistent
+   vertical rhythm whether or not a tour carries a rating; the availability/urgency
+   badge always sits in one slot at the row end. */
+.tk-tourcard__stats{display:flex;align-items:center;gap:var(--space-3);min-height:26px}
+.tk-tourcard--row .tk-tourcard__stats{min-height:0}
 .tk-tourcard__foot{display:flex;align-items:flex-end;justify-content:space-between;gap:var(--space-3);
   padding-block-start:var(--space-3);border-block-start:1px solid var(--border-subtle);margin-block-start:auto}
 .tk-tourcard--row{flex-direction:row;height:auto}

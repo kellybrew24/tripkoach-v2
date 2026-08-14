@@ -2408,17 +2408,17 @@ function TourCard({
       textDecoration: "none"
     }
   }, title)), /*#__PURE__*/React.createElement("div", {
-    className: "tk-row",
+    className: "tk-tourcard__stats"
+  }, /*#__PURE__*/React.createElement("span", {
     style: {
-      gap: "var(--space-3)",
-      flexWrap: "wrap"
+      marginInlineEnd: "auto"
     }
-  }, rating != null && /*#__PURE__*/React.createElement(__ds_scope.Rating, {
+  }, rating != null ? /*#__PURE__*/React.createElement(__ds_scope.Rating, {
     value: rating,
     count: reviewCount
-  }), spotsLeft != null && /*#__PURE__*/React.createElement(__ds_scope.AvailabilityBadge, {
+  }) : null), spotsLeft != null ? /*#__PURE__*/React.createElement(__ds_scope.AvailabilityBadge, {
     spotsLeft: spotsLeft
-  })), /*#__PURE__*/React.createElement("div", {
+  }) : null), /*#__PURE__*/React.createElement("div", {
     className: "tk-tourcard__foot"
   }, /*#__PURE__*/React.createElement(__ds_scope.Price, {
     amount: price,
