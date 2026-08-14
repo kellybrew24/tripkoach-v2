@@ -37,21 +37,60 @@ the cutover, not before:
 
 ## ⚠ Migration reconciliation (do FIRST, before any `migrate` on prod)
 
-Prod DB is at **mig 010**; dev is at **mig 031**. The ordered set 011→031 must be
-applied in order, but the set is **not clean** — two collisions to resolve before
-running `migrate` against prod:
+Prod DB is at **mig 010**; dev is at **mig 032**. The ordered set 011→032 must be
+applied in order, but the set is **not clean**, and — critically — **no single git
+ref currently contains the complete, ordered set** (see TRI-1161 audit / TRI-1162):
 
-- [ ] **029/030 duplicate lockout** — the TRI-1061 (MFA brute-force) and TRI-1065
-  (SEC hardening item 3) stacks BOTH introduce a `029/030` migration adding the
-  same consumer-lockout columns via *different* helpers. **Dedupe + renumber into
-  a single ordered migration; never blind-rsync one stack over the other.**
+- `origin/main` has 011→**030** but is MISSING 031 & 032 (they live only on
+  feature branches: 031 on `tri-1095-…`, 032 on `tri-1139-…`/`tri-1155-…`).
+- The tip feature branch (`tri-1155-remove-dashes`) has 011→028 + 031 + 032 but is
+  MISSING 029 & 030.
+- So the "clean 011→032" must be *assembled* into one reviewable branch before cutover.
+
+Collisions / divergences to resolve first (TRI-1162 owns producing the clean set):
+
+- [ ] **029** — `029_admin_login_lockout.sql` (TRI-1054): adds `staff_user.failed_login_count`/`locked_until`. Single definition, no conflict.
+- [ ] **030 — TWO DIVERGENT DEFINITIONS, not just a renumber.** `main` shipped
+  `030_consumer_login_lockout.sql` (TRI-1065) which adds ONLY
+  `user_account.failed_login_count`/`locked_until`. The unmerged branch
+  `tri-1061-mfa-brute-force` has `030_mfa_bruteforce_hardening.sql` which adds the
+  SAME two `user_account` columns **PLUS `session.mfa_failed_count`**. ⚠ **`main`
+  (and thus any cutover from main) is MISSING `session.mfa_failed_count` AND the
+  TRI-1061 auth.ts MFA-lockout code entirely** (`grep mfa_failed_count origin/main`
+  = 0 hits). The consolidated 030 must be the TRI-1061 superset (all three columns,
+  `IF NOT EXISTS`), and the TRI-1061 code must be merged with it. Coordinate with
+  TRI-1164 (security re-deploy) — same regression surface.
 - [ ] **030/031 numbering** — TRI-1095 `public_token` landed as mig 031 on top of
-  the contested 030. Reconcile the final numbers so prod applies a clean 011→NNN.
+  the contested 030. Keep 031/032 numbers (prod is at 010, so no already-applied
+  clash) but confirm the final ordered chain is contiguous 011→032.
 - [ ] **028 is a data backfill, NOT cleanly reversible** (guest→customer). Take the
   pre-migration `pg_dump` (RUNBOOK §DB) — that dump is the only real rollback.
+- [ ] **mig 032** (`032_departure_visibility.sql`, TRI-1136) — applied on dev, owes
+  prod. Apply in order; then `settings.flags.date_requests_enabled=true` to enable.
 - [ ] mig 021 (email verification, SOFT gate) was never run on prod — included here.
 
+> ⚠ **Runner note (why numbering ≠ safety):** `migrate.ts` tracks applied
+> migrations by **filename** in `schema_migrations`, sorted alphabetically,
+> forward-only. Two files sharing a `030_` prefix are treated as two DISTINCT
+> migrations and BOTH run (in filename order) — the runner does NOT dedupe by
+> number. Dedupe MUST happen in the files before `migrate` runs, not in the DB.
+
 Migration source of truth for reversibility: [docs/rollback.md](./rollback.md).
+
+## ⚠ Code-level cutover collisions (not migrations)
+
+- [ ] **`booking.ts` — adminCreated-aware required-field checks (TRI-1157) vs
+  consumer-only variant.** The live dev API host `booking.ts` nests the strict
+  required-field 422s inside the `!opts?.adminCreated` branch (preserves TRI-1137
+  admin leniency). A naive canonical-repo branch may carry a flat CONSUMER-ONLY
+  variant. At cutover apply the **adminCreated-aware** form and patch changed lines
+  only (prod is at older code/mig state). ⚠ **This work (TRI-1157) is currently an
+  UNCOMMITTED working-tree diff on `tri-1155-remove-dashes` — not committed to any
+  branch. TRI-1163 commits it before it can be lost.**
+- [ ] **`enquiries.ts`** — TRI-1141 (24h-SLA ack email) and TRI-1142 (72h min-lead
+  server guard) are additive, non-overlapping regions of the same file; keep both.
+- [ ] **Dev host src is a SUPERSET of every branch** — always diff host-vs-branch and
+  patch changed LINES; never wholesale `rsync src/`. See RUNBOOK §3.
 
 ---
 
