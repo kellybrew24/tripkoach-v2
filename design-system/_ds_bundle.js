@@ -2558,7 +2558,7 @@ function PaymentForm({
     style: {
       marginBottom: "var(--space-2)"
     }
-  }, "How would you like to pay?"), /*#__PURE__*/React.createElement("div", {
+  }, "Payment option"), /*#__PURE__*/React.createElement("div", {
     className: "tk-stack",
     style: {
       gap: "var(--space-2)"
@@ -2906,9 +2906,14 @@ function NumberStepper({
   max = 12,
   onChange,
   label = "Travellers",
+  unitLabel,
   disabled
 }) {
   const set = v => onChange && onChange(Math.min(max, Math.max(min, v)));
+  // Add/Remove always act on exactly ONE item, so the button labels read as the
+  // singular unit (e.g. "Add one traveller"). Fall back to stripping a trailing
+  // "s" from the group label when no explicit unitLabel is given (TRI-1169).
+  const one = (unitLabel || label.replace(/s$/i, "")).toLowerCase();
   return /*#__PURE__*/React.createElement("div", {
     className: "tk-stepper",
     role: "group",
@@ -2921,7 +2926,7 @@ function NumberStepper({
     className: "tk-stepper__btn",
     onClick: () => set(value - 1),
     disabled: disabled || value <= min,
-    "aria-label": `Remove one ${label.toLowerCase()}`
+    "aria-label": `Remove one ${one}`
   }, /*#__PURE__*/React.createElement(__ds_scope.Icon, {
     name: "minus",
     size: 18
@@ -2934,7 +2939,7 @@ function NumberStepper({
     className: "tk-stepper__btn",
     onClick: () => set(value + 1),
     disabled: disabled || value >= max,
-    "aria-label": `Add one ${label.toLowerCase()}`
+    "aria-label": `Add one ${one}`
   }, /*#__PURE__*/React.createElement(__ds_scope.Icon, {
     name: "plus",
     size: 18

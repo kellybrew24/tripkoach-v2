@@ -14,7 +14,7 @@ export function PaymentForm({
   return (
     <div className="tk-stack" style={{ gap: "var(--space-4)" }}>
       <fieldset style={{ border: 0, margin: 0, padding: 0 }}>
-        <legend className="tk-label" style={{ marginBottom: "var(--space-2)" }}>How would you like to pay?</legend>
+        <legend className="tk-label" style={{ marginBottom: "var(--space-2)" }}>Payment option</legend>
         <div className="tk-stack" style={{ gap: "var(--space-2)" }}>
           <Radio card id="pay-now" name="paymode" label="Pay now" checked={mode === "now"}
             disabled={!payNowEnabled} onChange={() => onModeChange && onModeChange("now")}

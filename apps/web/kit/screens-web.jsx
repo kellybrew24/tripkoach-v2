@@ -633,7 +633,7 @@ function Shell({ children, currency, setCurrency, go, screen }) {
           <Button variant="primary" size="sm" className="tk-hide-mobile" onClick={() => go && go("contact")}>Plan a trip</Button>
         </>} />
       <main id="main-content" tabIndex={-1} style={{ outline: "none" }}>{children}</main>
-      <Footer columns={FOOT} logoSrc="../../assets/logo-badge.png" />
+      <Footer columns={FOOT} logoSrc="../../assets/logo-badge.png" note={"TripKoach Ltd · Accra, Ghana · Prices shown in " + (currency === "GHS" ? "Ghana cedis (GHS)" : "US dollars (USD)")} />
       {menu && <MobileMenu go={go} onClose={() => setMenu(false)} />}
       {acct && <>
         <div onClick={() => setAcct(null)} style={{ position: "fixed", inset: 0, zIndex: 60 }} />
@@ -1366,7 +1366,7 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
             <Button size="lg" disabled={live ? busy : undefined} iconEnd={step === 3 && mode === "now" ? "external-link" : undefined} onClick={() => { if (step !== 3) { setStep(step + 1); return; } if (live) { onPay(); return; } window.__payMode = mode; go("confirm"); }}>{live && busy ? "Processing…" : (step === 3 ? (mode === "now" ? "Pay " + money(netTotal, currency) + " with Paystack" : "Confirm booking") : "Continue")}</Button>
           </div>
         </div>
-        <OrderSummary sticky lines={[{ label: money(unit, currency) + "/person × " + pax + " travellers", amount: cvt(total, currency) }]} total={cvt(netTotal, currency)} currency={currency} payMode={mode}
+        <OrderSummary sticky lines={[{ label: money(unit, currency) + "/person × " + pax + (pax === 1 ? " traveller" : " travellers"), amount: cvt(total, currency) }]} total={cvt(netTotal, currency)} currency={currency} payMode={mode}
           discount={discountUsd > 0 ? { label: "Promo " + promo.code, amount: cvt(discountUsd, currency) } : undefined}>
           {t0.packages ? <p className="tk-help" style={{ display: "flex", gap: 6 }}><Icon name="ticket" size={14} />{t.packageName} package</p> : null}
           {nextTier && <p className="tk-help" style={{ display: "flex", gap: 6, color: "var(--success-fg)" }}><Icon name="users" size={14} />Add {nextTier.minPax - pax} more and everyone pays {money(nextTier.price, currency)}/person.</p>}
