@@ -1047,7 +1047,22 @@ function TourWeb({ go, currency, slug }) {
               {dateRequestsOn ? (
                 <div className="tk-stack" style={{ gap: "var(--space-2)", borderTop: "1px solid var(--border-subtle)", paddingTop: "var(--space-3)" }}>
                   {!showRequest ? (
-                    <Button variant="link" size="sm" iconStart="calendar-days" style={{ alignSelf: "flex-start" }} onClick={() => setShowRequest(true)}>None of these dates work? Request your own date</Button>
+                    // TRI-1144 · render the trigger as an in-flow, full-width text link that WRAPS.
+                    // The DS <Button variant="link"> is a fixed-height inline-flex control whose base
+                    // `.tk-btn` sets `white-space:nowrap`, so this full-sentence label could not wrap and
+                    // overflowed the booking card's right edge — the trailing word ("date") was clipped
+                    // (board screenshot). A plain link-styled <button> keeps the same action + native-button
+                    // a11y but flows beneath the picker, stays inside the card (width:100%), and wraps on
+                    // narrow/mobile widths. Icon is top-aligned so it sits with the first line when wrapped.
+                    <button
+                      type="button"
+                      className="tk-datereq-trigger"
+                      onClick={() => setShowRequest(true)}
+                      style={{ display: "flex", alignItems: "flex-start", gap: 6, width: "100%", padding: 0, margin: 0, background: "none", border: 0, font: "inherit", fontSize: "var(--text-body-sm-size)", fontWeight: "var(--fw-semibold)", textAlign: "left", color: "var(--text-link)", textDecoration: "underline", textUnderlineOffset: 3, lineHeight: 1.4, whiteSpace: "normal", cursor: "pointer" }}
+                    >
+                      <Icon name="calendar-days" size={16} style={{ marginTop: 2 }} />
+                      <span>None of these dates work? Request your own date</span>
+                    </button>
                   ) : (<>
                     <div className="tk-stack" style={{ gap: 2 }}>
                       <strong style={{ fontSize: 15 }}>Request your own date</strong>
