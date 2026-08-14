@@ -1461,6 +1461,16 @@ function BookingDetailWeb({ go, currency = "USD", bref }) {
   const Wrap = ({ children }) => (
     <div className="tk-container" style={{ paddingBlock: "var(--space-8) var(--space-12)", maxWidth: 720 }}>
       <div className="tk-stack" style={{ gap: "var(--space-5)" }}>
+        {/* TRI-1103: prominent TripKoach brand lockup on the receipt page itself (TRI-1099
+            added the badge to the downloadable receipt + email; this closes the on-screen
+            /booking/:ref view). Relative asset path matches Header/Footer (base href="/"). */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <img src="../../assets/logo-badge.png" width="48" height="43" alt="TripKoach" style={{ display: "block" }} />
+          <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.15 }}>
+            <span style={{ fontWeight: 800, fontSize: 18, letterSpacing: "-0.01em", color: "var(--text-strong, #1E1C1A)" }}>TripKoach</span>
+            <span className="tk-body-sm tk-muted">Booking receipt</span>
+          </div>
+        </div>
         <h1 className="tk-h2">Your booking</h1>
         {children}
       </div>
