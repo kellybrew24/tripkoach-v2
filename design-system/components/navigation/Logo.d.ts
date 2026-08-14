@@ -7,6 +7,7 @@ export interface LogoProps {
   tone?: "ink" | "inverse";
   /** Path to the badge asset, relative to the consuming page. */
   src?: string;
+  /** Where the lockup links. Defaults to the site root "/". */
   href?: string;
 }
 export declare function Logo(props: LogoProps): JSX.Element;

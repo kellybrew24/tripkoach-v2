@@ -3187,7 +3187,7 @@ function Logo({
   wordmark = true,
   tone = "ink",
   src = "assets/logo-badge.png",
-  href = "#"
+  href = "/"
 }) {
   return /*#__PURE__*/React.createElement("a", {
     href: href,

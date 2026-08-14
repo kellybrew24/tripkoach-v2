@@ -12,6 +12,13 @@ a:hover{color:var(--text-link-hover);text-decoration-thickness:2px}
 a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,
 [tabindex]:focus-visible,summary:focus-visible{outline:var(--focus-ring-width) solid var(--focus-ring);
   outline-offset:var(--focus-ring-offset);border-radius:var(--radius-xs)}
+/* Skip-to-content link (WCAG 2.4.1): off-screen until keyboard-focused, then it
+   pins to the top-left and reads before the header so keyboard/SR users can jump
+   straight past the nav to the page's <main>. */
+.tk-skip-link{position:absolute;left:var(--space-3);top:calc(-1 * var(--space-12));z-index:var(--z-toast,2000);
+  display:inline-block;padding:10px 16px;border-radius:var(--radius-md);background:var(--text-strong);color:var(--n-0);
+  font-weight:700;font-size:14px;text-decoration:none;box-shadow:var(--elev-3);transition:top var(--dur-fast,.12s) var(--ease-standard,ease)}
+.tk-skip-link:focus,.tk-skip-link:focus-visible{top:var(--space-3);color:var(--n-0)}
 ::selection{background:var(--gold-200);color:var(--n-900)}
 .tk-display{font-size:var(--text-display-size);line-height:var(--text-display-lh);letter-spacing:var(--text-display-ls);font-weight:var(--text-display-weight);color:var(--text-strong)}
 .tk-h1{font-size:var(--text-h1-size);line-height:var(--text-h1-lh);letter-spacing:var(--text-h1-ls);font-weight:var(--text-h1-weight);color:var(--text-strong)}

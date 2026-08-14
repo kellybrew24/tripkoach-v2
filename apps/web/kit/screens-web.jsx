@@ -590,6 +590,9 @@ function Shell({ children, currency, setCurrency, go, screen }) {
   };
   return (
     <div style={{ background: "var(--bg-page)", minHeight: "100%" }} onClick={onNav}>
+      {/* Skip-to-content link (WCAG 2.4.1): first focusable element, hidden until
+          keyboard-focused, jumps past the header nav straight to <main> (TRI-1119). */}
+      <a className="tk-skip-link" href="#main-content">Skip to content</a>
       <Header items={NAV} current={NAV_CURRENT[screen]} signedIn={authed !== false} logoSrc="../../assets/logo-badge.png"
         right={<>
           <CurrencyToggle value={currency} onChange={setCurrency} />
@@ -597,7 +600,7 @@ function Shell({ children, currency, setCurrency, go, screen }) {
           {!live && <Button variant="ghost" size="sm" className="tk-hide-mobile" onClick={() => go && go("login")}>Sign in</Button>}
           <Button variant="primary" size="sm" className="tk-hide-mobile" onClick={() => go && go("contact")}>Plan a trip</Button>
         </>} />
-      <main>{children}</main>
+      <main id="main-content" tabIndex={-1} style={{ outline: "none" }}>{children}</main>
       <Footer columns={FOOT} logoSrc="../../assets/logo-badge.png" />
       {menu && <MobileMenu go={go} onClose={() => setMenu(false)} />}
       {acct && <>

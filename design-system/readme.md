@@ -18,7 +18,7 @@ able to answer "what will I be charged, in which currency, and when?" from whate
 | Source | What it gave us |
 | --- | --- |
 | Written brief (TripKoach, product + brand) | Flow inventory, business rules (pay-later, Paystack sandbox, GHS/USD), tone, audience, accessibility bar |
-| `uploads/logo-badge.png` (supplied, 160×145) | The only brand asset. Circular badge, charcoal `#303030`, gold star accents `#D08028`. Copied to `assets/logo-badge.png` |
+| `assets/logo-badge.png` (supplied original, 160×145) | The only brand asset, and the single canonical source. Circular badge, charcoal `#303030`, gold star accents `#D08028`. `scripts/build.mjs` copies it into each app's `dist/assets/`; the receipt/email surfaces reference it at `{webBaseUrl}/assets/logo-badge.png`. Lockup rules in `guidelines/logo-lockup.md`. |
 
 No codebase, Figma file or existing UI was provided, so the component inventory below was authored from the
 brief's Section 5 list. Colour, type and spacing systems are derived from the badge plus accessible defaults —

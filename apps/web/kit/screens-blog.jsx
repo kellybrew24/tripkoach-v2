@@ -53,6 +53,11 @@ function BlogImg({ src, alt, seed, overlay }) {
 function BlogCard({ p, go, big = false }) {
   return (
     <article onClick={() => go("post", p.slug)} className={"tk-card tk-card--interactive" + (big ? " tk-blogfeature" : "")}
+      /* Keyboard-operable card (WCAG 2.1.1): the whole card is the click target,
+         so expose it as a link, put it in the tab order, and activate on
+         Enter/Space like a native link/button (TRI-1119). */
+      role="link" tabIndex={0} aria-label={"Read: " + p.title}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go("post", p.slug); } }}
       style={{ cursor: "pointer", display: "flex", flexDirection: big ? "row" : "column", overflow: "hidden", gridColumn: big ? "1 / -1" : "auto" }}>
       <div className="tk-media" style={{ aspectRatio: big ? "16 / 10" : "3 / 2", flex: big ? "0 0 52%" : "none" }}>
         <BlogImg src={p.hero} alt="" seed={p.slug} />
