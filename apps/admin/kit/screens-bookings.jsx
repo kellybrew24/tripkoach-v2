@@ -26,6 +26,74 @@ function bookingDateFilters() {
   ];
 }
 
+// TRI-1130: custom departure-date range. Booking `date` is a display string
+// ("Sat 22 Aug 2026"); we normalise it to a local YYYY-MM-DD so it string-compares
+// cleanly against the native <input type="date"> values (also YYYY-MM-DD) with no
+// timezone drift. Either bound may be open-ended.
+function bookingYMD(s) {
+  const d = parseBookingDate(s);
+  if (!d) return null;
+  const mm = String(d.getMonth() + 1).padStart(2, "0"), dd = String(d.getDate()).padStart(2, "0");
+  return d.getFullYear() + "-" + mm + "-" + dd;
+}
+function inDateRange(s, range) {
+  const ymd = bookingYMD(s);
+  if (!ymd) return false;
+  if (range.from && ymd < range.from) return false;
+  if (range.to && ymd > range.to) return false;
+  return true;
+}
+function fmtYMD(ymd) {
+  const d = ymd ? new Date(ymd + "T00:00:00") : null;
+  if (!d || isNaN(d.getTime())) return ymd || "";
+  const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return d.getDate() + " " + MON[d.getMonth()] + " " + d.getFullYear();
+}
+function rangeLabel(range) {
+  if (range.from && range.to) return fmtYMD(range.from) + " – " + fmtYMD(range.to);
+  if (range.from) return "From " + fmtYMD(range.from);
+  if (range.to) return "Until " + fmtYMD(range.to);
+  return "Date range";
+}
+
+// The Date-facet dropdown: quick presets (mutually exclusive with a custom range)
+// plus two native date inputs for an arbitrary from/to window. Setting either input
+// clears the active preset and vice versa, so exactly one date filter is ever live.
+function DateRangeMenu({ range, setRange, dateF, setDateF, presets, onDone }) {
+  const setFrom = (v) => { setDateF(null); setRange((r) => ({ ...r, from: v })); };
+  const setTo = (v) => { setDateF(null); setRange((r) => ({ ...r, to: v })); };
+  const pickPreset = (id) => { setRange({ from: "", to: "" }); setDateF(id); onDone(); };
+  const label = { fontSize: 12, color: "var(--text-muted)", display: "flex", flexDirection: "column", gap: 4 };
+  const input = { minHeight: 34, padding: "6px 8px", border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-sm)", background: "var(--bg-surface)", color: "var(--text-strong)", fontSize: 13.5, width: "100%", boxSizing: "border-box", colorScheme: "light dark" };
+  const heading = { fontSize: 11.5, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: ".04em" };
+  return (
+    <div style={{ minWidth: 244, display: "flex", flexDirection: "column", gap: 10, padding: 4 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <span style={heading}>Quick ranges</span>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {presets.map((f) => (
+            <button key={f.id} type="button" onClick={() => pickPreset(f.id)} style={{ padding: "5px 10px", border: "1px solid var(--border-subtle)", borderRadius: 999, background: dateF === f.id ? "var(--brand-wash)" : "transparent", color: "var(--text-strong)", fontWeight: dateF === f.id ? 700 : 500, fontSize: 12.5, cursor: "pointer" }}>{f.label}</button>
+          ))}
+        </div>
+      </div>
+      <div style={{ height: 1, background: "var(--border-subtle)" }} />
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <span style={heading}>Custom range</span>
+        <label style={label}>From
+          <input type="date" value={range.from} max={range.to || undefined} onChange={(e) => setFrom(e.target.value)} style={input} />
+        </label>
+        <label style={label}>To
+          <input type="date" value={range.to} min={range.from || undefined} onChange={(e) => setTo(e.target.value)} style={input} />
+        </label>
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginTop: 2 }}>
+        <button type="button" onClick={() => { setRange({ from: "", to: "" }); setDateF(null); }} style={{ background: "none", border: 0, color: "var(--text-link)", fontWeight: 600, fontSize: 13, cursor: "pointer", padding: "4px 2px" }}>Clear</button>
+        <button type="button" onClick={onDone} style={{ padding: "6px 16px", border: 0, borderRadius: "var(--radius-sm)", background: "var(--brand-gold-deep, var(--text-strong))", color: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Done</button>
+      </div>
+    </div>
+  );
+}
+
 // TRI-1097: shared client-side row sort. The DS DataTable is presentational — it renders
 // the sort chevron/aria-sort and reports header clicks via onSortChange, but it NEVER
 // reorders rows. Every admin table therefore has to sort its own rows from the {key,dir}
@@ -101,6 +169,9 @@ function BookingsAdmin({ go, state, setState }) {
   const [dateF, setDateF] = React.useState(null);
   const [tourF, setTourF] = React.useState(null);
   const [payF, setPayF] = React.useState(null);
+  // TRI-1130: custom departure-date range (yyyy-mm-dd). Mutually exclusive with dateF.
+  const [range, setRange] = React.useState({ from: "", to: "" });
+  const rangeActive = !!(range.from || range.to);
   const openRef = state.detailRef;
   const loading = state.bookingsView === "loading";
 
@@ -110,7 +181,8 @@ function BookingsAdmin({ go, state, setState }) {
 
   let rows = A.bookings.filter(b => tab === "all" || b.status === tab);
   if (q) rows = rows.filter(b => (b.ref + b.customer + b.tour).toLowerCase().includes(q.toLowerCase()));
-  if (dateF) { const f = dateFilters.find(x => x.id === dateF); if (f) rows = rows.filter(b => f.test(parseBookingDate(b.date))); }
+  if (rangeActive) rows = rows.filter(b => inDateRange(b.date, range)); // TRI-1130: custom range wins over presets
+  else if (dateF) { const f = dateFilters.find(x => x.id === dateF); if (f) rows = rows.filter(b => f.test(parseBookingDate(b.date))); }
   if (tourF) rows = rows.filter(b => b.tour === tourF);
   if (payF) rows = rows.filter(b => b.payment === payF);
   rows = tkSortRows(rows, sort); // TRI-1097: apply the header sort the DataTable only tracks.
@@ -120,17 +192,16 @@ function BookingsAdmin({ go, state, setState }) {
 
   const applied = [];
   if (tab !== "all") applied.push({ id: "s", label: "Status: " + tab, onRemove: () => setTab("all") });
-  if (dateF) applied.push({ id: "d", label: "Date: " + (dateFilters.find(x => x.id === dateF) || {}).label, onRemove: () => setDateF(null) });
+  if (rangeActive) applied.push({ id: "d", label: "Date: " + rangeLabel(range), onRemove: () => setRange({ from: "", to: "" }) });
+  else if (dateF) applied.push({ id: "d", label: "Date: " + (dateFilters.find(x => x.id === dateF) || {}).label, onRemove: () => setDateF(null) });
   if (tourF) applied.push({ id: "t", label: "Tour: " + tourF, onRemove: () => setTourF(null) });
   if (payF) applied.push({ id: "p", label: "Payment: " + payLabel(payF), onRemove: () => setPayF(null) });
-  const clearAll = () => { setTab("all"); setDateF(null); setTourF(null); setPayF(null); };
-  const menuItems = menu === "date"
-    ? dateFilters.map(f => ({ id: f.id, label: f.label, on: () => { setDateF(f.id); setMenu(null); }, sel: dateF === f.id }))
-    : menu === "tour"
-      ? tours.map(t => ({ id: t, label: t, on: () => { setTourF(t); setMenu(null); }, sel: tourF === t }))
-      : menu === "pay"
-        ? pays.map(p => ({ id: p, label: payLabel(p), on: () => { setPayF(p); setMenu(null); }, sel: payF === p }))
-        : [];
+  const clearAll = () => { setTab("all"); setDateF(null); setRange({ from: "", to: "" }); setTourF(null); setPayF(null); };
+  const menuItems = menu === "tour"
+    ? tours.map(t => ({ id: t, label: t, on: () => { setTourF(t); setMenu(null); }, sel: tourF === t }))
+    : menu === "pay"
+      ? pays.map(p => ({ id: p, label: payLabel(p), on: () => { setPayF(p); setMenu(null); }, sel: payF === p }))
+      : [];
   const menuLeft = { date: 12, tour: 150, pay: 250 }[menu] || 12;
 
   const booking = A.bookings.find(b => b.ref === openRef);
@@ -144,7 +215,7 @@ function BookingsAdmin({ go, state, setState }) {
       <div className="tk-tablewrap" style={{ position: "relative" }}>
         <FilterBar
           facets={[
-            { id: "date", icon: "calendar-days", label: dateF ? (dateFilters.find(x => x.id === dateF) || {}).label : "Date range", active: !!dateF || menu === "date", onClick: () => setMenu(menu === "date" ? null : "date") },
+            { id: "date", icon: "calendar-days", label: rangeActive ? rangeLabel(range) : (dateF ? (dateFilters.find(x => x.id === dateF) || {}).label : "Date range"), active: !!dateF || rangeActive || menu === "date", onClick: () => setMenu(menu === "date" ? null : "date") },
             { id: "tour", label: tourF ? "Tour: " + tourF : "Tour", active: !!tourF || menu === "tour", onClick: () => setMenu(menu === "tour" ? null : "tour") },
             { id: "pay", label: payF ? "Payment: " + payLabel(payF) : "Payment", active: !!payF || menu === "pay", onClick: () => setMenu(menu === "pay" ? null : "pay") }]}
           applied={applied}
@@ -153,10 +224,12 @@ function BookingsAdmin({ go, state, setState }) {
           <Button size="sm" variant="secondary" iconStart="download" disabled={rows.length === 0}
             onClick={() => exportBookingsCsv(rows)}>Export</Button>
         </FilterBar>
-        {menu && menuItems.length > 0 && <><div onClick={() => setMenu(null)} style={{ position: "fixed", inset: 0, zIndex: 5 }} /><div style={{ position: "absolute", top: 52, insetInlineStart: menuLeft, zIndex: 6, minWidth: 200, maxHeight: 280, overflowY: "auto", background: "var(--bg-surface)", border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-lg)", padding: 6 }}>
-          {menuItems.map(o => (
-            <button key={o.id} type="button" onClick={o.on} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, width: "100%", textAlign: "start", padding: "8px 10px", border: 0, borderRadius: "var(--radius-sm)", background: o.sel ? "var(--brand-wash)" : "transparent", color: "var(--text-strong)", fontWeight: o.sel ? 700 : 500, fontSize: 13.5, cursor: "pointer" }}>{o.label}{o.sel && <Icon name="check" size={15} />}</button>
-          ))}
+        {menu && (menu === "date" || menuItems.length > 0) && <><div onClick={() => setMenu(null)} style={{ position: "fixed", inset: 0, zIndex: 5 }} /><div style={{ position: "absolute", top: 52, insetInlineStart: menuLeft, zIndex: 6, minWidth: 200, maxHeight: 340, overflowY: "auto", background: "var(--bg-surface)", border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-lg)", padding: 6 }}>
+          {menu === "date"
+            ? <DateRangeMenu range={range} setRange={setRange} dateF={dateF} setDateF={setDateF} presets={dateFilters} onDone={() => setMenu(null)} />
+            : menuItems.map(o => (
+              <button key={o.id} type="button" onClick={o.on} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, width: "100%", textAlign: "start", padding: "8px 10px", border: 0, borderRadius: "var(--radius-sm)", background: o.sel ? "var(--brand-wash)" : "transparent", color: "var(--text-strong)", fontWeight: o.sel ? 700 : 500, fontSize: 13.5, cursor: "pointer" }}>{o.label}{o.sel && <Icon name="check" size={15} />}</button>
+            ))}
         </div></>}
 
         {sel.length > 0 && (

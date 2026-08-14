@@ -502,7 +502,13 @@
     setGuideStatus: function (id, status) { return req("PATCH", "/guides/" + encodeURIComponent(id), { status: status }); },
     deleteGuide: function (id) { return req("DELETE", "/guides/" + encodeURIComponent(id)); },
     // reporting (TRI-898): console-home aggregates + read-only audit log (A15/A16)
-    getDashboard: function (range) { return req("GET", "/dashboard" + (range ? "?range=" + encodeURIComponent(range) : "")); },
+    getDashboard: function (range, from, to) {
+      // TRI-1130: a custom from/to window (yyyy-mm-dd) takes precedence over the named range.
+      var qs = (from && to)
+        ? "?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to)
+        : (range ? "?range=" + encodeURIComponent(range) : "");
+      return req("GET", "/dashboard" + qs);
+    },
     listAuditLog: function (params) {
       var q = [];
       if (params) { for (var k in params) if (params[k] != null && params[k] !== "") q.push(encodeURIComponent(k) + "=" + encodeURIComponent(params[k])); }

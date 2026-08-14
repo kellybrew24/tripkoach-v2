@@ -1876,9 +1876,38 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     all:   { since: `true`, trunc: 'month',
              start: `date_trunc('month', now()) - interval '11 months'`, stop: `date_trunc('month', now())`, step: '1 month', fmt: 'Mon' },
   };
-  async function getDashboard(opts: { range?: string } = {}) {
-    const range = opts.range && opts.range in RANGE_SPEC ? opts.range : '30d';
-    const spec = RANGE_SPEC[range];
+  // TRI-1130: build a spec for an arbitrary from/to window (both YYYY-MM-DD). The
+  // dates are validated to digits+dashes only, so interpolating them as ::date
+  // literals is injection-safe. Bucket granularity adapts to the span so the
+  // activity chart stays readable: hourly for ≤2d, daily ≤62d, weekly ≤366d, else monthly.
+  const CUSTOM_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+  function customSpec(fromIn: string, toIn: string) {
+    let from = fromIn, to = toIn;
+    if (Date.parse(from) > Date.parse(to)) { const t = from; from = to; to = t; } // tolerate reversed inputs
+    const spanDays = Math.round((Date.parse(to) - Date.parse(from)) / 86400000);
+    let trunc: string, step: string, fmt: string;
+    if (spanDays <= 2) { trunc = 'hour'; step = '1 hour'; fmt = 'Mon DD HH24:00'; }
+    else if (spanDays <= 62) { trunc = 'day'; step = '1 day'; fmt = 'Mon DD'; }
+    else if (spanDays <= 366) { trunc = 'week'; step = '1 week'; fmt = 'Mon DD'; }
+    else { trunc = 'month'; step = '1 month'; fmt = 'Mon YYYY'; }
+    // `stop` is the last bucket that can hold data in the inclusive [from, to] window.
+    // For hourly buckets that is 23:00 of the `to` day (so a single-day range yields
+    // 24 buckets, not just midnight); coarser grains stop at the truncated `to`.
+    const stop = trunc === 'hour'
+      ? `date_trunc('hour', ('${to}'::date + interval '1 day' - interval '1 hour'))`
+      : `date_trunc('${trunc}', '${to}'::date)`;
+    return {
+      trunc, step, fmt,
+      // `to` is inclusive to the end of that day.
+      since: `b.created_at >= '${from}'::date AND b.created_at < ('${to}'::date + interval '1 day')`,
+      start: `date_trunc('${trunc}', '${from}'::date)`,
+      stop,
+    };
+  }
+  async function getDashboard(opts: { range?: string; from?: string; to?: string } = {}) {
+    const custom = opts.from && opts.to && CUSTOM_DATE_RE.test(opts.from) && CUSTOM_DATE_RE.test(opts.to);
+    const range = custom ? 'custom' : (opts.range && opts.range in RANGE_SPEC ? opts.range : '30d');
+    const spec = custom ? customSpec(opts.from as string, opts.to as string) : RANGE_SPEC[range];
     // created_at window for booking/revenue metrics (ytd = since Jan 1; all = no bound).
     const sinceSql = spec.since;
 

@@ -22,10 +22,28 @@ const PERIODS = {
     trend: "Bookings by quarter, peaking at 441 in Q3" },
 };
 
+// TRI-1130: "Custom range…" period. When picked the two date inputs drive a live
+// getDashboard(from,to) query; until both are set we synthesise an empty P so the
+// header/labels read sensibly and the chart falls back to an empty series.
+function fmtYMD(ymd) {
+  const d = ymd ? new Date(ymd + "T00:00:00") : null;
+  if (!d || isNaN(d.getTime())) return ymd || "";
+  const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return d.getDate() + " " + MON[d.getMonth()] + " " + d.getFullYear();
+}
+function customPeriod(range) {
+  const label = (range.from && range.to) ? (fmtYMD(range.from) + " – " + fmtYMD(range.to)) : "custom range";
+  return { label: label, short: "in range", bookings: "0", confirmed: 0, revenue: "$0", bDelta: null, series: [], trend: "No bookings in the selected range" };
+}
+
 function Dashboard({ go, state, role = "admin" }) {
   const A = window.TK_ADMIN;
   const [period, setPeriod] = React.useState("7d");
-  const P = PERIODS[period];
+  // TRI-1130: custom date range (yyyy-mm-dd) for the "Custom range…" option.
+  const [range, setRange] = React.useState({ from: "", to: "" });
+  const customActive = period === "custom";
+  const rangeReady = customActive && !!range.from && !!range.to;
+  const P = PERIODS[period] || customPeriod(range);
   const LIVE = !!(window.TK_CONFIG && window.TK_CONFIG.USE_LIVE_API);
   // Live aggregates (TRI-898 GET /dashboard). Pre-hydrated at boot for the default
   // "7d" range; refetched whenever the range changes. Flag off ⇒ stays null and
@@ -33,20 +51,27 @@ function Dashboard({ go, state, role = "admin" }) {
   const [agg, setAgg] = React.useState(() => (LIVE && A && A.dashboard) || null);
   React.useEffect(() => {
     if (!LIVE || !window.TK_ADMIN_API) return;
+    if (customActive && !rangeReady) return; // wait until both range dates are chosen
     let off = false;
-    window.TK_ADMIN_API.getDashboard(period).then(
+    const req = customActive
+      ? window.TK_ADMIN_API.getDashboard(null, range.from, range.to)
+      : window.TK_ADMIN_API.getDashboard(period);
+    req.then(
       (d) => { if (!off && d) { setAgg(d); if (A) A.dashboard = d; } },
       () => {}
     );
     return () => { off = true; };
-  }, [period]);
+  }, [period, range.from, range.to]);
   const loading = state.dashView === "loading";
   const empty = state.dashView === "empty";
   const pending = A.bookings.filter(b => b.status === "pending");
   const upcoming = A.departures.filter(d => d.status === "scheduled").slice(0, 5);
 
   // --- live-derived display values (all default to the prototype literals) ----
-  const live = (LIVE && agg) ? agg : null;
+  // TRI-1130: while a custom range is half-selected, suppress agg so we show zeros
+  // for the range rather than the previously-loaded period's numbers.
+  const live = (LIVE && agg && !(customActive && !rangeReady)) ? agg : null;
+  const dateInput = { minHeight: 34, padding: "4px 8px", border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-sm)", background: "var(--bg-surface)", color: "var(--text-strong)", fontSize: 13, colorScheme: "light dark" };
   const bs = live ? (live.bookings.byStatus || {}) : null;
   const n = (v) => (typeof v === "number" ? v : 0);
   const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
@@ -108,9 +133,16 @@ function Dashboard({ go, state, role = "admin" }) {
         <div className="tk-chartcard">
           <div className="tk-row" style={{ justifyContent: "space-between", marginBottom: 14, gap: 12, flexWrap: "wrap" }}>
             <div><h3 className="tk-h5" style={{ margin: 0 }}>Bookings, {P.label.toLowerCase()}</h3><p className="tk-caption">{statBookings} new bookings · {statConfirmed} confirmed</p></div>
-            <div className="tk-row" style={{ gap: 12 }}>
+            <div className="tk-row" style={{ gap: 12, flexWrap: "wrap" }}>
               <Select aria-label="Period" value={period} onChange={(e) => setPeriod(e.target.value)} style={{ width: 150, minHeight: 36 }}
-                options={[{ value: "12h", label: "Last 12 hours" }, { value: "24h", label: "Last 24 hours" }, { value: "7d", label: "Last 7 days" }, { value: "30d", label: "Last 30 days" }, { value: "90d", label: "Last 90 days" }, { value: "ytd", label: "Year to date" }]} />
+                options={[{ value: "12h", label: "Last 12 hours" }, { value: "24h", label: "Last 24 hours" }, { value: "7d", label: "Last 7 days" }, { value: "30d", label: "Last 30 days" }, { value: "90d", label: "Last 90 days" }, { value: "ytd", label: "Year to date" }, { value: "custom", label: "Custom range…" }]} />
+              {customActive && (
+                <div className="tk-row" style={{ gap: 6 }}>
+                  <input type="date" aria-label="From date" value={range.from} max={range.to || undefined} onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))} style={dateInput} />
+                  <span style={{ color: "var(--text-muted)" }}>–</span>
+                  <input type="date" aria-label="To date" value={range.to} min={range.from || undefined} onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))} style={dateInput} />
+                </div>
+              )}
               <div className="tk-legend"><span><i style={{ background: "var(--chart-1)" }} />New bookings</span></div>
             </div>
           </div>

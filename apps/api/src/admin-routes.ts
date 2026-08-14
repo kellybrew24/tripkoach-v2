@@ -481,6 +481,6 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
     });
 
     // ── Dashboard aggregates (A15) ───────────────────────────────────────────────
-    admin.get('/dashboard', perm('bookings.view'), async (req) => svc.getDashboard({ range: qStr(query(req), 'range') }));
+    admin.get('/dashboard', perm('bookings.view'), async (req) => svc.getDashboard({ range: qStr(query(req), 'range'), from: qStr(query(req), 'from'), to: qStr(query(req), 'to') }));
   }, { prefix: cfg.adminPrefix });
 }
