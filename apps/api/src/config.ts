@@ -105,6 +105,12 @@ export interface ConsumerConfig {
   verifyResendMinSeconds: number;
   /** Public app origin used to build the password-reset link in the email (no trailing slash). */
   appBaseUrl: string;
+  /** Per-IP throttle for the unauthenticated auth routes (TRI-1055 SEC-H3 / TRI-1173): max attempts
+   *  per window before a 429. Default 10. Automated suites set this high to avoid tripping on their
+   *  own rapid single-IP logins. */
+  authRateLimitMax: number;
+  /** Window for the auth throttle, in @fastify/rate-limit `timeWindow` form. Default '1 minute'. */
+  authRateLimitWindow: string;
 }
 
 // Outbound email transport (TRI-880). The shared sendEmail() lib dispatches through this. Provider is
@@ -204,6 +210,8 @@ export function loadConfig(): Config {
       verifyTokenTtlMinutes: num(process.env.EMAIL_VERIFY_TTL_MINUTES) ?? 1_440, // 24h
       verifyResendMinSeconds: num(process.env.EMAIL_VERIFY_RESEND_MIN_SECONDS) ?? 60,
       appBaseUrl: (process.env.APP_BASE_URL || 'https://app.tripkoach.com').replace(/\/+$/, ''),
+      authRateLimitMax: num(process.env.AUTH_RATELIMIT_MAX) ?? 10,
+      authRateLimitWindow: process.env.AUTH_RATELIMIT_WINDOW || '1 minute',
     },
     // Where the admin console is served — the invite email links to `${adminBaseUrl}/accept-invite?token=…`.
     // Default matches the dev console host (TRI-854); DevOps sets ADMIN_BASE_URL per environment.

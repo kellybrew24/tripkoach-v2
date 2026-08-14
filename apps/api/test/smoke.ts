@@ -26,6 +26,10 @@ const WEBHOOK_SECRET = 'whsec_test_tripkoach';
 const cfg = {
   ...base, dbDriver: 'pglite' as const, pgliteData: 'memory://', env: 'test',
   reservationHoldMinutes: 30,
+  // The auth per-IP throttle (TRI-1055 SEC-H3 / TRI-1173) is exercised on its own in test/ratelimit.ts.
+  // This suite hammers /auth/* from one inject IP (>10 logins), so raise the ceiling here to keep those
+  // functional assertions about auth logic, not the throttle.
+  consumer: { ...base.consumer, authRateLimitMax: 100_000 },
   // The RBAC/CRUD block below logs in as a factor-less admin/operator and expects a full session; MFA
   // ENFORCEMENT (TRI-912) is exercised separately in its own block against an enforced app, so keep the
   // enforced-role set empty here to keep those login assertions about RBAC, not the enroll gate.

@@ -3,6 +3,7 @@
 
 import Fastify, { type FastifyInstance } from 'fastify';
 import cookie from '@fastify/cookie';
+import rateLimit from '@fastify/rate-limit';
 import type { Config } from './config.ts';
 import type { Db } from './db.ts';
 import { listRegions, listTours, getTourBySlug, getAvailability, getReviews } from './catalog.ts';
@@ -42,7 +43,10 @@ function sendBookingError(reply: any, err: unknown): any {
 }
 
 export function buildServer(db: Db, cfg: Config, paystack?: PaystackClient, storage?: Storage): FastifyInstance {
-  const app = Fastify({ logger: cfg.env !== 'test' });
+  // trustProxy: honor X-Forwarded-For from the Caddy reverse proxy (TRI-862) so req.ip is the real
+  // client IP, not the loopback proxy address. Required for the per-IP auth throttle below to bucket
+  // per client instead of collapsing every request into one global bucket (TRI-1173 / TRI-1160 H-1).
+  const app = Fastify({ logger: cfg.env !== 'test', trustProxy: true });
 
   // Keep the raw JSON body available for Paystack webhook HMAC verification, while still parsing JSON
   // for every other route. (Signature is computed over the exact bytes Paystack sent.)
@@ -56,6 +60,13 @@ export function buildServer(db: Db, cfg: Config, paystack?: PaystackClient, stor
   // Cookie support for the admin session (parses Cookie header; adds reply.setCookie/clearCookie).
   // Read-only for consumer routes → /api/v1 responses are unchanged.
   app.register(cookie);
+
+  // TRI-1055 SEC-H3 per-IP auth throttle. @fastify/rate-limit is registered once here with global:false
+  // so it applies ONLY to routes that opt in via `config.rateLimit` (the consumer /auth/* routes in
+  // consumer-routes.ts) — every other route is unaffected. The plugin is wrapped in fastify-plugin, so
+  // registering it on the root instance makes the per-route machinery available inside the encapsulated
+  // consumer plugin too. Without this registration the route-level config is inert (TRI-1173 root cause).
+  app.register(rateLimit, { global: false });
 
   // Transactional booking-lifecycle emails (TRI-889 P5.2). Inert when the email transport is unconfigured
   // (no RESEND_API_KEY / EMAIL_FROM) — every send renders + logs 'skipped'. Never throws to its callers.

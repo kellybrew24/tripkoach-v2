@@ -31,6 +31,12 @@ export function registerConsumer(app: FastifyInstance, db: Db, cfg: Config, stor
   const body = (req: FastifyRequest) => (req.body ?? {}) as unknown;
   const ipOf = (req: FastifyRequest) => ({ ip: req.ip ?? null });
 
+  // TRI-1055 SEC-H3 · per-IP throttle for unauthenticated credential-guessing surfaces. Opt-in via the
+  // route's `config.rateLimit`; inert unless @fastify/rate-limit is registered with global:false in
+  // server.ts (TRI-1173). Default 10 attempts / minute / IP — enough for a fat-fingered human, a wall
+  // for a brute-force. Applied to login, signup, the MFA challenge, and the password-reset request.
+  const authRateLimit = { config: { rateLimit: { max: cfg.consumer.authRateLimitMax, timeWindow: cfg.consumer.authRateLimitWindow } } };
+
   app.register(async (api) => {
     // Map service errors to the shared { error: { code, message } } envelope.
     api.setErrorHandler((err: any, _req, reply) => {
@@ -43,6 +49,13 @@ export function registerConsumer(app: FastifyInstance, db: Db, cfg: Config, stor
       }
       if (err?.statusCode === 400) {
         return reply.code(400).send({ error: { code: 'bad_request', message: err.message } });
+      }
+      // TRI-1173: @fastify/rate-limit signals an exceeded per-IP auth throttle (TRI-1055 SEC-H3) by
+      // raising an error with statusCode 429. Pass it through as a real 429 instead of collapsing it
+      // into the generic 500 below — otherwise the throttle is silently invisible to clients and the
+      // security smoke gate never sees the 429 it asserts.
+      if (err?.statusCode === 429) {
+        return reply.code(429).send({ error: { code: 'rate_limited', message: 'Too many attempts. Please wait a minute and try again.' } });
       }
       api.log.error(err);
       return reply.code(500).send({ error: { code: 'internal', message: 'Internal error' } });
@@ -61,15 +74,15 @@ export function registerConsumer(app: FastifyInstance, db: Db, cfg: Config, stor
       setUserCookie(reply, cfg, sid);
       return reply.code(201).send(out);
     };
-    api.post('/auth/signup', signup);
-    api.post('/auth/register', signup); // FE kits reference both names — alias to one handler
+    api.post('/auth/signup', authRateLimit, signup);
+    api.post('/auth/register', authRateLimit, signup); // FE kits reference both names — alias to one handler
 
     // ── Login ──
     // A 2FA-enabled account (TRI-1029) does not get a full session here: verifyLogin returns
     // { mfaRequired, pendingUserId } after the password check, and we mint a half-auth (mfa_pending)
     // session + set the cookie so POST /auth/mfa can find and complete it. The client sees only
     // { mfaRequired: true } and prompts for the authenticator code.
-    api.post('/auth/login', async (req: FastifyRequest, reply: FastifyReply) => {
+    api.post('/auth/login', authRateLimit, async (req: FastifyRequest, reply: FastifyReply) => {
       const out = await svc.verifyLogin(body(req), ipOf(req));
       if ((out as any).mfaRequired) {
         const sid = await createUserSession(db, cfg, (out as any).pendingUserId, { ip: req.ip, userAgent: req.headers['user-agent'], mfaPending: true });
@@ -85,7 +98,7 @@ export function registerConsumer(app: FastifyInstance, db: Db, cfg: Config, stor
     // Reads the pending session from the cookie, verifies the authenticator/recovery code, clears the
     // pending flag, and returns the same { user, linkedBookings } a normal login would. 401 if there's no
     // pending challenge or the code is wrong (the pending session is left intact so the user can retry).
-    api.post('/auth/mfa', async (req: FastifyRequest, reply: FastifyReply) => {
+    api.post('/auth/mfa', authRateLimit, async (req: FastifyRequest, reply: FastifyReply) => {
       const sid = req.cookies?.[cfg.consumer.cookieName];
       const pending = sid ? await resolvePendingUserSession(db, sid) : null;
       if (!pending) {
@@ -109,7 +122,7 @@ export function registerConsumer(app: FastifyInstance, db: Db, cfg: Config, stor
     });
 
     // ── Password reset (public; request is always 200 to avoid user enumeration) ──
-    api.post('/auth/password-reset/request', async (req: FastifyRequest) => svc.requestPasswordReset(body(req), ipOf(req)));
+    api.post('/auth/password-reset/request', authRateLimit, async (req: FastifyRequest) => svc.requestPasswordReset(body(req), ipOf(req)));
     api.post('/auth/password-reset/consume', async (req: FastifyRequest) => svc.consumePasswordReset(body(req), ipOf(req)));
 
     // ── Email verification (TRI-941) ──
