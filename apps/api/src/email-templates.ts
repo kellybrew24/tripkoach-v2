@@ -64,7 +64,7 @@ const TEMPLATES = {
     subject: 'TripKoach email transport check — {{ref}}',
     html: `<!doctype html><html><body style="margin:0;padding:24px;background:#F1EDE6;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#2B2724">
   <table role="presentation" align="center" width="600" style="width:600px;max-width:100%;background:#fff;border-radius:14px;overflow:hidden">
-    <tr><td style="background:#1E1C1A;padding:20px 28px;color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Transport check</td></tr>
+    <tr><td style="background:#1E1C1A;padding:20px 28px"><table role="presentation" width="100%"><tr><td><img src="{{logoUrl}}" width="38" height="34" alt="TripKoach" style="display:block;border:0"></td><td align="right" style="color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Transport check</td></tr></table></td></tr>
     <tr><td style="padding:28px">
       <h1 style="margin:0 0 8px;font-size:22px;color:#1E1C1A">Email transport is live</h1>
       <p style="margin:0 0 12px;font-size:15px;line-height:1.55">This is an automated deliverability check from the TripKoach API email transport (TRI-880).</p>
@@ -101,7 +101,7 @@ a.btn{display:block;background:#1E1C1A;color:#FFFFFF;text-decoration:none;font-w
 </style></head>
 <body>
 <table role="presentation" align="center" class="w" style="background:#FFFFFF;border-radius:14px;overflow:hidden">
-  <tr><td style="background:#1E1C1A;padding:20px 28px;color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Booking received</td></tr>
+  <tr><td style="background:#1E1C1A;padding:20px 28px"><table role="presentation" width="100%"><tr><td><img src="{{logoUrl}}" width="38" height="34" alt="TripKoach" style="display:block;border:0"></td><td align="right" style="color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Booking received</td></tr></table></td></tr>
   <tr><td class="pad" style="padding:32px 28px 8px">
     <h1 style="margin:0 0 8px;font-size:26px;line-height:1.2;letter-spacing:-.02em;color:#1E1C1A">Your spot is reserved, {{firstName}}</h1>
     <p style="margin:0;font-size:16px;line-height:1.55">We are holding {{travellers}} spot(s) on the {{tourTitle}} for {{departureLabel}}.</p>
@@ -159,7 +159,7 @@ a.btn{display:block;background:#1E1C1A;color:#FFFFFF;text-decoration:none;font-w
 </style></head>
 <body>
 <table role="presentation" align="center" class="w" style="background:#FFFFFF;border-radius:14px;overflow:hidden">
-  <tr><td style="background:#1E1C1A;padding:20px 28px;color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Booking confirmed</td></tr>
+  <tr><td style="background:#1E1C1A;padding:20px 28px"><table role="presentation" width="100%"><tr><td><img src="{{logoUrl}}" width="38" height="34" alt="TripKoach" style="display:block;border:0"></td><td align="right" style="color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Booking confirmed</td></tr></table></td></tr>
   <tr><td class="pad" style="padding:32px 28px 8px">
     <h1 style="margin:0 0 8px;font-size:26px;line-height:1.2;letter-spacing:-.02em;color:#1E1C1A">You’re going, {{firstName}} — it’s confirmed</h1>
     <p style="margin:0;font-size:16px;line-height:1.55">Payment received. Your {{travellers}} spot(s) on the {{tourTitle}} for {{departureLabel}} are locked in.</p>
@@ -221,7 +221,7 @@ a.btn{display:block;background:#1E1C1A;color:#FFFFFF;text-decoration:none;font-w
 </style></head>
 <body>
 <table role="presentation" align="center" class="w" style="background:#FFFFFF;border-radius:14px;overflow:hidden">
-  <tr><td style="background:#1E1C1A;padding:20px 28px;color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Booking cancelled</td></tr>
+  <tr><td style="background:#1E1C1A;padding:20px 28px"><table role="presentation" width="100%"><tr><td><img src="{{logoUrl}}" width="38" height="34" alt="TripKoach" style="display:block;border:0"></td><td align="right" style="color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Booking cancelled</td></tr></table></td></tr>
   <tr><td class="pad" style="padding:32px 28px 8px">
     <h1 style="margin:0 0 8px;font-size:26px;line-height:1.2;letter-spacing:-.02em;color:#1E1C1A">Your booking has been cancelled, {{firstName}}</h1>
     <p style="margin:0;font-size:16px;line-height:1.55">Booking {{ref}} for the {{tourTitle}} ({{departureLabel}}) is now cancelled and any held spots have been released.{{reason}}</p>
@@ -270,7 +270,7 @@ a.btn{display:block;background:#1E1C1A;color:#FFFFFF;text-decoration:none;font-w
 </style></head>
 <body>
 <table role="presentation" align="center" class="w" style="background:#FFFFFF;border-radius:14px;overflow:hidden">
-  <tr><td style="background:#1E1C1A;padding:20px 28px;color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Booking rescheduled</td></tr>
+  <tr><td style="background:#1E1C1A;padding:20px 28px"><table role="presentation" width="100%"><tr><td><img src="{{logoUrl}}" width="38" height="34" alt="TripKoach" style="display:block;border:0"></td><td align="right" style="color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Booking rescheduled</td></tr></table></td></tr>
   <tr><td class="pad" style="padding:32px 28px 8px">
     <h1 style="margin:0 0 8px;font-size:26px;line-height:1.2;letter-spacing:-.02em;color:#1E1C1A">New date for your {{tourTitle}}, {{firstName}}</h1>
     <p style="margin:0;font-size:16px;line-height:1.55">We’ve moved your {{travellers}} spot(s) to a new departure. Your booking and payment carry over — nothing else to do.</p>
@@ -320,7 +320,7 @@ a.btn{display:block;background:#1E1C1A;color:#FFFFFF;text-decoration:none;font-w
 </style></head>
 <body>
 <table role="presentation" align="center" class="w" style="background:#FFFFFF;border-radius:14px;overflow:hidden">
-  <tr><td style="background:#1E1C1A;padding:20px 28px;color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Payment not completed</td></tr>
+  <tr><td style="background:#1E1C1A;padding:20px 28px"><table role="presentation" width="100%"><tr><td><img src="{{logoUrl}}" width="38" height="34" alt="TripKoach" style="display:block;border:0"></td><td align="right" style="color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Payment not completed</td></tr></table></td></tr>
   <tr><td class="pad" style="padding:32px 28px 8px">
     <h1 style="margin:0 0 8px;font-size:26px;line-height:1.2;letter-spacing:-.02em;color:#1E1C1A">We couldn’t process your payment, {{firstName}}</h1>
     <p style="margin:0;font-size:16px;line-height:1.55">Your payment for the {{tourTitle}} ({{departureLabel}}) didn’t go through. Your spots aren’t confirmed yet — you can try again below.</p>
@@ -378,7 +378,7 @@ a.btn{display:block;background:#1E1C1A;color:#FFFFFF;text-decoration:none;font-w
 </style></head>
 <body>
 <table role="presentation" align="center" class="w" style="background:#FFFFFF;border-radius:14px;overflow:hidden">
-  <tr><td style="background:#1E1C1A;padding:20px 28px;color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Departure reminder</td></tr>
+  <tr><td style="background:#1E1C1A;padding:20px 28px"><table role="presentation" width="100%"><tr><td><img src="{{logoUrl}}" width="38" height="34" alt="TripKoach" style="display:block;border:0"></td><td align="right" style="color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Departure reminder</td></tr></table></td></tr>
   <tr><td class="pad" style="padding:32px 28px 8px">
     <h1 style="margin:0 0 8px;font-size:26px;line-height:1.2;letter-spacing:-.02em;color:#1E1C1A">Your trip departs {{daysLabel}}, {{firstName}}</h1>
     <p style="margin:0;font-size:16px;line-height:1.55">Your {{tourTitle}} sets off {{departureLabel}}. Here’s a quick reminder so you’re ready.</p>
@@ -431,7 +431,7 @@ a.btn{display:block;background:#1E1C1A;color:#FFFFFF;text-decoration:none;font-w
 </style></head>
 <body>
 <table role="presentation" align="center" class="w" style="background:#FFFFFF;border-radius:14px;overflow:hidden">
-  <tr><td style="background:#1E1C1A;padding:20px 28px;color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Password reset</td></tr>
+  <tr><td style="background:#1E1C1A;padding:20px 28px"><table role="presentation" width="100%"><tr><td><img src="{{logoUrl}}" width="38" height="34" alt="TripKoach" style="display:block;border:0"></td><td align="right" style="color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Password reset</td></tr></table></td></tr>
   <tr><td class="pad" style="padding:32px 28px 8px">
     <h1 style="margin:0 0 8px;font-size:24px;line-height:1.2;letter-spacing:-.02em;color:#1E1C1A">Reset your password, {{firstName}}</h1>
     <p style="margin:0 0 4px;font-size:16px;line-height:1.55">We received a request to reset the password on your TripKoach account. Tap the button below to choose a new one.</p>
@@ -471,7 +471,7 @@ a.btn{display:block;background:#1E1C1A;color:#FFFFFF;text-decoration:none;font-w
 </style></head>
 <body>
 <table role="presentation" align="center" class="w" style="background:#FFFFFF;border-radius:14px;overflow:hidden">
-  <tr><td style="background:#1E1C1A;padding:20px 28px;color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Verify your email</td></tr>
+  <tr><td style="background:#1E1C1A;padding:20px 28px"><table role="presentation" width="100%"><tr><td><img src="{{logoUrl}}" width="38" height="34" alt="TripKoach" style="display:block;border:0"></td><td align="right" style="color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Verify your email</td></tr></table></td></tr>
   <tr><td class="pad" style="padding:32px 28px 8px">
     <h1 style="margin:0 0 8px;font-size:24px;line-height:1.2;letter-spacing:-.02em;color:#1E1C1A">Welcome to TripKoach, {{firstName}}</h1>
     <p style="margin:0 0 4px;font-size:16px;line-height:1.55">Confirm this is your email address so we can send you booking updates and secure your account. Tap the button below to verify.</p>
@@ -511,7 +511,7 @@ a.btn{display:block;background:#1E1C1A;color:#FFFFFF;text-decoration:none;font-w
 </style></head>
 <body>
 <table role="presentation" align="center" class="w" style="background:#FFFFFF;border-radius:14px;overflow:hidden">
-  <tr><td style="background:#1E1C1A;padding:20px 28px;color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Share your experience</td></tr>
+  <tr><td style="background:#1E1C1A;padding:20px 28px"><table role="presentation" width="100%"><tr><td><img src="{{logoUrl}}" width="38" height="34" alt="TripKoach" style="display:block;border:0"></td><td align="right" style="color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Share your experience</td></tr></table></td></tr>
   <tr><td class="pad" style="padding:32px 28px 8px">
     <h1 style="margin:0 0 8px;font-size:26px;line-height:1.2;letter-spacing:-.02em;color:#1E1C1A">How was it, {{firstName}}?</h1>
     <p style="margin:0;font-size:16px;line-height:1.55">Thanks for joining the <strong>{{tourTitle}}</strong> on {{departureLabel}}. Your honest review helps other travellers — it only takes a minute.</p>
@@ -546,7 +546,7 @@ a.btn{display:block;background:#1E1C1A;color:#FFFFFF;text-decoration:none;font-w
 </style></head>
 <body>
 <table role="presentation" align="center" class="w" style="background:#FFFFFF;border-radius:14px;overflow:hidden">
-  <tr><td style="background:#1E1C1A;padding:20px 28px;color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Console invitation</td></tr>
+  <tr><td style="background:#1E1C1A;padding:20px 28px"><table role="presentation" width="100%"><tr><td><img src="{{logoUrl}}" width="38" height="34" alt="TripKoach" style="display:block;border:0"></td><td align="right" style="color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Console invitation</td></tr></table></td></tr>
   <tr><td class="pad" style="padding:32px 28px 8px">
     <h1 style="margin:0 0 8px;font-size:24px;line-height:1.2;letter-spacing:-.02em;color:#1E1C1A">You're invited, {{name}}</h1>
     <p style="margin:0;font-size:16px;line-height:1.55">You have been added to the TripKoach admin console as <strong>{{role}}</strong>. Set your password to activate your account — you'll be prompted to turn on two-factor authentication.</p>
@@ -585,7 +585,7 @@ table{border-collapse:collapse}.w{width:600px;max-width:100%}
 </style></head>
 <body>
 <table role="presentation" align="center" class="w" style="background:#FFFFFF;border-radius:14px;overflow:hidden">
-  <tr><td style="background:#1E1C1A;padding:20px 28px;color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">New {{enquiryType}}</td></tr>
+  <tr><td style="background:#1E1C1A;padding:20px 28px"><table role="presentation" width="100%"><tr><td><img src="{{logoUrl}}" width="38" height="34" alt="TripKoach" style="display:block;border:0"></td><td align="right" style="color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">New {{enquiryType}}</td></tr></table></td></tr>
   <tr><td class="pad" style="padding:28px 28px 8px">
     <h1 style="margin:0 0 4px;font-size:22px;line-height:1.2;letter-spacing:-.02em;color:#1E1C1A">{{name}}</h1>
     <p style="margin:0;font-size:15px;line-height:1.55"><a href="mailto:{{email}}" style="color:#1E6B33">{{email}}</a></p>

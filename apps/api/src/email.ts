@@ -183,7 +183,10 @@ export async function sendEmail(
 ): Promise<SendEmailResult> {
   const email = cfg.email;
   const log = opts.log ?? (() => {});
-  const vars: TemplateVars = input.vars ?? {};
+  // TRI-1102: brand every transactional email with the TripKoach badge in the dark header bar.
+  // Templates reference {{logoUrl}}; default it here to the web app's own static asset (an absolute
+  // https URL is required for email clients). Callers may override via input.vars.logoUrl.
+  const vars: TemplateVars = { logoUrl: `${cfg.notify.webBaseUrl}/assets/logo-badge.png`, ...(input.vars ?? {}) };
 
   // ── Validate + render up front (throws on programmer error, before touching the DB). ──
   const to = (input.to ?? '').trim();
