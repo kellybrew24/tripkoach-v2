@@ -10,12 +10,48 @@
 
 ---
 
-## 🔴 URGENT — Cloudflare R2 media token expires **2026-08-24**
+## 🟠 Cloudflare R2 media token — expiry EXTENDED by account owner (2026-08-14)
+
+**Update 2026-08-14 (TRI-1110):** rather than mint a new token, the board/CEO
+**extended the duration of the existing R2 API token**. If the edit changed only
+the expiry (TTL) and left the permission scope and bucket untouched, then the
+**Access Key ID + Secret are unchanged → no env swap and no DevOps rotation are
+needed**; the credentials already in both EnvironmentFiles keep working past the
+old 2026-08-24 date. See "Required token scope — verified from code" below.
+_Action still open:_ (a) confirm the edit did not roll the secret, (b) record the
+**new** expiry date here and reset the T-14d reminder, (c) DevOps confirms an
+upload still round-trips on dev.
 
 **Impact if it lapses:** media + avatar uploads break on **both dev and prod**.
 The storage layer is safe-when-unconfigured, so an expired/invalid token doesn't
 crash the API — media routes just return **503** and uploads silently fail. There
 is **no automatic alert** today (monitoring gap — see [monitoring-proposal.md](./monitoring-proposal.md)).
+
+### Required token scope — verified from code (TRI-1110, 2026-08-14)
+
+Audited every R2 call site. The credential is used for **exactly one operation:
+`PutObject` (write)** — `apps/api/src/storage.ts` `createStorage().put()` signs a
+single SigV4 PUT, called only from the admin/consumer media + avatar upload routes
+(`media.ts`, `admin-routes.ts`, `consumer-routes.ts`). There is **no
+Get/Delete/List/bucket-config/token-admin** operation anywhere in the codebase;
+public reads are served through `cdn.tripkoach.com` (the bucket's public custom
+domain), which does **not** use the API token at all.
+
+So the token needs, and only needs:
+
+| Capability | Needed? | Notes |
+|---|---|---|
+| **Object Write** (`PutObject`) on the media bucket | ✅ **REQUIRED** | the only credentialed operation |
+| Object Read (`GetObject`) | ➖ not exercised | included in the standard "Object Read & Write" template; harmless to keep |
+| Scope = the single media bucket | ✅ | bucket-scoped, not account-wide |
+| Bucket admin / config / token management | ❌ not needed | |
+
+**Verdict for "are all requested features allowed":** the standard **Object Read &
+Write, scoped to the media bucket** template covers everything the app does (write
+is the only thing exercised). Since uploads are serving today on that same token,
+its permissions already satisfy our needs — extending its expiry preserves that.
+The only failure mode to rule out is an edit that *narrowed* the scope or *rolled
+the secret*.
 
 ### What the token is
 
