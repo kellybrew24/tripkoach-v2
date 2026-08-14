@@ -28,9 +28,21 @@ const TK_ADMIN_PROMO = {
   night:     { img: "https://cdn.tripkoach.com/img/posts/cape-coast-castles-guide-hero.jpg",          greet: "Good evening",   scrim: "linear-gradient(180deg, rgba(26,26,72,.42), rgba(6,8,20,.84))" },
 };
 
-function AuthFrame({ children, foot }) {
+// TRI-1120 — the aside greeting must fit the flow. Sign-in reuses the returning-vs-new
+// operator treatment (TRI-925). First-run flows pass an `intent` so a brand-new invitee
+// never sees "Welcome back / pick up where you left off" (they've never been here), and a
+// password recovery reads as a recovery, not a fresh sign-in.
+const TK_ADMIN_ASIDE_INTENT = {
+  invite: { over: "Welcome to the team", body: "Set up your account to help run tours, departures, bookings and payments." },
+  recover: { over: "Account recovery", body: "Choose a new password and you'll be back in the console in a moment." },
+};
+function AuthFrame({ children, foot, intent }) {
   const promo = TK_ADMIN_PROMO[TK_ADMIN_PROMO_BUCKET()];
-  const returning = tkAdminIsReturning(); // TRI-925 — new device vs returning operator
+  const returning = !intent && tkAdminIsReturning(); // TRI-925 — new device vs returning operator; suppressed on first-run flows (TRI-1120)
+  const aside = TK_ADMIN_ASIDE_INTENT[intent] || {
+    over: returning ? "Welcome back" : promo.greet,
+    body: returning ? "Sign in to pick up where you left off — bookings, departures and payments." : "Tours, departures, bookings and payments — one console for the whole operation.",
+  };
   return (
     <div style={{ minHeight: "100vh", display: "grid", gridTemplateColumns: "1fr 1fr", background: "var(--shell-content-bg)" }}>
       <div style={{ position: "relative", background: "var(--n-950)", color: "var(--n-0)", padding: "48px", display: "flex", flexDirection: "column", justifyContent: "space-between", overflow: "hidden" }} className="tk-admin-authaside">
@@ -41,9 +53,9 @@ function AuthFrame({ children, foot }) {
           <strong style={{ fontWeight: 800, fontSize: 18, letterSpacing: "-0.02em" }}>TripKoach <span style={{ color: "var(--gold-400)" }}>Ops</span></strong>
         </div>
         <div style={{ position: "relative" }}>
-          <span className="tk-overline" style={{ color: "var(--gold-400)" }}>{returning ? "Welcome back" : promo.greet}</span>
+          <span className="tk-overline" style={{ color: "var(--gold-400)" }}>{aside.over}</span>
           <h1 style={{ fontFamily: "var(--font-display)", fontWeight: 800, letterSpacing: "-0.03em", lineHeight: 1.05, fontSize: 34, maxWidth: "14ch", marginTop: 8 }}>The back office for every booking in Ghana.</h1>
-          <p style={{ color: "rgba(255,255,255,.7)", marginTop: 12, maxWidth: "40ch", fontSize: 14.5 }}>{returning ? "Sign in to pick up where you left off — bookings, departures and payments." : "Tours, departures, bookings and payments — one console for the whole operation."}</p>
+          <p style={{ color: "rgba(255,255,255,.7)", marginTop: 12, maxWidth: "40ch", fontSize: 14.5 }}>{aside.body}</p>
         </div>
         <p style={{ position: "relative", fontSize: 12, color: "rgba(255,255,255,.5)" }}>Staff access only · All actions are logged.</p>
       </div>
@@ -108,7 +120,7 @@ function AdminLogin({ go, state }) {
       {liveErr && <Alert tone="error" title={liveErr.title} style={{ marginBottom: "var(--space-4)" }}>{liveErr.msg}</Alert>}
       {wrong && !liveErr && <Alert tone="error" title="Sign-in failed" style={{ marginBottom: "var(--space-4)" }}>That email and password don't match. You have 2 attempts left before the account locks.</Alert>}
       <form className="tk-stack" style={{ gap: "var(--space-4)" }} onSubmit={submit}>
-        <FormField id="a-email" label="Work email"><Input type="email" autoComplete="username" placeholder="you@tripkoach.com" iconStart="mail" disabled={locked} /></FormField>
+        <FormField id="a-email" label="Work email"><Input type="email" autoComplete="username" iconStart="mail" disabled={locked} /></FormField>
         <FormField id="a-pw" label="Password" error={wrong ? "Check your password" : undefined}><PasswordInput id="a-pw" disabled={locked} /></FormField>
         <div className="tk-row" style={{ justifyContent: "space-between" }}>
           <Checkbox id="a-trust" label="Trust this device for 14 days" />
@@ -160,7 +172,7 @@ function MfaChallenge({ go, state }) {
       {err && <Alert tone="error" title="Incorrect code" style={{ marginBottom: "var(--space-4)" }}>{useRecovery ? "That recovery code didn't match or has already been used." : "That code didn't match or has expired. Codes refresh every 30 seconds."}</Alert>}
       {useRecovery ? (
         <FormField id="mfa-recovery" label="Recovery code">
-          <Input id="mfa-recovery" value={recovery} onChange={(e) => setRecovery(e.target.value)} placeholder="XXXX-XXXX" autoComplete="one-time-code"
+          <Input id="mfa-recovery" value={recovery} onChange={(e) => setRecovery(e.target.value)} autoComplete="one-time-code"
             style={{ fontVariantNumeric: "tabular-nums", letterSpacing: "0.04em", textTransform: "uppercase" }} />
         </FormField>
       ) : (
@@ -301,7 +313,7 @@ function ResetPassword({ go }) {
     });
   };
   return (
-    <AuthFrame foot={<Button block variant="ghost" style={{ marginTop: "var(--space-4)" }} onClick={() => go("login")}>Back to sign-in</Button>}>
+    <AuthFrame intent="recover" foot={<Button block variant="ghost" style={{ marginTop: "var(--space-4)" }} onClick={() => go("login")}>Back to sign-in</Button>}>
       <h2 className="tk-h2">Reset your password</h2>
       {sent ? (
         <Alert tone="success" title="Check your inbox" style={{ marginTop: "var(--space-5)" }}>If an account exists for that email, we've sent a reset link. It expires in 60 minutes.</Alert>
@@ -310,7 +322,7 @@ function ResetPassword({ go }) {
           <p className="tk-body-sm tk-muted" style={{ marginTop: 4, marginBottom: "var(--space-6)" }}>Enter your work email and we'll send a reset link. For security, we won't say whether the account exists.</p>
           {err && <Alert tone="error" title="Couldn't send reset link" style={{ marginBottom: "var(--space-4)" }}>{err}</Alert>}
           <form onSubmit={submit} className="tk-stack" style={{ gap: "var(--space-4)" }}>
-            <FormField id="r-email" label="Work email"><Input id="r-email" type="email" placeholder="you@tripkoach.com" iconStart="mail" value={email} onChange={(e) => setEmail(e.target.value)} /></FormField>
+            <FormField id="r-email" label="Work email"><Input id="r-email" type="email" iconStart="mail" value={email} onChange={(e) => setEmail(e.target.value)} /></FormField>
             <Button block size="lg" type="submit" disabled={busy || (LIVE && !email.trim())}>{busy ? "Sending…" : "Send reset link"}</Button>
           </form>
         </>
@@ -345,7 +357,7 @@ function ResetPasswordConsume({ go }) {
     });
   };
   return (
-    <AuthFrame foot={<Button block variant="ghost" style={{ marginTop: "var(--space-4)" }} onClick={() => go("login")}>Back to sign-in</Button>}>
+    <AuthFrame intent="recover" foot={<Button block variant="ghost" style={{ marginTop: "var(--space-4)" }} onClick={() => go("login")}>Back to sign-in</Button>}>
       {done ? (
         <>
           <h2 className="tk-h2">Password updated</h2>
@@ -414,7 +426,7 @@ function AcceptInvite({ go }) {
   const backFoot = <Button block variant="ghost" style={{ marginTop: "var(--space-4)" }} onClick={() => go("login")}>Back to sign-in</Button>;
 
   if (!preview) {
-    return <AuthFrame foot={backFoot}><p className="tk-body-sm tk-muted" style={{ marginTop: 4 }}>Checking your invite…</p></AuthFrame>;
+    return <AuthFrame intent="invite" foot={backFoot}><p className="tk-body-sm tk-muted" style={{ marginTop: 4 }}>Checking your invite…</p></AuthFrame>;
   }
   if (preview.valid === false) {
     const msg = ({
@@ -423,14 +435,14 @@ function AcceptInvite({ go }) {
       not_pending: "This account is no longer awaiting acceptance. Try signing in instead.",
     })[preview.reason] || "This invite link is invalid. Ask an admin to send you a fresh one.";
     return (
-      <AuthFrame foot={backFoot}>
+      <AuthFrame intent="invite" foot={backFoot}>
         <h2 className="tk-h2">Invite link problem</h2>
         <Alert tone="error" title="We couldn't open this invite" style={{ marginTop: "var(--space-5)" }}>{msg}</Alert>
       </AuthFrame>
     );
   }
   return (
-    <AuthFrame foot={backFoot}>
+    <AuthFrame intent="invite" foot={backFoot}>
       {done ? (
         <>
           <h2 className="tk-h2">You're all set</h2>
