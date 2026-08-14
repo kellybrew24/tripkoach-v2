@@ -958,6 +958,15 @@ function TourWeb({ go, currency, slug }) {
   // list means "no upcoming departures". Fixtures always carry departures, so the
   // flag-off prototype never hits the empty branch (byte-identical).
   const hasDepartures = (t.departures || []).length > 0;
+  // TRI-1143 · secondary entry point to the custom-date request flow ON tours that DO have departures.
+  // Board/CEO: a traveller should be able to request their own date even when dates are listed, not only
+  // on the empty-departures case (TRI-1138). We reuse the SAME DateInterestForm + backend/inbox pipeline
+  // (POST /tours/:id/interest, intent "request") — no second pipeline. Gated behind the SAME
+  // date_requests_enabled flag: when it's off (or the flag-off prototype), `dateRequestsOn` is false and
+  // the departures branch renders exactly as before (byte-identical). `showRequest` reveals the form on
+  // demand so the primary "Reserve my spot" flow stays visually front-and-centre.
+  const dateRequestsOn = customDateFlags().enabled;
+  const [showRequest, setShowRequest] = React.useState(false);
   return (
     <div className="tk-container" style={{ paddingBlock: "var(--space-6) var(--space-12)", maxWidth: 1200, display: "flex", flexDirection: "column", gap: "var(--space-5)" }}>
       <Breadcrumbs items={[{ label: "Tours", href: SCREEN_PATH.browse }, { label: t.region, href: SCREEN_PATH.browse + "?region=" + encodeURIComponent(t.region || "") }, { label: t.title }]} />
@@ -1031,6 +1040,23 @@ function TourWeb({ go, currency, slug }) {
               <GroupedDeparturePicker departures={t.departures} value={dep} onChange={setDep} currency={currency} packages={t0.packages} legend="Choose a departure" activePackageId={pkgId} onPackageChange={choosePackage} routeSelectedElsewhere={!!t0.packages} />
               <Button size="lg" block disabled={!dep} onClick={() => { window.TK_SEL = { tourId: t0.id, apiTourId: t0._apiId, packageId: pkgId, packageName: t.packageName, departureId: dep }; go("checkout"); }}>Reserve my spot</Button>
               <p className="tk-caption" style={{ display: "flex", gap: 6 }}><Icon name="wallet" size={14} />Nothing is charged today. Pay before departure.</p>
+              {/* TRI-1143 · "None of these dates work?" — the same custom-date request flow as the
+                  empty-departures case, surfaced under the departure picker. Flag-gated + collapsed by
+                  default so the primary Reserve flow is unchanged; opening it reveals the shared
+                  DateInterestForm (same POST /tours/:id/interest → admin Requests inbox). */}
+              {dateRequestsOn ? (
+                <div className="tk-stack" style={{ gap: "var(--space-2)", borderTop: "1px solid var(--border-subtle)", paddingTop: "var(--space-3)" }}>
+                  {!showRequest ? (
+                    <Button variant="link" size="sm" iconStart="calendar-days" style={{ alignSelf: "flex-start" }} onClick={() => setShowRequest(true)}>None of these dates work? Request your own date</Button>
+                  ) : (<>
+                    <div className="tk-stack" style={{ gap: 2 }}>
+                      <strong style={{ fontSize: 15 }}>Request your own date</strong>
+                      <span className="tk-caption">Pick a date that suits you and a koach will confirm within 24 hours.</span>
+                    </div>
+                    <DateInterestForm tourId={t0._apiId || t0.id} packageId={pkgId} />
+                  </>)}
+                </div>
+              ) : null}
             </>) : (
               // TRI-998/TRI-999/TRI-1018: no upcoming departures — replace the picker + "Reserve my spot"
               // with a graceful empty state + a REAL email-interest capture (POST /tours/:id/interest),
