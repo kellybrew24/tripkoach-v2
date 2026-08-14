@@ -5,7 +5,7 @@ const { Button, Icon, FormField, Input, PhoneInput, PasswordInput, Select, Switc
 // control + canonical source (window.TK_TERMS via /config) as the checkout gate in
 // screens-web.jsx; duplicated here because each kit file is its own module scope. Native
 // <details> keeps it keyboard/screen-reader accessible with no JS or extra network cost.
-// Callers guard on TK_TERMS so it only mounts when real admin copy exists — never placeholder.
+// Callers guard on TK_TERMS so it only mounts when real admin copy exists, never placeholder.
 function TkTermsDisclosure() {
   return (
     <details className="tk-terms-disclosure" style={{ marginTop: "var(--space-2)" }}>
@@ -19,21 +19,21 @@ function TkTermsDisclosure() {
   );
 }
 
-// TRI-882 — consumer auth live-wiring gate. When window.TK_CONFIG.USE_LIVE_API is
+// TRI-882: consumer auth live-wiring gate. When window.TK_CONFIG.USE_LIVE_API is
 // OFF (the default build and the DS preview) window.TK_AUTH is inert and every
-// screen below renders exactly the fixture prototype — no API calls. When ON, the
+// screen below renders exactly the fixture prototype, no API calls. When ON, the
 // auth/profile screens talk to the P1 /api/v1 auth spine (Backend TRI-881) through
 // window.TK_AUTH (shim/tk-auth.js), mirroring the TRI-867 booking wiring posture.
 const LIVE_AUTH = () => !!(window.TK_CONFIG && window.TK_CONFIG.USE_LIVE_API && window.TK_AUTH);
 const authVal = (id) => { const el = document.getElementById(id); return el && typeof el.value === "string" ? el.value.trim() : ""; };
 const authErrMsg = (e, fallback) => (e && e.message ? e.message : (fallback || "Something went wrong. Please try again."));
 
-// TRI-925 — returning-visitor detection for the login promo panel. We stamp a
+// TRI-925: returning-visitor detection for the login promo panel. We stamp a
 // durable, best-effort flag (localStorage first, cookie fallback) the first time a
 // visitor successfully authenticates AND whenever /me later resolves to a real
 // person (so people who signed in before this feature shipped still count). The
 // login panel then shows returning copy ("Welcome back") only to a browser that has
-// logged in before, and prospect copy to a genuinely new visitor — independent of
+// logged in before, and prospect copy to a genuinely new visitor, independent of
 // which auth tab they land on. Privacy modes that throw on storage read as "new".
 const TK_RETURNING_KEY = "tk_returning";
 function tkIsReturning() {
@@ -46,20 +46,20 @@ function tkMarkReturning() {
   try { document.cookie = "tk_returning=1; path=/; max-age=31536000; SameSite=Lax"; } catch (e) {}
 }
 
-// TRI-923 — the left promo panel used to statically read "Welcome back", which is
+// TRI-923: the left promo panel used to statically read "Welcome back", which is
 // wrong for first-time / prospective customers. It now (1) swaps copy on the auth
-// mode — returning ("sign in") vs new ("sign up") — and (2) rotates a small curated
+// mode, returning ("sign in") vs new ("sign up"), and (2) rotates a small curated
 // set of imagery + greeting + scrim by the visitor's LOCAL time-of-day so the panel
 // feels alive with zero extra logic and stays deterministic (no per-refresh random).
-// All imagery lives on cdn.tripkoach.com (TRI-914/918 hard rule — no dev-hosted or
+// All imagery lives on cdn.tripkoach.com (TRI-914/918 hard rule: no dev-hosted or
 // base64 heroes); each scrim keeps the bottom heavily darkened so white copy stays
 // legible across every image in the set.
 const TK_PROMO_BUCKET = (d) => { const h = (d || new Date()).getHours(); return h < 5 ? "night" : h < 11 ? "morning" : h < 17 ? "afternoon" : h < 21 ? "evening" : "night"; };
 const TK_PROMO_SET = {
-  morning:   { img: "https://cdn.tripkoach.com/img/posts/green-season-ghana-hero.jpg",                greet: "Good morning",   newSub: "Wake to Wli's falls and Kakum at first light — build the trip that's yours." },
-  afternoon: { img: "https://cdn.tripkoach.com/img/posts/kakum-canopy-walk-cape-coast-day-trip-hero.jpg", greet: "Good afternoon", newSub: "Canopy walks, castle tours, market afternoons — plan it your way, book it in minutes." },
-  evening:   { img: "https://cdn.tripkoach.com/img/posts/mole-larabanga-northern-ghana-weekend-hero.jpg",  greet: "Good evening",   newSub: "Golden-hour safari at Mole, sundowners on the coast — your Ghana, at your pace." },
-  night:     { img: "https://cdn.tripkoach.com/img/posts/cape-coast-castles-guide-hero.jpg",          greet: "Good evening",   newSub: "From Cape Coast to the north — start planning tonight, travel on your terms." },
+  morning:   { img: "https://cdn.tripkoach.com/img/posts/green-season-ghana-hero.jpg",                greet: "Good morning",   newSub: "Wake to Wli's falls and Kakum at first light. Build the trip that's yours." },
+  afternoon: { img: "https://cdn.tripkoach.com/img/posts/kakum-canopy-walk-cape-coast-day-trip-hero.jpg", greet: "Good afternoon", newSub: "Canopy walks, castle tours, market afternoons. Plan it your way, book it in minutes." },
+  evening:   { img: "https://cdn.tripkoach.com/img/posts/mole-larabanga-northern-ghana-weekend-hero.jpg",  greet: "Good evening",   newSub: "Golden-hour safari at Mole, sundowners on the coast. Your Ghana, at your pace." },
+  night:     { img: "https://cdn.tripkoach.com/img/posts/cape-coast-castles-guide-hero.jpg",          greet: "Good evening",   newSub: "From Cape Coast to the north. Start planning tonight, travel on your terms." },
 };
 const TK_PROMO_SCRIM = {
   morning:   "linear-gradient(175deg, rgba(60,42,15,.14) 0%, rgba(20,19,18,.55) 55%, rgba(15,14,12,.86) 100%)",
@@ -68,7 +68,7 @@ const TK_PROMO_SCRIM = {
   night:     "linear-gradient(165deg, rgba(26,26,72,.42) 0%, rgba(12,14,35,.7) 55%, rgba(6,8,22,.92) 100%)",
 };
 // mode: "signin" | "signup" (prospect) | "reset" (forgot-password)
-// returning: TRI-925 — has this browser signed in before? A first-time visitor who
+// returning: TRI-925, has this browser signed in before? A first-time visitor who
 // lands on the "sign in" tab still gets prospect copy (never a stale "Welcome back").
 function PromoPanel({ mode, returning }) {
   const bucket = TK_PROMO_BUCKET();
@@ -77,7 +77,7 @@ function PromoPanel({ mode, returning }) {
   const overline = isNew ? "New to TripKoach" : set.greet;
   const heading = isNew ? "Discover Ghana, your way." : "Your trips to Ghana, in one place.";
   const sub = mode === "reset"
-    ? "We'll help you back in — resetting your password only takes a moment."
+    ? "We'll help you back in. Resetting your password only takes a moment."
     : (isNew ? set.newSub : "Sign in to see your bookings, manage travellers, and pick up planning where you left off.");
   return (
     <div style={{ position: "relative", overflow: "hidden", background: "var(--n-950)" }}>
@@ -106,7 +106,7 @@ function AccountShell({ current, go, title, children }) {
   // login if the session is gone (401). Inert + placeholder person when flag off.
   const live = LIVE_AUTH();
   const [me, setMe] = React.useState(live ? window.TK_AUTH.cachedMe() || null : null);
-  // TRI-941 — dismissible email-verification nudge (session-scoped) + resend.
+  // TRI-941: dismissible email-verification nudge (session-scoped) + resend.
   const [nudge, setNudge] = React.useState(true);
   const [nudgeSent, setNudgeSent] = React.useState(false);
   const [nudgeBusy, setNudgeBusy] = React.useState(false);
@@ -125,7 +125,7 @@ function AccountShell({ current, go, title, children }) {
     setNudgeBusy(true); setNudgeErr(false);
     let failed = false;
     // The authed resend returns { deliveryFailed: true } when the provider actually rejected/timed out
-    // (TRI-941) — don't claim "sent" when it wasn't. A thrown/rejected request is also a failure.
+    // (TRI-941), don't claim "sent" when it wasn't. A thrown/rejected request is also a failure.
     try { const r = await window.TK_AUTH.resendVerification(); if (r && r.deliveryFailed) failed = true; }
     catch (_) { failed = true; }
     setNudgeBusy(false);
@@ -172,10 +172,10 @@ function AccountShell({ current, go, title, children }) {
             onDismiss={() => setNudge(false)}
             action={nudgeSent ? undefined : <Button size="sm" variant="secondary" disabled={nudgeBusy} onClick={resendVerify}>{nudgeBusy ? "Sending…" : nudgeErr ? "Try again" : "Resend email"}</Button>}>
             {nudgeErr
-              ? <>We couldn’t send the verification link to <strong>{acctEmail}</strong> just now — please try again in a moment.</>
+              ? <>We couldn’t send the verification link to <strong>{acctEmail}</strong> just now. Please try again in a moment.</>
               : nudgeSent
               ? <>Check your inbox (and spam) for the link to <strong>{acctEmail}</strong>. It expires in 24 hours.</>
-              : <>We sent a verification link to <strong>{acctEmail}</strong>. Confirm your address to secure your account — you can keep using TripKoach either way.</>}
+              : <>We sent a verification link to <strong>{acctEmail}</strong>. Confirm your address to secure your account. You can keep using TripKoach either way.</>}
           </Alert>
         )}
         {children}
@@ -252,7 +252,7 @@ function ProfileWeb({ go }) {
       const result = await window.TK_AUTH.uploadAvatar(file);
       setAvatarUrl(result.avatarUrl);
       setAvatarStatus(result.avatarStatus);
-      setToast(result.avatarStatus === "approved" ? "Photo updated" : "Photo uploaded — under review");
+      setToast(result.avatarStatus === "approved" ? "Photo updated" : "Photo uploaded, under review");
     } catch (err) {
       window.tkToast(authErrMsg(err, "We couldn't upload your photo. Please try again."));
     } finally { setAvatarBusy(false); if (avatarInputRef.current) avatarInputRef.current.value = ""; }
@@ -281,7 +281,7 @@ function ProfileWeb({ go }) {
       <p className="tk-body tk-muted" style={{ marginTop: -8 }}>Your details travel with every booking. Guides use them to prepare for your trip.</p>
       <div className="tk-card"><div className="tk-card__body" style={{ padding: "var(--space-6)", gap: "var(--space-4)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          {/* TRI-943: avatar — show photo when approved/pending, initials otherwise */}
+          {/* TRI-943: avatar, show photo when approved/pending, initials otherwise */}
           <span style={{ position: "relative", width: 64, height: 64, borderRadius: "50%", background: "var(--brand-wash)", color: "var(--brand-gold-deep)", display: "grid", placeItems: "center", fontWeight: 800, fontSize: 22, overflow: "hidden", flexShrink: 0 }}>
             {avatarUrl
               ? <img src={avatarUrl} alt="Your avatar" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%", opacity: avatarBusy ? 0.5 : 1 }} />
@@ -289,11 +289,11 @@ function ProfileWeb({ go }) {
             {avatarBusy && <span style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.25)", display: "grid", placeItems: "center" }}><Icon name="loader" size={20} style={{ color: "#fff" }} /></span>}
           </span>
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            {/* Hidden file input — triggered by the button below */}
+            {/* Hidden file input, triggered by the button below */}
             <input ref={avatarInputRef} type="file" accept="image/jpeg,image/png,image/webp" style={{ display: "none" }} onChange={handleAvatarChange} />
             <Button variant="secondary" size="sm" iconStart="camera" disabled={avatarBusy} onClick={() => { if (live) { avatarInputRef.current && avatarInputRef.current.click(); } else { touch(); } }}>{avatarBusy ? "Uploading…" : "Change photo"}</Button>
             {avatarStatus === "pending" && <span className="tk-caption tk-muted">Photo is under review</span>}
-            {avatarStatus === "rejected" && <span className="tk-caption" style={{ color: "var(--danger-fg)" }}>Photo was declined — please upload a different one</span>}
+            {avatarStatus === "rejected" && <span className="tk-caption" style={{ color: "var(--danger-fg)" }}>Photo was declined. Please upload a different one</span>}
             {avatarStatus === "hidden" && <span className="tk-caption" style={{ color: "var(--danger-fg)" }}>Photo is under review</span>}
           </div>
         </div>
@@ -370,13 +370,13 @@ function NotificationsWeb({ go }) {
   );
   return (
     <AccountShell current="notifications" go={go} title="Notifications">
-      <p className="tk-body tk-muted" style={{ marginTop: -8 }}>Choose what we send and how. Booking confirmations and payment reminders are always on — they're part of your trip.</p>
+      <p className="tk-body tk-muted" style={{ marginTop: -8 }}>Choose what we send and how. Booking confirmations and payment reminders are always on. They're part of your trip.</p>
       <div className="tk-card"><div className="tk-card__body" style={{ padding: "var(--space-2) var(--space-6) var(--space-4)" }}>
         <h2 className="tk-h6" style={{ margin: "var(--space-4) 0 0" }}>Email</h2>
         <Row label="Booking confirmations" hint="Your reference, payment instructions and receipt." locked />
         <Row label="Payment reminders" hint="Before your pay-by date, so you don't lose your spots." locked />
         <Row label="Departure reminders" hint="A nudge 48 hours before you travel, with pickup details." defaultChecked channel="email" type="departure_reminders" />
-        <Row label="Review reminders" hint="After your trip, an invite to review the tour — with a nudge if you haven't yet." defaultChecked channel="email" type="review_reminders" />
+        <Row label="Review reminders" hint="After your trip, an invite to review the tour, with a nudge if you haven't yet." defaultChecked channel="email" type="review_reminders" />
         <Row label="Trip inspiration & offers" hint="New tours, seasonal trips and the occasional promo code." defaultChecked={false} channel="email" type="marketing_offers" />
       </div></div>
       <div className="tk-card"><div className="tk-card__body" style={{ padding: "var(--space-2) var(--space-6) var(--space-4)" }}>
@@ -390,11 +390,11 @@ function NotificationsWeb({ go }) {
   );
 }
 
-// TRI-1029 — the two-factor enroll/disable modal. One component, three panels keyed off tfa.mode/step:
+// TRI-1029: the two-factor enroll/disable modal. One component, three panels keyed off tfa.mode/step:
 //   enroll·setup → scan the QR (or key in the secret) + confirm the first code
 //   enroll·codes → the one-time recovery codes (shown ONCE)
 //   disable·confirm → prove a current code to turn 2FA off
-// The QR is drawn client-side from the otpauth URI (MfaQr, qr.jsx) — the secret never leaves the browser
+// The QR is drawn client-side from the otpauth URI (MfaQr, qr.jsx). The secret never leaves the browser
 // for a third-party image service.
 function TwoFactorModal({ tfa, setCode, onClose, onVerify, onDisable, onDone }) {
   if (!tfa) return null;
@@ -417,7 +417,7 @@ function TwoFactorModal({ tfa, setCode, onClose, onVerify, onDisable, onDone }) 
   }
   if (tfa.step === "codes") {
     return (
-      <Modal open title="Save your recovery codes" description="Store these somewhere safe. Each code works once if you lose your authenticator — this is the only time we'll show them." onClose={onDone}
+      <Modal open title="Save your recovery codes" description="Store these somewhere safe. Each code works once if you lose your authenticator. This is the only time we'll show them." onClose={onDone}
         actions={<Button iconStart="check" onClick={onDone}>I've saved them</Button>}>
         <div className="tk-stack" style={{ gap: "var(--space-4)" }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 14, padding: "var(--space-4)", background: "var(--bg-subtle)", borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)" }}>
@@ -492,7 +492,7 @@ function AccountSettingsWeb({ go }) {
       setTfaOn(true);
       setTfa((t) => ({ ...t, busy: false, step: "codes", recoveryCodes: r.recoveryCodes || [] }));
     } catch (e) {
-      setTfa((t) => ({ ...t, busy: false, err: e && e.status === 400 ? "That code didn't match — check your authenticator app and try again." : authErrMsg(e, "We couldn't verify that code.") }));
+      setTfa((t) => ({ ...t, busy: false, err: e && e.status === 400 ? "That code didn't match. Check your authenticator app and try again." : authErrMsg(e, "We couldn't verify that code.") }));
     }
   }
   async function submitDisable() {
@@ -550,7 +550,7 @@ function AccountSettingsWeb({ go }) {
           <FormField id="s-lang" label="Language"><Select defaultValue={live && me ? me.language : "en"} onChange={touch} options={[{ value: "en", label: "English" }, { value: "tw", label: "Twi" }, { value: "fr", label: "Français" }]} /></FormField>
           <FormField id="s-cur" label="Display currency" help="You're always charged in USD"><Select defaultValue={live && me ? me.displayCurrency : "USD"} onChange={touch} options={[{ value: "USD", label: "US Dollar ($)" }, { value: "GHS", label: "Ghana Cedi (GH₵)" }]} /></FormField>
         </div>
-        <Switch id="s-saver" label="Data saver — lighter images on slow connections" defaultChecked={live && me ? me.dataSaver : true} onChange={touch} />
+        <Switch id="s-saver" label="Data saver: lighter images on slow connections" defaultChecked={live && me ? me.dataSaver : true} onChange={touch} />
       </div></div>
       <div className="tk-card"><div className="tk-card__body" style={{ padding: "var(--space-6)", gap: "var(--space-4)" }}>
         <h2 className="tk-h5" style={{ margin: 0 }}>Password &amp; security</h2>
@@ -590,7 +590,7 @@ function LoginWeb({ go, startCreating }) {
   const [creating, setCreating] = React.useState(!!startCreating);
   const [pw, setPw] = React.useState("");
   const [wrong, setWrong] = React.useState(false);
-  // TRI-925 — snapshot returning-visitor status once at mount; the page navigates
+  // TRI-925: snapshot returning-visitor status once at mount; the page navigates
   // away on a successful login so it never needs to re-read after the flag is set.
   const returning = React.useMemo(() => tkIsReturning(), []);
   // Live auth (TRI-882): submit logs in / signs up via /api/v1. Flag off → the
@@ -598,11 +598,11 @@ function LoginWeb({ go, startCreating }) {
   const live = LIVE_AUTH();
   const [busy, setBusy] = React.useState(false);
   const [errMsg, setErrMsg] = React.useState(null);
-  // TRI-941 — after a live signup the account is created + signed in but unverified; show a
+  // TRI-941: after a live signup the account is created + signed in but unverified; show a
   // "check your inbox" panel (with a resend path) instead of dropping straight into bookings.
   const [signedUp, setSignedUp] = React.useState(false);
   const [signupEmail, setSignupEmail] = React.useState("");
-  // TRI-1029 — when a 2FA-enabled account logs in, the server withholds the session and asks for the
+  // TRI-1029: when a 2FA-enabled account logs in, the server withholds the session and asks for the
   // authenticator code. `mfa` non-null switches this panel into the second-factor challenge step.
   const [mfa, setMfa] = React.useState(null); // null | { code, busy, err }
   async function submitMfa(e) {
@@ -629,14 +629,14 @@ function LoginWeb({ go, startCreating }) {
         const name = authVal("lg-name");
         const terms = !!(document.getElementById("lg-terms") && document.getElementById("lg-terms").checked);
         await window.TK_AUTH.signup({ email: email, password: pw, name: name || undefined, agreedTerms: terms });
-        tkMarkReturning(); // TRI-925 — this browser has now signed in at least once
+        tkMarkReturning(); // TRI-925: this browser has now signed in at least once
         setBusy(false); setSignupEmail(email); setSignedUp(true); return; // TRI-941 check-inbox
       }
       const el = document.getElementById("lg-pw");
       const password = el && typeof el.value === "string" ? el.value : "";
       const res = await window.TK_AUTH.login(email, password);
       if (res && res.mfaRequired) { setBusy(false); setMfa({ code: "", busy: false, err: null }); return; } // TRI-1029 second factor
-      tkMarkReturning(); // TRI-925 — this browser has now signed in at least once
+      tkMarkReturning(); // TRI-925: this browser has now signed in at least once
       go("bookings");
     } catch (err) {
       setBusy(false); setWrong(true);
@@ -676,7 +676,7 @@ function LoginWeb({ go, startCreating }) {
         <div style={{ width: "100%", maxWidth: 380 }}>
           <img src="../../assets/logo-badge.png" width="44" height="44" alt="TripKoach" style={{ marginBottom: "var(--space-5)" }} />
           <h1 className="tk-h2">{creating ? "Create your account" : "Log in"}</h1>
-          <p className="tk-body-sm tk-muted" style={{ marginTop: 4, marginBottom: "var(--space-6)" }}>{creating ? "Takes a minute — you only need it once." : (returning ? "Welcome back. Enter your details to continue." : "Welcome — sign in to pick up your Ghana trip planning.")}</p>
+          <p className="tk-body-sm tk-muted" style={{ marginTop: 4, marginBottom: "var(--space-6)" }}>{creating ? "Takes a minute. You only need it once." : (returning ? "Welcome back. Enter your details to continue." : "Welcome, sign in to pick up your Ghana trip planning.")}</p>
           {wrong && <Alert tone="error" title={creating ? "We couldn't create your account" : "We couldn't log you in"} style={{ marginBottom: "var(--space-4)" }}>{errMsg || "That email and password don't match. Try again, or reset your password."}</Alert>}
           <form className="tk-stack" style={{ gap: "var(--space-4)" }} onSubmit={submit}>
             {creating && <FormField id="lg-name" label="Full name"><Input autoComplete="name" /></FormField>}
@@ -695,7 +695,7 @@ function LoginWeb({ go, startCreating }) {
             {creating && <Checkbox id="lg-terms" label="I agree to the booking terms and privacy policy" />}
             {/* TRI-1150: give sign-ups a way to READ the conditions behind the checkbox.
                 Same canonical source + accessible disclosure as checkout (window.TK_TERMS
-                via /config). Hidden until Content publishes real copy — no placeholder. */}
+                via /config). Hidden until Content publishes real copy, no placeholder. */}
             {creating && window.TK_TERMS ? <TkTermsDisclosure /> : null}
             <Button block size="lg" type="submit" disabled={live ? busy : undefined}>{busy ? (creating ? "Creating…" : "Signing in…") : (creating ? "Create account" : "Log in")}</Button>
           </form>
@@ -724,7 +724,7 @@ function AuthShell({ children }) {
 
 function ForgotWeb({ go }) {
   // Live reset (TRI-882): the email stage POSTs /password-reset/request (always
-  // 200 — no enumeration); arriving via the emailed /reset-password?token=… link
+  // 200, no enumeration); arriving via the emailed /reset-password?token=… link
   // opens straight on the "reset" stage and the form POSTs /password-reset/consume.
   const live = LIVE_AUTH();
   const initial = (function () {
@@ -805,9 +805,9 @@ function ForgotWeb({ go }) {
     </AuthShell>
   );
 }
-// TRI-941 — post-signup "check your inbox" panel. The account is already created + signed in (session
+// TRI-941: post-signup "check your inbox" panel. The account is already created + signed in (session
 // cookie set), but unverified; this confirms where the verify email went and offers a rate-limited resend
-// plus a way to continue into the account without verifying (SOFT enforcement — nothing is gated).
+// plus a way to continue into the account without verifying (SOFT enforcement, nothing is gated).
 function CheckInboxPanel({ email, go }) {
   const live = LIVE_AUTH();
   const [sent, setSent] = React.useState(false);
@@ -823,7 +823,7 @@ function CheckInboxPanel({ email, go }) {
       <img src="../../assets/logo-badge.png" width="44" height="44" alt="TripKoach" style={{ marginBottom: "var(--space-5)" }} />
       <div style={{ width: 52, height: 52, borderRadius: "50%", background: "var(--success-bg)", color: "var(--success-fg)", display: "grid", placeItems: "center", marginBottom: "var(--space-4)" }}><Icon name="mail" size={26} /></div>
       <h1 className="tk-h2">Check your inbox</h1>
-      <p className="tk-body-sm tk-muted" style={{ marginTop: 4, marginBottom: "var(--space-5)" }}>Your account is ready. We've sent a verification link to <strong style={{ color: "var(--text-strong)" }}>{email || "your email"}</strong> — open it to confirm your address. You can start planning right away; verifying just secures your account.</p>
+      <p className="tk-body-sm tk-muted" style={{ marginTop: 4, marginBottom: "var(--space-5)" }}>Your account is ready. We've sent a verification link to <strong style={{ color: "var(--text-strong)" }}>{email || "your email"}</strong>. Open it to confirm your address. You can start planning right away; verifying just secures your account.</p>
       {sent
         ? <Alert tone="success" title="Verification email sent" style={{ marginBottom: "var(--space-5)" }}>Check your inbox (and spam). Links can take a minute to arrive.</Alert>
         : <Alert tone="info" title="Didn't get it?" style={{ marginBottom: "var(--space-5)" }}>Check spam, or resend the link below. The link expires in 24 hours.</Alert>}
@@ -835,7 +835,7 @@ function CheckInboxPanel({ email, go }) {
   );
 }
 
-// TRI-941 — /verify-email?token=… landing page. Consumes the emailed token on mount and resolves to one
+// TRI-941: /verify-email?token=… landing page. Consumes the emailed token on mount and resolves to one
 // of: verified (just now), already-verified, or invalid/expired (with a resend path). Flag off → inert
 // demo success (no API), matching the DS prototype posture of the other auth pages.
 function VerifyEmailPage({ go }) {
@@ -883,13 +883,13 @@ function VerifyEmailPage({ go }) {
         </div>
         <p className="tk-body-sm tk-muted">This only takes a moment.</p>
       </>)}
-      {stage === "verified" && <Success title="Email verified" body="Thanks — your email address is confirmed and your account is secured. You're all set." />}
-      {stage === "already" && <Success title="Already verified" body="This email address was already confirmed. Nothing more to do — you're all set." />}
+      {stage === "verified" && <Success title="Email verified" body="Thanks. Your email address is confirmed and your account is secured. You're all set." />}
+      {stage === "already" && <Success title="Already verified" body="This email address was already confirmed. Nothing more to do, you're all set." />}
       {stage === "sent" && <Success title="New link sent" body="We've sent a fresh verification link to your inbox. Open it to confirm your address (it expires in 24 hours)." />}
       {stage === "expired" && (<>
         <div style={{ width: 52, height: 52, borderRadius: "50%", background: "var(--warning-bg, var(--bg-sunken))", color: "var(--warning-fg, var(--text-strong))", display: "grid", placeItems: "center", marginBottom: "var(--space-4)" }}><Icon name="triangle-alert" size={26} /></div>
         <h1 className="tk-h2">Link expired</h1>
-        <p className="tk-body-sm tk-muted" style={{ marginTop: 4, marginBottom: "var(--space-6)" }}>This verification link is invalid or has expired. Verification links can be used once and last 24 hours — request a fresh one below.</p>
+        <p className="tk-body-sm tk-muted" style={{ marginTop: 4, marginBottom: "var(--space-6)" }}>This verification link is invalid or has expired. Verification links can be used once and last 24 hours. Request a fresh one below.</p>
         <div className="tk-stack" style={{ gap: "var(--space-3)" }}>
           <Button block size="lg" disabled={busy} onClick={resend}>{busy ? "Sending…" : "Send me a new link"}</Button>
           <Button block variant="secondary" onClick={() => go("login")}>Back to log in</Button>
@@ -901,15 +901,15 @@ function VerifyEmailPage({ go }) {
 
 Object.assign(window, { AccountShell, ProfileWeb, NotificationsWeb, AccountSettingsWeb, LoginWeb, ForgotWeb, ReviewsWeb, VerifyEmailPage, CheckInboxPanel });
 
-// TRI-1016 — the account "Reviews" page. When live (flag on + TK_AUTH), it reads the
+// TRI-1016: the account "Reviews" page. When live (flag on + TK_AUTH), it reads the
 // signed-in traveller's OWN reviews + pending review invites from GET /me/reviews:
 // "Awaiting your review" lists real unredeemed invites (each carrying a one-time token
 // so "Write your review" submits the REAL verified review via TK_REVIEWS_API.submit,
-// TRI-1014/892 — no un-tokenized fixture form), and "Your reviews" shows this account's
+// TRI-1014/892, no un-tokenized fixture form), and "Your reviews" shows this account's
 // own submissions with their moderation status. Flag OFF → the DS preview renders the
 // original fixture prototype byte-identically (no API calls, no demo-name filter). The
 // old build hard-coded "Ama Mensah" and fell back to slice(0,2) of the shared demo
-// reviews as the user's own — that fallback is dropped on the live path.
+// reviews as the user's own. That fallback is dropped on the live path.
 function ReviewsWeb({ go }) {
   const Stars = NS.Stars;
   const RM = window.ReviewModal;
@@ -935,7 +935,7 @@ function ReviewsWeb({ go }) {
     window.TK_AUTH.myReviews().then((d) => setData(d)).catch(() => {});
   }
 
-  // Fixture demo (flag off / DS preview) — unchanged from the prototype.
+  // Fixture demo (flag off / DS preview), unchanged from the prototype.
   const fxMe = "Ama Mensah";
   const fxAll = (window.TK_REVIEWS || []);
   let fxMine = fxAll.filter(r => r.author === fxMe || r.name === fxMe);
@@ -991,12 +991,12 @@ function ReviewsWeb({ go }) {
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>{Stars ? <Stars value={r.rating} /> : null}<span className="tk-caption">{r.date || "Recently"}</span></div>
             {r.title && <strong style={{ fontSize: 14.5 }}>{r.title}</strong>}
             <p className="tk-body-sm" style={{ margin: 0, color: "var(--text-body)" }}>{r.body || r.text}</p>
-            {r.status === "pending" && <span className="tk-caption" style={{ color: "var(--warning-fg)" }}>Checked before it appears publicly — usually within a day.</span>}
+            {r.status === "pending" && <span className="tk-caption" style={{ color: "var(--warning-fg)" }}>Checked before it appears publicly, usually within a day.</span>}
             {r.reply && <div style={{ marginTop: 6, padding: "10px 12px", background: "var(--bg-sunken)", borderRadius: "var(--radius-md)" }}><span className="tk-caption" style={{ fontWeight: 700, color: "var(--brand-ink)" }}>TripKoach replied</span><p className="tk-body-sm" style={{ margin: "2px 0 0" }}>{r.reply}</p></div>}
           </div></div>
         )) : (
           <div className="tk-card"><div className="tk-card__body" style={{ padding: "var(--space-6)", alignItems: "center", textAlign: "center", gap: 6 }}>
-            <span className="tk-body-sm tk-muted">You haven't shared a review yet. After a trip we'll invite you to review it — they'll appear here once you do.</span>
+            <span className="tk-body-sm tk-muted">You haven't shared a review yet. After a trip we'll invite you to review it, and they'll appear here once you do.</span>
           </div></div>
         )}
       </div>

@@ -18,11 +18,11 @@ const REGIONS = [
 
 const TESTIMONIALS = [
   { initials: "ML", name: "Marcus & Lia", meta: "First-time visitors · London",
-    quote: "We almost did not come — too many what-ifs. TripKoach handled every one. The pickup, the eSIM, the koach who answered our eleven o'clock questions. Worth every cedi." },
+    quote: "We almost did not come. Too many what-ifs. TripKoach handled every one. The pickup, the eSIM, the koach who answered our eleven o'clock questions. Worth every cedi." },
   { initials: "KA", name: "Kojo Asante", meta: "Returning · third trip",
     quote: "I have booked direct, gone solo, used the big platforms. TripKoach is the only one that felt like family was meeting me at arrivals." },
   { initials: "AO", name: "Ama Owusu-Afriyie", meta: "Diaspora visit · Toronto",
-    quote: "Five days, two regions, no friction. The itinerary read like a friend wrote it — because the koach who built it had actually been there last month." },
+    quote: "Five days, two regions, no friction. The itinerary read like a friend wrote it, because the koach who built it had actually been there last month." },
 ];
 
 function Section({ children, style }) {
@@ -31,7 +31,7 @@ function Section({ children, style }) {
 
 // Homepage hero carousel (TRI-1132). Cross-fades the same CDN image set the
 // LIVE apex hero slider uses (window.TK_HERO_SLIDES). Auto-advances, pauses on
-// hover/focus and honours prefers-reduced-motion; fully keyboard operable —
+// hover/focus and honours prefers-reduced-motion; fully keyboard operable:
 // prev/next buttons + a dot tablist (Left/Right/Home/End). Inactive slides are
 // aria-hidden; the active slide carries alt text. All frames hotlink
 // cdn.tripkoach.com via TK_HERO_SRCSET (responsive 480/960/1440, TRI-1117).
@@ -139,11 +139,11 @@ function HomeWeb({ go }) {
   // a hard-coded value="" with a no-op onChange, so React reset every keystroke
   // and the input silently rejected all typed text. It is now stateful; Enter or
   // the Explore button carries the query to /browse?q=… where BrowseWeb applies
-  // it as its live text filter (no separate search backend — browse filters the
+  // it as its live text filter (no separate search backend, browse filters the
   // already-loaded catalogue client-side).
   const [q, setQ] = React.useState("");
   const search = () => go("browse", q.trim() ? { q: q.trim() } : undefined);
-  // Rating + review totals derived from the live catalogue — each tour carries
+  // Rating + review totals derived from the live catalogue, each tour carries
   // its cached rating and review count (tk-boot mapTourSummary). Weight the
   // average by review volume so a 200-review 4.8 outweighs an 18-review 4.9;
   // fall back to plain brand copy when nothing is rated yet (fresh catalogue).
@@ -156,14 +156,14 @@ function HomeWeb({ go }) {
   const curated = ["discover-ghana-in-10-days", "accra-city-tour", "a-christmas-like-no-other"]
     .map(id => tours.find(t => t.id === id)).filter(Boolean);
   // Live catalogues won't carry the fixture slugs, so fall back to the first
-  // tours (prefer any flagged featured) — keeps the "popular" rail filled from
+  // tours (prefer any flagged featured), keeps the "popular" rail filled from
   // live data. With fixtures all three curated slugs resolve, so this is a no-op
   // and the prototype render is unchanged.
   const featured = tours.filter(t => t.featured);
   const popular = curated.length ? curated : (featured.length ? featured : tours).slice(0, 3);
   // Latest 3 stories for the homepage journal rail (TRI-954). window.TK_BLOG is
   // seeded from fixtures and, in live mode, replaced by GET /api/v1/blog at boot
-  // (tk-boot loadBlog) — already newest-first, so the first three are the most
+  // (tk-boot loadBlog), already newest-first, so the first three are the most
   // recent published posts. BlogCard is published on window by screens-blog.jsx;
   // reading it at render time (not module load) keeps it order-independent.
   const stories = (window.TK_BLOG || []).slice(0, 3);
@@ -180,7 +180,7 @@ function HomeWeb({ go }) {
             Ghana, shown by the people who <em style={{ fontStyle: "normal", color: "var(--gold-400)" }}>live there.</em>
           </h1>
           <p style={{ fontSize: "clamp(17px, 1.5vw, 21px)", lineHeight: 1.5, maxWidth: "52ch", marginTop: "var(--space-5)", color: "rgba(255,255,255,.9)" }}>
-            Guided day trips and multi-day journeys with local koaches — from a morning in Accra to a ten-day loop of castles, canopy walks and savanna. Reserve now, pay now or later.
+            Guided day trips and multi-day journeys with local koaches, from a morning in Accra to a ten-day loop of castles, canopy walks and savanna. Reserve now, pay now or later.
           </p>
           <div style={{ display: "flex", gap: 12, marginTop: "var(--space-7)", flexWrap: "wrap", maxWidth: 680 }}>
             <div style={{ flex: "1 1 320px", minWidth: 260 }}>
@@ -207,7 +207,7 @@ function HomeWeb({ go }) {
       {/* ── STAT STRIP ──────────────────────────────────── */}
       <section style={{ background: "var(--n-900)", color: "var(--n-0)", borderTop: "1px solid rgba(255,255,255,.08)" }}>
         <div className="tk-container" style={{ maxWidth: 1200, display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "var(--space-6)", paddingBlock: "var(--space-8)" }}>
-          {[[String(tours.length), "guided tours"], [String(window.TK_REGION_COUNT()), "regions of Ghana"], [ratingStr ? ratingStr + "★" : "—", "average rating"], ["1", "koach in your pocket"]].map(([n, l]) => (
+          {[[String(tours.length), "guided tours"], [String(window.TK_REGION_COUNT()), "regions of Ghana"], [ratingStr ? ratingStr + "★" : "-", "average rating"], ["1", "koach in your pocket"]].map(([n, l]) => (
             <div key={l} style={{ textAlign: "center" }}>
               <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: "clamp(30px,3.4vw,46px)", letterSpacing: "-0.03em", color: "var(--gold-400)" }}>{n}</div>
               <div style={{ fontSize: 13.5, color: "rgba(255,255,255,.72)", marginTop: 4, letterSpacing: ".01em" }}>{l}</div>
@@ -272,9 +272,9 @@ function HomeWeb({ go }) {
         <h2 className="tk-h1" style={{ marginTop: 8, marginBottom: "var(--space-8)", maxWidth: "18ch" }}>Everything sorted before you land.</h2>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "var(--space-5)" }}>
           {[
-            { icon: "wifi", tag: "Free 5GB", title: "eSIM on arrival", body: "Land connected. A Ghana eSIM with 5GB free, activated before you step off the plane — no SIM-swap queues." },
+            { icon: "wifi", tag: "Free 5GB", title: "eSIM on arrival", body: "Land connected. A Ghana eSIM with 5GB free, activated before you step off the plane. No SIM-swap queues." },
             { icon: "bus", tag: "Fixed price", title: "Airport pickup", body: "A verified driver waiting at KIA arrivals with your name on a board. One price, agreed up front, no haggling at midnight." },
-            { icon: "message-circle", tag: "Always on", title: "Your koach in your pocket", body: "A real person who knows the ground answers your questions — before you book and every evening while you travel." },
+            { icon: "message-circle", tag: "Always on", title: "Your koach in your pocket", body: "A real person who knows the ground answers your questions, before you book and every evening while you travel." },
           ].map(s => (
             <div key={s.title} className="tk-card" style={{ padding: "var(--space-6)", display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
               <span style={{ width: 48, height: 48, borderRadius: "var(--radius-md)", background: "var(--brand-wash)", color: "var(--gold-700)", display: "grid", placeItems: "center" }}>
@@ -297,7 +297,7 @@ function HomeWeb({ go }) {
               Your travel plan, built in a chat.
             </h2>
             <p style={{ fontSize: 18, lineHeight: 1.55, color: "rgba(255,255,255,.82)", marginTop: "var(--space-4)", maxWidth: "46ch" }}>
-              Tell Koach how long you have, what you're into, and your budget. You get a real itinerary you can book in one tap — flights, pickup and connectivity sorted.
+              Tell Koach how long you have, what you're into, and your budget. You get a real itinerary you can book in one tap. Flights, pickup and connectivity sorted.
             </p>
             <div style={{ display: "flex", gap: 12, marginTop: "var(--space-6)", flexWrap: "wrap" }}>
               <Button size="lg" variant="accent" iconEnd="arrow-right" onClick={() => go("contact")}>Plan a trip</Button>
@@ -317,7 +317,7 @@ function HomeWeb({ go }) {
                 Crafts and good food, five days in March.
               </div>
               <div style={{ alignSelf: "flex-start", maxWidth: "88%", background: "var(--n-700)", color: "var(--n-0)", padding: "10px 14px", borderRadius: "16px 16px 16px 4px", fontSize: 14.5, lineHeight: 1.45 }}>
-                Then start in Bonwire for kente, finish in Accra for night food. I'll draft something — give me a sec.
+                Then start in Bonwire for kente, finish in Accra for night food. I'll draft something, give me a sec.
               </div>
               <div style={{ alignSelf: "flex-start", display: "flex", gap: 5, padding: "10px 14px" }}>
                 {[0, 1, 2].map(i => <span key={i} style={{ width: 7, height: 7, borderRadius: "50%", background: "rgba(255,255,255,.5)" }} />)}
@@ -328,7 +328,7 @@ function HomeWeb({ go }) {
               <span style={{ width: 34, height: 34, borderRadius: "50%", background: "var(--gold-400)", color: "var(--n-950)", display: "grid", placeItems: "center" }}><Icon name="arrow-right" size={17} /></span>
             </div>
             <span style={{ display: "block", marginTop: "var(--space-3)", fontSize: 12, color: "rgba(255,255,255,.5)", textAlign: "center" }}>
-              Illustrative preview — chat isn't live yet; tap “Plan a trip” to reach a real koach.
+              Illustrative preview. Chat isn't live yet; tap “Plan a trip” to reach a real koach.
             </span>
           </div>
         </Section>
@@ -338,7 +338,7 @@ function HomeWeb({ go }) {
       <Section>
         <span className="tk-overline" style={{ color: "var(--gold-700)" }}>From the field</span>
         <h2 className="tk-h1" style={{ marginTop: 8, marginBottom: 6, maxWidth: "20ch" }}>What travelers tell us when they get home.</h2>
-        <p className="tk-caption" style={{ color: "var(--text-muted)", marginTop: 0, marginBottom: "var(--space-8)" }}>Illustrative stories — every tour page carries its own verified traveler reviews.</p>
+        <p className="tk-caption" style={{ color: "var(--text-muted)", marginTop: 0, marginBottom: "var(--space-8)" }}>Illustrative stories. Every tour page carries its own verified traveler reviews.</p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "var(--space-5)" }}>
           {TESTIMONIALS.map(t => (
             <figure key={t.name} className="tk-card" style={{ margin: 0, padding: "var(--space-6)", display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>

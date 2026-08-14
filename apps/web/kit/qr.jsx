@@ -10,7 +10,7 @@
  *
  * Correctness: this encoder was verified during TRI-911 to produce byte-identical
  * module matrices to the mature `qrcode` npm package across 5000 random inputs
- * (versions 1–13, automatic mask selection), and its output round-trips through
+ * (versions 1 to 13, automatic mask selection), and its output round-trips through
  * the independent `jsQR` decoder for real otpauth URIs. See the task write-up.
  *
  * Only `tkQrEncode` (the encoder) and `MfaQr` (the SVG component) are exported
@@ -248,7 +248,7 @@ var tkQrEncode = (function () {
   };
 })();
 
-/* SVG renderer — one <path> of all dark modules over a white quiet zone. */
+/* SVG renderer: one <path> of all dark modules over a white quiet zone. */
 function MfaQr({ text, px }) {
   const dim = px || 176;
   const qr = React.useMemo(() => { try { return tkQrEncode(text); } catch (e) { return null; } }, [text]);
@@ -259,7 +259,7 @@ function MfaQr({ text, px }) {
     if (qr.modules[y][x]) d += "M" + (x + quiet) + " " + (y + quiet) + "h1v1h-1z";
   return (
     <svg width={dim} height={dim} viewBox={"0 0 " + box + " " + box} shapeRendering="crispEdges"
-      role="img" aria-label="QR code — scan with your authenticator app to enroll"
+      role="img" aria-label="QR code, scan with your authenticator app to enroll"
       style={{ background: "#fff", borderRadius: "var(--radius-md)", display: "block" }}>
       <path d={d} fill="#000" />
     </svg>

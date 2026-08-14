@@ -48,7 +48,7 @@ const SHARED_SHIM = ["config.js", "tk-api.js"];
 // docs/PROD-CUTOVER-BACKLOG.md). Admin ships noindex — it is not public surface.
 const SITE_URL = (process.env.SITE_URL || "https://dev.tripkoach.com").replace(/\/+$/, "");
 const WEB_DESC =
-  "Guided small-group tours across Ghana — festivals, coastline, culture and nature, booked with a local koach.";
+  "Guided small-group tours across Ghana: festivals, coastline, culture and nature, booked with a local koach.";
 const htmlEsc = (s) =>
   String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 function webHead(title) {
@@ -214,7 +214,7 @@ function prerenderDeepLinks(cfg, dist, scripts) {
     const path = `/tour/${encodeURIComponent(slug)}`;
     const url = `${SITE_URL}${path}`;
     const img = ogImageAbs(t.image);
-    const title = `${t.title} — TripKoach`;
+    const title = `${t.title}: TripKoach`;
     const desc = String(t.blurb || DEFAULT_DESC).slice(0, 180);
     const head = routeHead({ title, desc, path, image: t.image, ogType: "product", jsonLd: tourJsonLd(t, url, img) });
     writePrerender(dist, ["tour", slug], renderPage(cfg, title, head, scripts));
@@ -224,7 +224,7 @@ function prerenderDeepLinks(cfg, dist, scripts) {
     const path = `/blog/${encodeURIComponent(p.slug)}`;
     const url = `${SITE_URL}${path}`;
     const img = ogImageAbs(p.image || p.cover);
-    const title = `${p.title} — TripKoach Stories`;
+    const title = `${p.title}: TripKoach Stories`;
     const desc = String(p.excerpt || DEFAULT_DESC).slice(0, 180);
     const head = routeHead({ title, desc, path, image: p.image || p.cover, ogType: "article", jsonLd: postJsonLd(p, url, img) });
     writePrerender(dist, ["blog", p.slug], renderPage(cfg, title, head, scripts));
@@ -249,7 +249,7 @@ const APPS = {
     extraShim: ["tk-booking.js", "tk-auth.js", "tk-reviews.js"],
     // data.js (window.TK_DATA / TK_IMG) must load before blog.js.
     data: ["data.js", "blog.js"],
-    title: "TripKoach — guided tours across Ghana",
+    title: "TripKoach: guided tours across Ghana",
     bodyBg: "var(--bg-page)",
     // Responsive layer lifted verbatim from ui_kits/web/index.html <style>.
     headCss: `main{min-height:60vh}
@@ -286,7 +286,7 @@ const APPS = {
     app: "app.jsx",
     // data.js (window.TK_DATA) must load before admin-data.js (which reads it).
     data: ["data.js", "admin-data.js"],
-    title: "TripKoach Ops — admin console",
+    title: "TripKoach Ops: admin console",
     bodyBg: "var(--shell-content-bg)",
     // TRI-978 #1: app-shell scroll fix (app layer; design-system/ stays pristine).
     // The DS shell let the whole window scroll while the sidebar (height:100vh,
@@ -421,7 +421,7 @@ function buildApp(name) {
   cpSync(join(cfg.kit, "tk-boot.js"), join(dist, "tk-boot.js"));
 
   // 4. Build-time-transpiled application script (screens + app, in kit order).
-  let appJs = "/* Built by scripts/build.mjs — do not edit. Sources live in apps/" + name + "/kit + design-system/. */\n";
+  let appJs = "/* Built by scripts/build.mjs. Do not edit. Sources live in apps/" + name + "/kit + design-system/. */\n";
   for (const f of [...cfg.screens, cfg.app]) appJs += wrapFile(cfg.kit, f);
   writeFileSync(join(dist, "app.js"), appJs);
 

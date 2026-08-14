@@ -61,7 +61,7 @@ const TEMPLATES = {
   // Neutral connectivity/verification email — used by the send smoke path (npm run send-email) and the
   // automated smoke. Not a product email; safe to send to an internal address to prove delivery.
   smoke_test: {
-    subject: 'TripKoach email transport check — {{ref}}',
+    subject: 'TripKoach email transport check: {{ref}}',
     html: `<!doctype html><html><body style="margin:0;padding:24px;background:#F1EDE6;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#2B2724">
   <table role="presentation" align="center" width="600" style="width:600px;max-width:100%;background:#fff;border-radius:14px;overflow:hidden">
     <tr><td style="background:#1E1C1A;padding:20px 28px"><table role="presentation" width="100%"><tr><td><img src="{{logoUrl}}" width="38" height="34" alt="TripKoach" style="display:block;border:0"></td><td align="right" style="color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Transport check</td></tr></table></td></tr>
@@ -89,7 +89,7 @@ TripKoach Ghana Ltd · Accra · automated message, no reply needed.`,
   // Registered to prove the renderer handles a real transactional layout. NOT wired to booking yet —
   // the P5 booking-email slice owns wiring this (and any subject/copy refinements) to sendEmail().
   booking_pending: {
-    subject: 'Your TripKoach booking {{ref}} — spot reserved',
+    subject: 'Your TripKoach booking {{ref}}: spot reserved',
     html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Your TripKoach booking {{ref}}</title>
 <style>
@@ -131,7 +131,7 @@ Booking reference: {{ref}}
 Tour: {{tourTitle}}
 Departure: {{departureLabel}}
 Travellers: {{travellers}}
-Total due: {{totalDisplay}} (charged in US dollars — final quote confirmed by your koach)
+Total due: {{totalDisplay}} (charged in US dollars, final quote confirmed by your koach)
 
 View this booking: {{manageUrl}}
 
@@ -147,7 +147,7 @@ TripKoach Ghana Ltd · Accra · Prices in US dollars (USD)`,
 
   // booking-confirmed — payment succeeded (webhook verify → paid). The receipt/"you're going" moment.
   booking_confirmed: {
-    subject: 'Booking {{ref}} confirmed — you’re going to {{tourTitle}}',
+    subject: 'Booking {{ref}} confirmed: you’re going to {{tourTitle}}',
     html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Booking {{ref}} confirmed</title>
 <style>
@@ -161,7 +161,7 @@ a.btn{display:block;background:#1E1C1A;color:#FFFFFF;text-decoration:none;font-w
 <table role="presentation" align="center" class="w" style="background:#FFFFFF;border-radius:14px;overflow:hidden">
   <tr><td style="background:#1E1C1A;padding:20px 28px"><table role="presentation" width="100%"><tr><td><img src="{{logoUrl}}" width="38" height="34" alt="TripKoach" style="display:block;border:0"></td><td align="right" style="color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Booking confirmed</td></tr></table></td></tr>
   <tr><td class="pad" style="padding:32px 28px 8px">
-    <h1 style="margin:0 0 8px;font-size:26px;line-height:1.2;letter-spacing:-.02em;color:#1E1C1A">You’re going, {{firstName}} — it’s confirmed</h1>
+    <h1 style="margin:0 0 8px;font-size:26px;line-height:1.2;letter-spacing:-.02em;color:#1E1C1A">You’re going, {{firstName}}. It’s confirmed</h1>
     <p style="margin:0;font-size:16px;line-height:1.55">Payment received. Your {{travellers}} spot(s) on the {{tourTitle}} for {{departureLabel}} are locked in.</p>
   </td></tr>
   <tr><td class="pad" style="padding:20px 28px 0">
@@ -189,7 +189,7 @@ a.btn{display:block;background:#1E1C1A;color:#FFFFFF;text-decoration:none;font-w
   <tr><td style="background:#1E1C1A;padding:20px 28px"><p style="margin:0;color:#A8A096;font-size:12px;line-height:1.6">TripKoach Ghana Ltd · Accra · Prices in US dollars (USD)</p></td></tr>
 </table>
 </body></html>`,
-    text: `You're going, {{firstName}} — booking {{ref}} is confirmed.
+    text: `You're going, {{firstName}}. Booking {{ref}} is confirmed.
 
 Payment received. Your {{travellers}} spot(s) on the {{tourTitle}} for {{departureLabel}} are locked in.
 
@@ -237,7 +237,7 @@ a.btn{display:block;background:#1E1C1A;color:#FFFFFF;text-decoration:none;font-w
     </table>
   </td></tr>
   <tr><td class="pad" style="padding:22px 28px 0"><a class="btn" href="{{manageUrl}}">Book another date</a></td></tr>
-  <tr><td class="pad" style="padding:18px 28px 0"><p class="mut" style="margin:0">If you were charged, any refund is handled separately by our team. Reply to this email or call 024 555 0100 (Mon–Sat, 8am–6pm GMT) with any questions.</p></td></tr>
+  <tr><td class="pad" style="padding:18px 28px 0"><p class="mut" style="margin:0">If you were charged, any refund is handled separately by our team. Reply to this email or call 024 555 0100 (Mon to Sat, 8am to 6pm GMT) with any questions.</p></td></tr>
   <tr><td style="background:#1E1C1A;padding:20px 28px"><p style="margin:0;color:#A8A096;font-size:12px;line-height:1.6">TripKoach Ghana Ltd · Accra</p></td></tr>
 </table>
 </body></html>`,
@@ -273,7 +273,7 @@ a.btn{display:block;background:#1E1C1A;color:#FFFFFF;text-decoration:none;font-w
   <tr><td style="background:#1E1C1A;padding:20px 28px"><table role="presentation" width="100%"><tr><td><img src="{{logoUrl}}" width="38" height="34" alt="TripKoach" style="display:block;border:0"></td><td align="right" style="color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Booking rescheduled</td></tr></table></td></tr>
   <tr><td class="pad" style="padding:32px 28px 8px">
     <h1 style="margin:0 0 8px;font-size:26px;line-height:1.2;letter-spacing:-.02em;color:#1E1C1A">New date for your {{tourTitle}}, {{firstName}}</h1>
-    <p style="margin:0;font-size:16px;line-height:1.55">We’ve moved your {{travellers}} spot(s) to a new departure. Your booking and payment carry over — nothing else to do.</p>
+    <p style="margin:0;font-size:16px;line-height:1.55">We’ve moved your {{travellers}} spot(s) to a new departure. Your booking and payment carry over, nothing else to do.</p>
   </td></tr>
   <tr><td class="pad" style="padding:20px 28px 0">
     <table role="presentation" width="100%" style="border:1px solid #E4DFD6;border-radius:10px">
@@ -293,7 +293,7 @@ a.btn{display:block;background:#1E1C1A;color:#FFFFFF;text-decoration:none;font-w
 </body></html>`,
     text: `New date for your {{tourTitle}}, {{firstName}}.
 
-We’ve moved your {{travellers}} spot(s) to a new departure. Your booking and payment carry over — nothing else to do.
+We’ve moved your {{travellers}} spot(s) to a new departure. Your booking and payment carry over, nothing else to do.
 
 Booking reference: {{ref}}
 Tour: {{tourTitle}}
@@ -310,7 +310,7 @@ TripKoach Ghana Ltd · Accra`,
   payment_failed: {
     subject: 'Payment didn’t go through for booking {{ref}}',
     html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Payment issue — booking {{ref}}</title>
+<title>Payment issue: booking {{ref}}</title>
 <style>
 body{margin:0;padding:24px 0;background:#F1EDE6;font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#2B2724}
 table{border-collapse:collapse}.w{width:600px;max-width:100%}
@@ -323,7 +323,7 @@ a.btn{display:block;background:#1E1C1A;color:#FFFFFF;text-decoration:none;font-w
   <tr><td style="background:#1E1C1A;padding:20px 28px"><table role="presentation" width="100%"><tr><td><img src="{{logoUrl}}" width="38" height="34" alt="TripKoach" style="display:block;border:0"></td><td align="right" style="color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Payment not completed</td></tr></table></td></tr>
   <tr><td class="pad" style="padding:32px 28px 8px">
     <h1 style="margin:0 0 8px;font-size:26px;line-height:1.2;letter-spacing:-.02em;color:#1E1C1A">We couldn’t process your payment, {{firstName}}</h1>
-    <p style="margin:0;font-size:16px;line-height:1.55">Your payment for the {{tourTitle}} ({{departureLabel}}) didn’t go through. Your spots aren’t confirmed yet — you can try again below.</p>
+    <p style="margin:0;font-size:16px;line-height:1.55">Your payment for the {{tourTitle}} ({{departureLabel}}) didn’t go through. Your spots aren’t confirmed yet, but you can try again below.</p>
   </td></tr>
   <tr><td class="pad" style="padding:20px 28px 0">
     <table role="presentation" width="100%" style="background:#FDECEC;border:1px solid #F2C4C4;border-radius:10px">
@@ -344,7 +344,7 @@ a.btn{display:block;background:#1E1C1A;color:#FFFFFF;text-decoration:none;font-w
     </table>
   </td></tr>
   <tr><td class="pad" style="padding:22px 28px 0"><a class="btn" href="{{manageUrl}}">Try payment again</a></td></tr>
-  <tr><td class="pad" style="padding:18px 28px 0"><p class="mut" style="margin:0"><strong style="color:#8A8078">Staying safe:</strong> Retry only from the button above — you’ll finish on Paystack’s secured checkout page. TripKoach will never ask for your card number, PIN or one-time code by email, phone or text.</p></td></tr>
+  <tr><td class="pad" style="padding:18px 28px 0"><p class="mut" style="margin:0"><strong style="color:#8A8078">Staying safe:</strong> Retry only from the button above. You’ll finish on Paystack’s secured checkout page. TripKoach will never ask for your card number, PIN or one-time code by email, phone or text.</p></td></tr>
   <tr><td style="background:#1E1C1A;padding:20px 28px"><p style="margin:0;color:#A8A096;font-size:12px;line-height:1.6">TripKoach Ghana Ltd · Accra · Prices in US dollars (USD)</p></td></tr>
 </table>
 </body></html>`,
@@ -359,16 +359,16 @@ Amount outstanding: {{totalDisplay}}
 
 Try payment again: {{manageUrl}}
 
-Staying safe: Retry only from the link above — you'll finish on Paystack's secured checkout page. TripKoach will never ask for your card number, PIN or one-time code by email, phone or text.
+Staying safe: Retry only from the link above. You'll finish on Paystack's secured checkout page. TripKoach will never ask for your card number, PIN or one-time code by email, phone or text.
 
 TripKoach Ghana Ltd · Accra · Prices in US dollars (USD)`,
   },
 
   // departure-reminder — cron, N days before a paid booking's departure. {{daysLabel}} e.g. "in 3 days".
   departure_reminder: {
-    subject: 'Your {{tourTitle}} departs {{departureLabel}} — see you soon',
+    subject: 'Your {{tourTitle}} departs {{departureLabel}}, see you soon',
     html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Reminder — {{tourTitle}} {{departureLabel}}</title>
+<title>Reminder: {{tourTitle}} {{departureLabel}}</title>
 <style>
 body{margin:0;padding:24px 0;background:#F1EDE6;font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#2B2724}
 table{border-collapse:collapse}.w{width:600px;max-width:100%}
@@ -437,7 +437,7 @@ a.btn{display:block;background:#1E1C1A;color:#FFFFFF;text-decoration:none;font-w
     <p style="margin:0 0 4px;font-size:16px;line-height:1.55">We received a request to reset the password on your TripKoach account. Tap the button below to choose a new one.</p>
   </td></tr>
   <tr><td class="pad" style="padding:22px 28px 4px"><a class="btn" href="{{resetUrl}}">Choose a new password</a></td></tr>
-  <tr><td class="pad" style="padding:12px 28px 0"><p class="mut" style="margin:0">This link expires in {{ttlMinutes}} minutes and can be used once. If you didn't ask to reset your password, you can safely ignore this email — your password won't change.</p></td></tr>
+  <tr><td class="pad" style="padding:12px 28px 0"><p class="mut" style="margin:0">This link expires in {{ttlMinutes}} minutes and can be used once. If you didn't ask to reset your password, you can safely ignore this email. Your password won't change.</p></td></tr>
   <tr><td class="pad" style="padding:16px 28px 4px"><p class="mut" style="margin:0;word-break:break-all">Button not working? Paste this link into your browser:<br>{{resetUrl}}</p></td></tr>
   <tr><td style="background:#1E1C1A;padding:20px 28px"><p style="margin:0;color:#A8A096;font-size:12px;line-height:1.6">TripKoach Ghana Ltd · Accra · automated message, no reply needed.</p></td></tr>
 </table>
@@ -450,7 +450,7 @@ Open this link to choose a new one:
 {{resetUrl}}
 
 This link expires in {{ttlMinutes}} minutes and can be used once. If you didn't ask
-to reset your password, you can safely ignore this email — your password won't change.
+to reset your password, you can safely ignore this email. Your password won't change.
 
 TripKoach Ghana Ltd · Accra · automated message, no reply needed.`,
   },
@@ -477,7 +477,7 @@ a.btn{display:block;background:#1E1C1A;color:#FFFFFF;text-decoration:none;font-w
     <p style="margin:0 0 4px;font-size:16px;line-height:1.55">Confirm this is your email address so we can send you booking updates and secure your account. Tap the button below to verify.</p>
   </td></tr>
   <tr><td class="pad" style="padding:22px 28px 4px"><a class="btn" href="{{verifyUrl}}">Verify my email</a></td></tr>
-  <tr><td class="pad" style="padding:12px 28px 0"><p class="mut" style="margin:0">This link expires in {{ttlHours}} hours and can be used once. You can keep browsing and booking without verifying — this just confirms your address.</p></td></tr>
+  <tr><td class="pad" style="padding:12px 28px 0"><p class="mut" style="margin:0">This link expires in {{ttlHours}} hours and can be used once. You can keep browsing and booking without verifying. This just confirms your address.</p></td></tr>
   <tr><td class="pad" style="padding:16px 28px 4px"><p class="mut" style="margin:0;word-break:break-all">Button not working? Paste this link into your browser:<br>{{verifyUrl}}</p></td></tr>
   <tr><td style="background:#1E1C1A;padding:20px 28px"><p style="margin:0;color:#A8A096;font-size:12px;line-height:1.6">TripKoach Ghana Ltd · Accra · automated message, no reply needed.</p></td></tr>
 </table>
@@ -490,7 +490,7 @@ Open this link to verify:
 {{verifyUrl}}
 
 This link expires in {{ttlHours}} hours and can be used once. You can keep browsing and
-booking without verifying — this just confirms your address.
+booking without verifying. This just confirms your address.
 
 TripKoach Ghana Ltd · Accra · automated message, no reply needed.`,
   },
@@ -514,7 +514,7 @@ a.btn{display:block;background:#1E1C1A;color:#FFFFFF;text-decoration:none;font-w
   <tr><td style="background:#1E1C1A;padding:20px 28px"><table role="presentation" width="100%"><tr><td><img src="{{logoUrl}}" width="38" height="34" alt="TripKoach" style="display:block;border:0"></td><td align="right" style="color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Share your experience</td></tr></table></td></tr>
   <tr><td class="pad" style="padding:32px 28px 8px">
     <h1 style="margin:0 0 8px;font-size:26px;line-height:1.2;letter-spacing:-.02em;color:#1E1C1A">How was it, {{firstName}}?</h1>
-    <p style="margin:0;font-size:16px;line-height:1.55">Thanks for joining the <strong>{{tourTitle}}</strong> on {{departureLabel}}. Your honest review helps other travellers — it only takes a minute.</p>
+    <p style="margin:0;font-size:16px;line-height:1.55">Thanks for joining the <strong>{{tourTitle}}</strong> on {{departureLabel}}. Your honest review helps other travellers. It only takes a minute.</p>
   </td></tr>
   <tr><td class="pad" style="padding:24px 28px 0"><a class="btn" href="{{reviewUrl}}">Write your review</a></td></tr>
   <tr><td class="pad" style="padding:16px 28px 0"><p class="mut" style="margin:0">This link is personal to you and can be used once. If the button doesn't work, paste this into your browser:<br><span style="word-break:break-all;color:#1E1C1A">{{reviewUrl}}</span></p></td></tr>
@@ -523,7 +523,7 @@ a.btn{display:block;background:#1E1C1A;color:#FFFFFF;text-decoration:none;font-w
 </body></html>`,
     text: `How was it, {{firstName}}?
 
-Thanks for joining the {{tourTitle}} on {{departureLabel}}. Your honest review helps other travellers — it only takes a minute.
+Thanks for joining the {{tourTitle}} on {{departureLabel}}. Your honest review helps other travellers. It only takes a minute.
 
 Write your review (personal, one-time link):
 {{reviewUrl}}
@@ -549,24 +549,24 @@ a.btn{display:block;background:#1E1C1A;color:#FFFFFF;text-decoration:none;font-w
   <tr><td style="background:#1E1C1A;padding:20px 28px"><table role="presentation" width="100%"><tr><td><img src="{{logoUrl}}" width="38" height="34" alt="TripKoach" style="display:block;border:0"></td><td align="right" style="color:#F1EDE6;font-size:13px;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Console invitation</td></tr></table></td></tr>
   <tr><td class="pad" style="padding:32px 28px 8px">
     <h1 style="margin:0 0 8px;font-size:24px;line-height:1.2;letter-spacing:-.02em;color:#1E1C1A">You're invited, {{name}}</h1>
-    <p style="margin:0;font-size:16px;line-height:1.55">You have been added to the TripKoach admin console as <strong>{{role}}</strong>. Set your password to activate your account — you'll be prompted to turn on two-factor authentication.</p>
+    <p style="margin:0;font-size:16px;line-height:1.55">You have been added to the TripKoach admin console as <strong>{{role}}</strong>. Set your password to activate your account. You'll be prompted to turn on two-factor authentication.</p>
   </td></tr>
   <tr><td class="pad" style="padding:22px 28px 0"><a class="btn" href="{{acceptUrl}}">Set your password</a></td></tr>
   <tr><td class="pad" style="padding:14px 28px 0"><p class="mut" style="margin:0">This invite link expires in {{expiryHours}} hours. If it has expired, ask an administrator to resend it. If you weren't expecting this, you can ignore this email.</p></td></tr>
-  <tr><td style="background:#1E1C1A;padding:20px 28px;margin-top:20px"><p style="margin:0;color:#A8A096;font-size:12px;line-height:1.6">TripKoach Ghana Ltd · Accra · Staff console — do not share this link.</p></td></tr>
+  <tr><td style="background:#1E1C1A;padding:20px 28px;margin-top:20px"><p style="margin:0;color:#A8A096;font-size:12px;line-height:1.6">TripKoach Ghana Ltd · Accra · Staff console. Do not share this link.</p></td></tr>
 </table>
 </body></html>`,
     text: `You're invited, {{name}}
 
 You have been added to the TripKoach admin console as {{role}}. Set your password to
-activate your account — you'll be prompted to turn on two-factor authentication.
+activate your account. You'll be prompted to turn on two-factor authentication.
 
 Set your password: {{acceptUrl}}
 
 This invite link expires in {{expiryHours}} hours. If it has expired, ask an administrator to
 resend it. If you weren't expecting this, you can ignore this email.
 
-TripKoach Ghana Ltd · Accra · Staff console — do not share this link.`,
+TripKoach Ghana Ltd · Accra · Staff console. Do not share this link.`,
   },
 
   // TRI-1015 · Lead capture. Internal ops notification sent when a visitor submits the Contact or
@@ -574,7 +574,7 @@ TripKoach Ghana Ltd · Accra · Staff console — do not share this link.`,
   // a koach can reply straight from their inbox. {{details}} is a pre-formatted multi-line block
   // (label: value per line) — the html renders it with white-space:pre-line so the newlines show.
   enquiry_received: {
-    subject: 'New {{enquiryType}} — {{email}}',
+    subject: 'New {{enquiryType}}: {{email}}',
     html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>New {{enquiryType}}</title>
 <style>

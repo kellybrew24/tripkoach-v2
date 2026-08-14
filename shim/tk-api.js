@@ -1,7 +1,7 @@
 /* ==========================================================================
- * TripKoach v2 — tiny same-origin API client (TRI-861 Phase 1 shim).
+ * TripKoach v2: tiny same-origin API client (TRI-861 Phase 1 shim).
  *
- * `window.TK_API` — a dependency-free fetch wrapper that talks to the API base
+ * `window.TK_API`, a dependency-free fetch wrapper that talks to the API base
  * from window.TK_CONFIG.apiBase. Same-origin (Caddy proxies `/api/*` to the
  * Fastify service on the box), so the session cookie "just works" with
  * credentials:"include" and there is no CORS. Errors are normalised to a
@@ -28,7 +28,7 @@
 
   function join(path) {
     var p = String(path || "");
-    if (/^https?:\/\//i.test(p)) return p; // absolute — used by tests/mocks
+    if (/^https?:\/\//i.test(p)) return p; // absolute, used by tests/mocks
     if (p.charAt(0) !== "/") p = "/" + p;
     return base() + p;
   }

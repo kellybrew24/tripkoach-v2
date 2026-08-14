@@ -1,13 +1,13 @@
 const NS = window.TripKoachDesignSystem_c9e4af;
 const { Button, Input, PasswordInput, FormField, Checkbox, Alert, Icon } = NS;
 
-// TRI-923 — the console sign-in aside rotates a small curated set of imagery + a
+// TRI-923: the console sign-in aside rotates a small curated set of imagery + a
 // restrained time-of-day greeting by the operator's LOCAL time, so the panel feels
 // alive without changing the branded, staff-only copy. Imagery is served from
-// cdn.tripkoach.com (TRI-914/918 hard rule — no dev-hosted / base64 heroes); the
+// cdn.tripkoach.com (TRI-914/918 hard rule, no dev-hosted / base64 heroes); the
 // per-bucket scrim keeps the aside dark enough for white copy at any hour.
 const TK_ADMIN_PROMO_BUCKET = (d) => { const h = (d || new Date()).getHours(); return h < 5 ? "night" : h < 11 ? "morning" : h < 17 ? "afternoon" : h < 21 ? "evening" : "night"; };
-// TRI-925 — returning-operator detection. We stamp a durable, best-effort flag once
+// TRI-925: returning-operator detection. We stamp a durable, best-effort flag once
 // an operator completes sign-in on this device, so the console aside greets a
 // returning operator with "Welcome back" and a first-time device with the neutral
 // time-of-day greeting. Privacy modes that throw on storage simply read as "new".
@@ -28,7 +28,7 @@ const TK_ADMIN_PROMO = {
   night:     { img: "https://cdn.tripkoach.com/img/posts/cape-coast-castles-guide-hero.jpg",          greet: "Good evening",   scrim: "linear-gradient(180deg, rgba(26,26,72,.42), rgba(6,8,20,.84))" },
 };
 
-// TRI-1120 — the aside greeting must fit the flow. Sign-in reuses the returning-vs-new
+// TRI-1120: the aside greeting must fit the flow. Sign-in reuses the returning-vs-new
 // operator treatment (TRI-925). First-run flows pass an `intent` so a brand-new invitee
 // never sees "Welcome back / pick up where you left off" (they've never been here), and a
 // password recovery reads as a recovery, not a fresh sign-in.
@@ -38,10 +38,10 @@ const TK_ADMIN_ASIDE_INTENT = {
 };
 function AuthFrame({ children, foot, intent }) {
   const promo = TK_ADMIN_PROMO[TK_ADMIN_PROMO_BUCKET()];
-  const returning = !intent && tkAdminIsReturning(); // TRI-925 — new device vs returning operator; suppressed on first-run flows (TRI-1120)
+  const returning = !intent && tkAdminIsReturning(); // TRI-925: new device vs returning operator; suppressed on first-run flows (TRI-1120)
   const aside = TK_ADMIN_ASIDE_INTENT[intent] || {
     over: returning ? "Welcome back" : promo.greet,
-    body: returning ? "Sign in to pick up where you left off — bookings, departures and payments." : "Tours, departures, bookings and payments — one console for the whole operation.",
+    body: returning ? "Sign in to pick up where you left off: bookings, departures and payments." : "Tours, departures, bookings and payments, one console for the whole operation.",
   };
   return (
     <div style={{ minHeight: "100vh", display: "grid", gridTemplateColumns: "1fr 1fr", background: "var(--shell-content-bg)" }}>
@@ -85,7 +85,7 @@ function AdminLogin({ go, state }) {
     // TRI-990: read by stable id, NOT by input[type]. The DS PasswordInput's
     // "Show password" toggle flips the input's type from "password" to "text"
     // when revealed, so a `input[type="password"]` selector returns null and the
-    // password reads as empty — the backend then 400s "email and password are
+    // password reads as empty, so the backend then 400s "email and password are
     // required" on a fully-filled form. Ids ("a-email"/"a-pw") are stamped onto
     // the inner inputs by FormField and never change with reveal state.
     const email = (form.querySelector('#a-email') || {}).value || "";
@@ -101,8 +101,8 @@ function AdminLogin({ go, state }) {
       // TRI-912 enforcement: MFA is required for this role but the account has no factor yet. The server
       // issued an enroll-gated half-auth session; route to the enroll gate to set one up before entering.
       if (res && (res.mfaEnrollmentRequired || res.mfa_enrollment_required)) { setBusy(false); go("mfa-enroll"); return; }
-      // Logged in — record session + hydrate, then go to the dashboard.
-      tkAdminMarkReturning(); // TRI-925 — this device has now completed a staff sign-in
+      // Logged in: record session + hydrate, then go to the dashboard.
+      tkAdminMarkReturning(); // TRI-925: this device has now completed a staff sign-in
       Promise.resolve(window.TK_ADMIN_ENTER(res)).then(() => { setBusy(false); go("dashboard"); }, () => { setBusy(false); go("dashboard"); });
     }, (err) => {
       setBusy(false);
@@ -136,7 +136,7 @@ function MfaChallenge({ go, state }) {
   const LIVE = !!(window.TK_CONFIG && window.TK_CONFIG.USE_LIVE_API);
   const [code, setCode] = React.useState(["", "", "", "", "", ""]);
   const [recovery, setRecovery] = React.useState("");
-  const [useRecovery, setUseRecovery] = React.useState(false); // LIVE only — see below
+  const [useRecovery, setUseRecovery] = React.useState(false); // LIVE only, see below
   const [busy, setBusy] = React.useState(false);
   const [liveErr, setLiveErr] = React.useState(false);
   // TRI-952: name the real account being verified (captured at the login step),
@@ -149,7 +149,7 @@ function MfaChallenge({ go, state }) {
     setBusy(true); setLiveErr(false);
     // POST /auth/mfa accepts a live TOTP OR a single-use recovery code (TRI-895).
     window.TK_ADMIN_API.verifyMfa(value).then((res) => {
-      tkAdminMarkReturning(); // TRI-925 — completed sign-in (TOTP / recovery)
+      tkAdminMarkReturning(); // TRI-925: completed sign-in (TOTP / recovery)
       Promise.resolve(window.TK_ADMIN_ENTER(res)).then(() => { setBusy(false); go("dashboard"); }, () => { setBusy(false); go("dashboard"); });
     }, () => { setBusy(false); setLiveErr(true); });
   };
@@ -201,7 +201,7 @@ function MfaChallenge({ go, state }) {
 // signs in: the server returned { mfaEnrollmentRequired: true } and issued an enroll-gated half-auth
 // session that can reach only /auth/mfa/*. We reuse the same enroll → QR → verify → recovery-codes flow
 // as the in-console MfaEnrollDrawer (TRI-899/911); on a successful verify the server promotes the session
-// and returns { staff, permissions, recoveryCodes }, so we hydrate and land on the dashboard. LIVE only —
+// and returns { staff, permissions, recoveryCodes }, so we hydrate and land on the dashboard. LIVE only:
 // with the flag off this screen is never routed to, so the prototype render stays byte-identical.
 function MfaEnrollGate({ go }) {
   const LIVE = !!(window.TK_CONFIG && window.TK_CONFIG.USE_LIVE_API);
@@ -239,7 +239,7 @@ function MfaEnrollGate({ go }) {
   };
   const enter = () => {
     const res = enterRes.current || {};
-    tkAdminMarkReturning(); // TRI-925 — completed enrollment + sign-in on this device
+    tkAdminMarkReturning(); // TRI-925: completed enrollment + sign-in on this device
     Promise.resolve(window.TK_ADMIN_ENTER(res)).then(() => go("dashboard"), () => go("dashboard"));
   };
   const secretPretty = data && data.secret ? data.secret.replace(/\s+/g, "").replace(/(.{4})/g, "$1 ").trim() : "";
@@ -280,7 +280,7 @@ function MfaEnrollGate({ go }) {
       ) : (
         <>
           <h2 className="tk-h2">Save your recovery codes</h2>
-          <p className="tk-body-sm tk-muted" style={{ marginTop: 4, marginBottom: "var(--space-5)" }}>Two-factor authentication is now on. Store these one-time recovery codes somewhere safe — each works once if you lose access to your authenticator.</p>
+          <p className="tk-body-sm tk-muted" style={{ marginTop: 4, marginBottom: "var(--space-5)" }}>Two-factor authentication is now on. Store these one-time recovery codes somewhere safe. Each works once if you lose access to your authenticator.</p>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: "var(--space-4)", background: "var(--surface-muted)", borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)", marginBottom: "var(--space-3)" }}>
             {(recoveryCodes || []).map((c) => <span key={c} className="tk-num" style={{ fontSize: 14, letterSpacing: "0.04em", color: "var(--text-strong)" }}>{c}</span>)}
           </div>
@@ -292,7 +292,7 @@ function MfaEnrollGate({ go }) {
   );
 }
 
-// TRI-1000 · Forgot password — request stage (from the sign-in screen). Previously this only flipped a
+// TRI-1000 · Forgot password: request stage (from the sign-in screen). Previously this only flipped a
 // local `sent` flag without calling anything. Live → POST /api/admin/auth/password-reset/request, which
 // always returns 200 (no account enumeration), so we show the same "check your inbox" state regardless.
 // Flag off → keep the prototype behaviour (byte-identical).
@@ -331,7 +331,7 @@ function ResetPassword({ go }) {
   );
 }
 
-// TRI-1000 · Forgot password — consume stage. Reached via the emailed link
+// TRI-1000 · Forgot password: consume stage. Reached via the emailed link
 // (${ADMIN_BASE_URL}/reset-password?token=…). Sets a new password with the single-use token, then routes
 // back to sign-in. The token is read from the query string once on mount.
 function ResetPasswordConsume({ go }) {
@@ -380,11 +380,11 @@ function ResetPasswordConsume({ go }) {
   );
 }
 
-// TRI-1032 · Accept invite — set-password stage. Reached via the emailed staff-invite link
+// TRI-1032 · Accept invite: set-password stage. Reached via the emailed staff-invite link
 // (${ADMIN_BASE_URL}/accept-invite?token=…). Previews who the invite is for, then sets the initial
 // password with the single-use token (POST /api/admin/staff/accept), which activates the account.
 // On success the invitee signs in normally (and enrols MFA on first login if their role enforces it).
-// The token is read from the query string once on mount. This mirrors ResetPasswordConsume (TRI-1000) —
+// The token is read from the query string once on mount. This mirrors ResetPasswordConsume (TRI-1000):
 // the FE was never built for the invite path, so the emailed link landed on the sign-in screen.
 function AcceptInvite({ go }) {
   const LIVE = !!(window.TK_CONFIG && window.TK_CONFIG.USE_LIVE_API);

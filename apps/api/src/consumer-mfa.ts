@@ -61,7 +61,7 @@ export function createConsumerMfaService(db: Db, _cfg: Config) {
   async function enroll(userId: string, ip: string | null) {
     const u = await loadUser(userId);
     if (!u) throw notFound('account');
-    if (u.two_factor_enabled) throw conflict('Two-factor is already on — turn it off first to re-enroll.');
+    if (u.two_factor_enabled) throw conflict('Two-factor is already on. Turn it off first to re-enroll.');
     const secret = generateSecret();
     // A fresh enroll supersedes any abandoned unconfirmed factor.
     await db.query(`DELETE FROM user_mfa_factor WHERE user_id=$1 AND confirmed_at IS NULL`, [userId]);
@@ -74,9 +74,9 @@ export function createConsumerMfaService(db: Db, _cfg: Config) {
   async function verifyEnroll(userId: string, code: unknown, ip: string | null) {
     const factor = (await db.query(
       `SELECT * FROM user_mfa_factor WHERE user_id=$1 AND confirmed_at IS NULL ORDER BY added_at DESC LIMIT 1`, [userId])).rows[0];
-    if (!factor) throw conflict('Start setup first — no pending two-factor enrollment.');
+    if (!factor) throw conflict('Start setup first: no pending two-factor enrollment.');
     if (!verifyTotp(factor.secret, String(code ?? ''))) {
-      throw validation('That code did not match — check your authenticator app and try again.', 'code');
+      throw validation('That code did not match. Check your authenticator app and try again.', 'code');
     }
     const codes = genRecoveryCodes();
     await db.tx(async (q) => {

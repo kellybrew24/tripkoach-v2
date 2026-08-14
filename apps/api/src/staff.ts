@@ -94,7 +94,7 @@ export function createStaffService(db: Db, cfg: Config) {
       lockedUntil: r.locked_until ?? null,
       initials: initials(name || r.email),
       lastActiveAt: r.last_active_at ?? null,
-      last: r.last_active_at ? formatReviewDate(r.last_active_at) : '—',
+      last: r.last_active_at ? formatReviewDate(r.last_active_at) : '-',
       createdAt: r.created_at,
     };
   }
@@ -171,7 +171,7 @@ export function createStaffService(db: Db, cfg: Config) {
     const existing = (await db.query(`SELECT * FROM staff_user WHERE lower(email) = $1`, [email])).rows[0];
     if (existing) {
       if (existing.status === 'active') throw conflict(`${email} is already an active staff member`);
-      if (existing.status === 'disabled') throw conflict(`${email} is disabled — re-enable the account instead of re-inviting`);
+      if (existing.status === 'disabled') throw conflict(`${email} is disabled. Re-enable the account instead of re-inviting`);
       // status 'invited': refresh role/name and re-issue a fresh invite (older tokens simply expire).
       await db.query(
         `UPDATE staff_user SET role=$2, name=COALESCE($3, name), job_title=COALESCE($4, job_title), updated_at=now() WHERE id=$1`,
@@ -211,7 +211,7 @@ export function createStaffService(db: Db, cfg: Config) {
   async function revokeInvite(id: string, actor: Actor) {
     const cur = await getStaffRow(id);
     if (!cur) throw notFound('staff member');
-    if (cur.status !== 'invited') throw conflict(`can only revoke a pending (invited) invite; ${cur.email} is ${cur.status} — disable the account instead`);
+    if (cur.status !== 'invited') throw conflict(`can only revoke a pending (invited) invite; ${cur.email} is ${cur.status}. Disable the account instead`);
     await db.query(`DELETE FROM staff_user WHERE id=$1`, [id]);
     await audit(db, { actorId: actor.id, action: 'staff.invite_revoked', targetType: 'staff_user', targetId: id, before: { email: cur.email, role: cur.role, status: cur.status }, ip: actor.ip });
     return { ok: true, id, email: cur.email };
@@ -287,7 +287,7 @@ export function createStaffService(db: Db, cfg: Config) {
         throw new ValidationError('"status" can only be set to "active" or "disabled" here (use the invite flow for pending accounts)', 'status');
       }
       if (status === 'active' && cur.status === 'invited') {
-        throw conflict('this account has not accepted its invite yet — resend the invite instead of activating it');
+        throw conflict('this account has not accepted its invite yet. Resend the invite instead of activating it');
       }
       nextStatus = status;
       set('status', status);
@@ -296,7 +296,7 @@ export function createStaffService(db: Db, cfg: Config) {
     // Last-admin guard: block demoting/disabling the only remaining active admin.
     const losingAdmin = cur.role === 'admin' && cur.status === 'active' && (nextRole !== 'admin' || nextStatus !== 'active');
     if (losingAdmin && (await countOtherActiveAdmins(cur.id)) === 0) {
-      throw conflict('this is the last active admin — promote another admin before changing this account');
+      throw conflict('this is the last active admin. Promote another admin before changing this account');
     }
 
     if (!sets.length) throw new ValidationError('no updatable fields provided (role, name, jobTitle, status)');
@@ -310,10 +310,10 @@ export function createStaffService(db: Db, cfg: Config) {
     const cur = await getStaffRow(id);
     if (!cur) throw notFound('staff member');
     if (status === 'active' && cur.status === 'invited') {
-      throw conflict('this account has not accepted its invite yet — resend the invite instead');
+      throw conflict('this account has not accepted its invite yet. Resend the invite instead');
     }
     if (status === 'disabled' && cur.role === 'admin' && cur.status === 'active' && (await countOtherActiveAdmins(cur.id)) === 0) {
-      throw conflict('this is the last active admin — promote another admin before disabling this account');
+      throw conflict('this is the last active admin. Promote another admin before disabling this account');
     }
     if (cur.status === status) return staffDTO(cur);
     await db.query(`UPDATE staff_user SET status=$2, updated_at=now() WHERE id=$1`, [id, status]);
@@ -349,7 +349,7 @@ export function createStaffService(db: Db, cfg: Config) {
   async function enrollMfa(staffId: string, actor: Actor) {
     const staff = await getStaffRow(staffId);
     if (!staff) throw notFound('staff member');
-    if (staff.mfa_enabled) throw conflict('MFA is already enabled — disable it first to re-enroll');
+    if (staff.mfa_enabled) throw conflict('MFA is already enabled. Disable it first to re-enroll');
     const secret = generateSecret();
     // Replace any prior unconfirmed factor; a fresh enroll supersedes an abandoned one.
     await db.query(`DELETE FROM mfa_factor WHERE staff_user_id=$1 AND confirmed_at IS NULL`, [staffId]);
@@ -362,9 +362,9 @@ export function createStaffService(db: Db, cfg: Config) {
   async function verifyMfaEnrollment(staffId: string, code: string, actor: Actor) {
     const factor = (await db.query(
       `SELECT * FROM mfa_factor WHERE staff_user_id=$1 AND confirmed_at IS NULL ORDER BY added_at DESC LIMIT 1`, [staffId])).rows[0];
-    if (!factor) throw conflict('no pending MFA enrollment — start enroll first');
+    if (!factor) throw conflict('no pending MFA enrollment. Start enroll first');
     if (!verifyTotp(factor.secret, String(code ?? ''))) {
-      throw new ValidationError('that code did not match — check your authenticator app and try again', 'code');
+      throw new ValidationError('that code did not match. Check your authenticator app and try again', 'code');
     }
     const codes = genRecoveryCodes();
     await db.tx(async (q) => {

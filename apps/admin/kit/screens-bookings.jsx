@@ -11,7 +11,7 @@ function paymentBadge(p) {
 // TRI-1010: the Bookings FilterBar Date/Tour/Payment facets used to be no-op onClicks.
 // They're now real client-side filters over the already-hydrated A.bookings rows (same
 // menu-dropdown pattern as Customers). Departure dates arrive as display strings
-// ("Sat 22 Aug 2026") — new Date() parses those, so the date presets compare against today.
+// ("Sat 22 Aug 2026"). new Date() parses those, so the date presets compare against today.
 function parseBookingDate(s) {
   const d = s ? new Date(s) : null;
   return d && !isNaN(d.getTime()) ? d : null;
@@ -50,7 +50,7 @@ function fmtYMD(ymd) {
   return d.getDate() + " " + MON[d.getMonth()] + " " + d.getFullYear();
 }
 function rangeLabel(range) {
-  if (range.from && range.to) return fmtYMD(range.from) + " – " + fmtYMD(range.to);
+  if (range.from && range.to) return fmtYMD(range.from) + " to " + fmtYMD(range.to);
   if (range.from) return "From " + fmtYMD(range.from);
   if (range.to) return "Until " + fmtYMD(range.to);
   return "Date range";
@@ -94,7 +94,7 @@ function DateRangeMenu({ range, setRange, dateF, setDateF, presets, onDone }) {
   );
 }
 
-// TRI-1097: shared client-side row sort. The DS DataTable is presentational — it renders
+// TRI-1097: shared client-side row sort. The DS DataTable is presentational. It renders
 // the sort chevron/aria-sort and reports header clicks via onSortChange, but it NEVER
 // reorders rows. Every admin table therefore has to sort its own rows from the {key,dir}
 // state before handing them to DataTable; historically none did, so the sort headers on
@@ -110,7 +110,7 @@ function tkSortRows(rows, sort) {
   const vals = rows.map(r => r && r[key]).filter(v => v != null && v !== "");
   const asNum = (v) => typeof v === "number" ? v : parseFloat(String(v).replace(/[^0-9.\-]/g, ""));
   // Column is numeric only if EVERY non-empty value is a real number or a purely
-  // numeric/currency string ("$1,240", "12") — this keeps ref codes like "TK-4821" (letters)
+  // numeric/currency string ("$1,240", "12"). This keeps ref codes like "TK-4821" (letters)
   // out of the numeric path so they sort as text.
   const allNum = vals.length > 0 && vals.every(v => typeof v === "number" || (/^[-+]?[\d.,\s$₵%]+$/.test(String(v).trim()) && !isNaN(asNum(v))));
   // Otherwise date if every non-empty value parses to a valid date (formatted date strings do).
@@ -164,7 +164,7 @@ function BookingsAdmin({ go, state, setState }) {
   const [q, setQ] = React.useState("");
   const [sel, setSel] = React.useState([]);
   const [sort, setSort] = React.useState({ key: "created", dir: "desc" });
-  // TRI-1010: FilterBar facet state — which dropdown is open + the active date/tour/payment filters.
+  // TRI-1010: FilterBar facet state: which dropdown is open + the active date/tour/payment filters.
   const [menu, setMenu] = React.useState(null);
   const [dateF, setDateF] = React.useState(null);
   const [tourF, setTourF] = React.useState(null);
@@ -287,11 +287,11 @@ function BookingDrawer({ booking, onClose }) {
   const moveOptions = (A.departures || [])
     .filter((d) => d.tourId === booking.tourId && d.id !== booking.departureId
       && d.status === "scheduled" && Number(d.spotsLeft) >= Number(booking.travellers))
-    .map((d) => ({ value: d.id, label: (d.date || "Departure") + (d.time ? " · " + d.time : "") + " — " + d.spotsLeft + " left" }));
+    .map((d) => ({ value: d.id, label: (d.date || "Departure") + (d.time ? " · " + d.time : "") + " (" + d.spotsLeft + " left)" }));
   const canReschedule = cur !== "cancelled" && cur !== "completed" && cur !== "failed";
 
   // TRI-978 #2: the drawer History used to fabricate precise clock times
-  // ("09:14"/"10:02") and a made-up staff name ("Kofi A.") — placeholder data.
+  // ("09:14"/"10:02") and a made-up staff name ("Kofi A."). Placeholder data.
   // Show only what's actually true for this booking: the real creation date, the
   // real payment outcome, and the real current status. "Just now"/"You" appear
   // only for an action taken in THIS drawer session (`status` is set on confirm/
@@ -304,7 +304,7 @@ function BookingDrawer({ booking, onClose }) {
     ...(booking.payment === "paid" ? [{ type: "paid", text: "Payment received via Paystack", actor: "Paystack", time: created, tone: "success" }] : []),
     ...(booking.payment === "failed" ? [{ type: "failed", text: "Payment failed", actor: "Paystack", time: created, tone: "danger" }] : []),
     ...(cur === "confirmed" ? [Object.assign({ type: "confirmed", text: "Booking confirmed", tone: "success" }, stamp("You", "Just now", "Staff"))] : []),
-    ...(cur === "cancelled" ? [Object.assign({ type: "cancelled", text: "Booking cancelled" + (reason ? " — " + reason : ""), tone: "danger" }, stamp("You", "Just now", "Staff"))] : []),
+    ...(cur === "cancelled" ? [Object.assign({ type: "cancelled", text: "Booking cancelled" + (reason ? ": " + reason : ""), tone: "danger" }, stamp("You", "Just now", "Staff"))] : []),
   ];
 
   const moveBtn = canReschedule
@@ -338,12 +338,12 @@ function BookingDrawer({ booking, onClose }) {
         </section>
         <section>
           <h3 className="tk-h6" style={{ marginBottom: 8 }}>Contact</h3>
-          {/* TRI-1035: surface the booker's real contact so staff can reach out — this is the
+          {/* TRI-1035: surface the booker's real contact so staff can reach out. This is the
               only place a GUEST (no-account) booker's email/phone shows in the console. */}
           <div className="tk-summary" style={{ padding: 0 }}>
-            <div className="tk-summary__line"><span>Name</span><span style={{ fontWeight: 600, color: "var(--text-strong)" }}>{booking.customer || "—"}</span></div>
-            <div className="tk-summary__line"><span>Email</span><span style={{ fontWeight: 600, color: "var(--text-strong)" }}>{booking.customerEmail ? <a href={"mailto:" + booking.customerEmail} style={{ color: "var(--brand-ink)" }}>{booking.customerEmail}</a> : "—"}</span></div>
-            <div className="tk-summary__line"><span>Phone</span><span style={{ fontWeight: 600, color: "var(--text-strong)" }}>{booking.customerPhone ? <a href={"tel:" + booking.customerPhone} style={{ color: "var(--brand-ink)" }}>{booking.customerPhone}</a> : "—"}</span></div>
+            <div className="tk-summary__line"><span>Name</span><span style={{ fontWeight: 600, color: "var(--text-strong)" }}>{booking.customer || "-"}</span></div>
+            <div className="tk-summary__line"><span>Email</span><span style={{ fontWeight: 600, color: "var(--text-strong)" }}>{booking.customerEmail ? <a href={"mailto:" + booking.customerEmail} style={{ color: "var(--brand-ink)" }}>{booking.customerEmail}</a> : "-"}</span></div>
+            <div className="tk-summary__line"><span>Phone</span><span style={{ fontWeight: 600, color: "var(--text-strong)" }}>{booking.customerPhone ? <a href={"tel:" + booking.customerPhone} style={{ color: "var(--brand-ink)" }}>{booking.customerPhone}</a> : "-"}</span></div>
           </div>
         </section>
         <section>
@@ -370,14 +370,14 @@ function BookingDrawer({ booking, onClose }) {
       </Modal>
 
       <Modal open={moveOpen} title={"Move booking " + booking.ref + " to another departure"}
-        description={"Choose a scheduled departure of " + booking.tour + " with room for " + booking.travellers + " traveller(s). The payment carries over — the amount is unchanged."}
+        description={"Choose a scheduled departure of " + booking.tour + " with room for " + booking.travellers + " traveller(s). The payment carries over. The amount is unchanged."}
         onClose={() => setMoveOpen(false)}
         actions={<><Button variant="secondary" onClick={() => setMoveOpen(false)}>Cancel</Button><Button iconStart="calendar-days" disabled={!targetDep} onClick={() => {
           const chosen = moveOptions.find((o) => o.value === targetDep);
           window.TK_ADMIN_ACT(
             () => window.TK_ADMIN_API.rescheduleBooking(booking.ref, targetDep, { notify: notifyMove }),
             (res) => {
-              const newDate = (res && (res.newDeparture || res.date)) || (chosen ? chosen.label.split(" — ")[0] : booking.date);
+              const newDate = (res && (res.newDeparture || res.date)) || (chosen ? chosen.label.split(" (")[0] : booking.date);
               setMovedDate(newDate);
               booking.date = newDate; booking.departureId = targetDep; // optimistic local sync
               setMoveOpen(false);

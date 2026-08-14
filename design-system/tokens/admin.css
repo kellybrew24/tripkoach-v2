@@ -1,4 +1,4 @@
-/* Admin console tokens — data-dense back office. Shares the palette; adds
+/* Admin console tokens: data-dense back office. Shares the palette; adds
    table neutrals and a compact type scale. */
 :root{
   /* Table + data surfaces */
@@ -18,7 +18,7 @@
   --text-dense-sm-size:12px;--text-dense-sm-lh:1.3;
   --text-kpi-size:34px;--text-kpi-lh:1.05;/* @kind font */
 
-  /* Chart palette — sequenced, distinguishable without relying on hue alone */
+  /* Chart palette: sequenced, distinguishable without relying on hue alone */
   --chart-1:var(--gold-500);--chart-2:var(--blue-600);--chart-3:var(--green-600);
   --chart-4:var(--n-500);--chart-5:var(--gold-700);--chart-6:var(--red-500);
   --chart-grid:var(--n-200);--chart-axis:var(--n-400);

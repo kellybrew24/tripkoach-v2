@@ -66,16 +66,16 @@ function ToursAdmin({ go, state, setState }) {
             { key: "published", header: "Status", render: r => r.published ? <Badge tone="soft" style={{ color: "var(--success-fg)", background: "var(--success-bg)" }}>Live</Badge> : <Badge tone="neutral">Draft</Badge> },
             { key: "price", header: "From", align: "end", sortable: true, render: r => <Price amount={r.price} currency="USD" size="sm" /> },
             // TRI-998: a published tour with no upcoming (bookable) departures shows a
-            // warning here — those customers hit a "No upcoming departures" empty state.
+            // warning here. Those customers hit a "No upcoming departures" empty state.
             { key: "departures", header: "Departures", align: "end", render: r => (
               r.published && r.upcomingDepartures === 0
                 ? <Badge tone="soft" style={{ color: "var(--warning-fg)", background: "var(--warning-bg)" }}
-                    title="Published, but no upcoming departures — customers see a “No upcoming departures” empty state. Add a departure.">
+                    title="Published, but no upcoming departures. Customers see a “No upcoming departures” empty state. Add a departure.">
                     <Icon name="triangle-alert" size={12} style={{ verticalAlign: "-1px", marginInlineEnd: 4 }} />No upcoming
                   </Badge>
                 : r.departures
             ) },
-            { key: "rating", header: "Rating", align: "end", render: r => r.rating ? "★ " + r.rating : "—" },
+            { key: "rating", header: "Rating", align: "end", render: r => r.rating ? "★ " + r.rating : "-" },
           ]}
           rows={rows} getRowId={r => r.id}
           rowActions={(r) => (
@@ -104,7 +104,7 @@ function TourEdit({ go, state }) {
 
   // TRI-928 / data-safety: live edits load the FULL tour detail before rendering.
   // The tours *list* projection omits blurb/highlights/tiers/images, and
-  // updateTour treats an empty string/array as a write — so editing off the list
+  // updateTour treats an empty string/array as a write, so editing off the list
   // and saving would blank those fields. Fixtures (flag off) already hold the
   // rich record, so seed synchronously there.
   const [detail, setDetail] = React.useState(isNew ? blank : (live ? null : (listTour || blank)));
@@ -128,7 +128,7 @@ function TourEdit({ go, state }) {
   // Tracks (TRI-989): route variants a traveller picks on the tour page. Persisted
   // as `packages` on the tour. Controlled state (repeatable rows), seeded from the
   // loaded detail alongside the gallery. Each track carries a local `_uid` for keys,
-  // its stored `slug` (blank for new tracks — server derives one from the name), and
+  // its stored `slug` (blank for new tracks, server derives one from the name), and
   // its own price tiers. `defaultTrack` holds the _uid of the preselected track.
   const [tracks, setTracks] = React.useState([]);
   const [defaultTrack, setDefaultTrack] = React.useState(null);
@@ -136,7 +136,7 @@ function TourEdit({ go, state }) {
   const nextTrackId = () => "t" + (tuidRef.current++);
 
   // Flat "Group pricing" tiers (TRI-1003): tour-level per-person price by party size,
-  // for single-itinerary tours (no tracks). Persisted as `tiers` on the tour — separate
+  // for single-itinerary tours (no tracks). Persisted as `tiers` on the tour, separate
   // rows from per-track tiers (price_tier.tour_id vs .package_id). Controlled state,
   // seeded from the loaded detail like the gallery/tracks so Save actually persists edits.
   const [tiers, setTiers] = React.useState([]);
@@ -189,9 +189,9 @@ function TourEdit({ go, state }) {
   const removeTier = (i) => { setTiers(ts => ts.filter((_, j) => j !== i)); touch(); };
   const setTierField = (i, field, value) => { setTiers(ts => ts.map((t, j) => j === i ? Object.assign({}, t, { [field]: value }) : t)); touch(); };
 
-  const commitRegion = () => { const v = newRegion.trim(); if (!v) return; window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.createRegion(v), () => { window.TK_ADD_REGION(v); setRegions(window.TK_DATA.regions.slice()); setRegion(v); setNewRegion(""); setAddingRegion(false); touch(); setToast("Region “" + v + "” added — now live in browse filters and the Regions page"); }); };
+  const commitRegion = () => { const v = newRegion.trim(); if (!v) return; window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.createRegion(v), () => { window.TK_ADD_REGION(v); setRegions(window.TK_DATA.regions.slice()); setRegion(v); setNewRegion(""); setAddingRegion(false); touch(); setToast("Region “" + v + "” added. Now live in browse filters and the Regions page"); }); };
 
-  // Gallery handlers — cover tracked by tile id so reorder/remove never mislabels it.
+  // Gallery handlers: cover tracked by tile id so reorder/remove never mislabels it.
   const removeMedia = (id) => { setMedia(ms => { const next = ms.filter(m => m.id !== id); setCover(c => c === id ? (next.length ? next[0].id : null) : c); return next; }); touch(); };
   const reorderMedia = (from, to) => { setMedia(ms => { if (to < 0 || to >= ms.length || from < 0 || from >= ms.length) return ms; const next = ms.slice(); const x = next.splice(from, 1)[0]; next.splice(to, 0, x); return next; }); touch(); };
   const setCoverMedia = (id) => { setCover(id); touch(); };
@@ -228,7 +228,7 @@ function TourEdit({ go, state }) {
       blurb: val("e-blurb"), highlights: lines("e-high"), included: lines("e-inc"), excluded: lines("e-exc"),
       currency: val("e-cur") || "USD", published: published,
     };
-    // Only persist images when we hold the authoritative gallery — a failed detail
+    // Only persist images when we hold the authoritative gallery. A failed detail
     // load must not blank stored images with an empty array.
     if (!loadErr) { body.images = ordered; body.image = ordered[0] || ""; }
     // Tracks (TRI-989) → packages[]. Same authoritative-load guard as images: a
@@ -278,7 +278,7 @@ function TourEdit({ go, state }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <div style={{ maxWidth: 900 }}>
-        {loadErr && <Alert tone="warning" title="Couldn't load the full tour">We showed the summary we had. Reload before saving — saving now may overwrite fields that didn't load. Images won't be changed.</Alert>}
+        {loadErr && <Alert tone="warning" title="Couldn't load the full tour">We showed the summary we had. Reload before saving. Saving now may overwrite fields that didn't load. Images won't be changed.</Alert>}
         <Section title="Basics" hint="The name, region and category travellers see on the tour card.">
           <FormField id="e-title" label="Tour title" required><Input defaultValue={t.title} onChange={touch} /></FormField>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
@@ -340,7 +340,7 @@ function TourEdit({ go, state }) {
 
         <Section title="Tracks" hint="Optional route variants a traveller picks on the tour page (e.g. the Accra City Tour's three half-day routes). Leave empty for a single-itinerary tour.">
           {tracks.length === 0 ? (
-            <p className="tk-caption" style={{ margin: "0 0 4px" }}>No tracks — this tour books as a single itinerary.</p>
+            <p className="tk-caption" style={{ margin: "0 0 4px" }}>No tracks. This tour books as a single itinerary.</p>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               {tracks.map((tr, ti) => (
@@ -389,7 +389,7 @@ function TourEdit({ go, state }) {
         </Section>
 
         <Section title="Visibility" hint="Drafts are hidden from the website until published.">
-          <Switch id="e-pub" label={published ? "Published — live on the website" : "Draft — hidden from travellers"} checked={published} onChange={() => { setPublished(!published); touch(); }} />
+          <Switch id="e-pub" label={published ? "Published: live on the website" : "Draft: hidden from travellers"} checked={published} onChange={() => { setPublished(!published); touch(); }} />
         </Section>
       </div>
 
@@ -421,7 +421,7 @@ function DeparturesAdmin({ go, state, setState }) {
   const tourOpts = A.tours.map(t => ({ value: t.id, label: t.title }));
   const [form, setForm] = React.useState({ tourId: "", packageId: "", date: "", time: "08:00", capacity: 12, price: "", guide: "", repeat: false, notes: "", visibility: "public" });
   // TRI-1139: openAdd accepts an optional prefill (dispatched from the Requests inbox's
-  // "Create departure" action via the tk-add-departure event detail) — tour + requested
+  // "Create departure" action via the tk-add-departure event detail), tour + requested
   // date + capacity ≥ group size + Unlisted visibility. No prefill → the normal blank Add form.
   const openAdd = (pf) => { pf = pf || {}; const tid = pf.tourId || (scoped ? state.editId : (A.tours[0] && A.tours[0].id) || ""); const tt = A.tours.find(t => t.id === tid); setForm({ tourId: tid, packageId: tt ? (tt.defaultPackage || (tt.packages && tt.packages[0] && tt.packages[0].id) || "") : "", date: pf.date || "", time: "08:00", capacity: pf.capacity != null ? pf.capacity : 12, price: "", guide: "", repeat: false, notes: pf.notes || "", visibility: pf.visibility || "public" }); setAdding(true); };
   const upd = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -433,14 +433,14 @@ function DeparturesAdmin({ go, state, setState }) {
   const canSave = form.tourId && form.date && form.capacity > 0;
   React.useEffect(() => { const h = (e) => openAdd(e && e.detail); window.addEventListener("tk-add-departure", h); return () => window.removeEventListener("tk-add-departure", h); });
   const save = () => {
-    const optimistic = () => { setAdding(false); setToast("Departure added — " + (chosenTour ? chosenTour.title : "tour") + (chosenPkg ? " · " + chosenPkg.name : "") + (form.date ? " on " + form.date : "") + (form.repeat ? " (+ weekly repeats)" : "")); };
+    const optimistic = () => { setAdding(false); setToast("Departure added: " + (chosenTour ? chosenTour.title : "tour") + (chosenPkg ? " · " + chosenPkg.name : "") + (form.date ? " on " + form.date : "") + (form.repeat ? " (+ weekly repeats)" : "")); };
     window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.createDeparture({
       tourId: (chosenTour && chosenTour._apiId) || form.tourId, packageId: form.packageId || undefined,
       date: form.date, time: form.time, capacity: +form.capacity,
       price: form.price === "" ? undefined : +form.price, guideId: form.guide || undefined,
       repeatWeekly: !!form.repeat, notes: form.notes || undefined, currency: "USD",
       // TRI-1139: 'public' (listed, bookable by anyone) or 'unlisted' (private hold for a
-      // custom-date request — excluded from public reads, reachable only via a secure ?t= link).
+      // custom-date request, excluded from public reads, reachable only via a secure ?t= link).
       visibility: form.visibility || "public",
     }), optimistic);
   };
@@ -472,7 +472,7 @@ function DeparturesAdmin({ go, state, setState }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {scoped && <Alert tone="info" title={"Showing departures for one tour"} action={<Button variant="link" size="sm" onClick={() => setState({ editId: null })}>Show all</Button>}>Filtered to a single tour's schedule.</Alert>}
       <div className="tk-tablewrap">
-        <div className="tk-tabletools"><strong style={{ fontSize: 14 }}>{rows.length} departures</strong><span className="tk-caption" style={{ marginInlineStart: 8 }}>Watch the utilization bar — red means near capacity.</span><Button size="sm" iconStart="plus" style={{ marginInlineStart: "auto" }} onClick={openAdd}>Add departure</Button></div>
+        <div className="tk-tabletools"><strong style={{ fontSize: 14 }}>{rows.length} departures</strong><span className="tk-caption" style={{ marginInlineStart: 8 }}>Watch the utilization bar: red means near capacity.</span><Button size="sm" iconStart="plus" style={{ marginInlineStart: "auto" }} onClick={openAdd}>Add departure</Button></div>
         <DataTable density="compact"
           columns={[
             { key: "tour", header: "Tour", strong: true, render: r => <span style={{ display: "inline-block", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", verticalAlign: "bottom" }}>{r.tour}</span> },
@@ -497,7 +497,7 @@ function DeparturesAdmin({ go, state, setState }) {
         <FormField id="dep-tour" label="Tour" hint={scoped ? "Locked to the tour you're viewing." : undefined}>
           <Select id="dep-tour" value={form.tourId} disabled={scoped} onChange={(e) => setTour(e.target.value)} options={tourOpts} />
         </FormField>
-        <FormField id="dep-package" label="Package / type" hint={chosenPkg ? chosenPkg.blurb : "This tour has no package types — departures use the standard rate."}>
+        <FormField id="dep-package" label="Package / type" hint={chosenPkg ? chosenPkg.blurb : "This tour has no package types. Departures use the standard rate."}>
           <Select id="dep-package" value={form.packageId} disabled={!(chosenTour && chosenTour.packages && chosenTour.packages.length)} onChange={(e) => upd("packageId", e.target.value)} options={pkgOpts} />
         </FormField>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-4)" }}>
@@ -512,9 +512,9 @@ function DeparturesAdmin({ go, state, setState }) {
         </div>
         <FormField id="dep-guide" label="Lead guide" optional hint={<>Manage the roster in <a href="#" onClick={(e) => { e.preventDefault(); go("guides"); }} style={{ color: "var(--brand-ink)", fontWeight: 600 }}>Guides</a>.</>}><Select id="dep-guide" value={form.guide} onChange={(e) => { if (e.target.value === "__add") { go("guides"); setTimeout(() => window.dispatchEvent(new CustomEvent("tk-add-guide")), 60); return; } upd("guide", e.target.value); }} options={[{ value: "", label: "Assign later" }, ...((A.guides || []).filter(g => g.status === "active").map(g => ({ value: g.id, label: g.name + " · " + g.base }))), { value: "__add", label: "＋ Add a new guide…" }]} /></FormField>
         {/* TRI-1139: visibility. Off = Public (listed & bookable by anyone); on = Unlisted
-            (private hold for a custom-date request — hidden from the site, secure-link only). */}
+            (private hold for a custom-date request, hidden from the site, secure-link only). */}
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, padding: "12px 14px", background: "var(--bg-sunken)", borderRadius: "var(--radius-md)" }}>
-          <span style={{ maxWidth: "40ch" }}><strong style={{ fontSize: 14, color: "var(--text-strong)" }}>Unlisted (private hold)</strong><p className="tk-body-sm tk-muted" style={{ margin: "2px 0 0" }}>Hidden from the website and search — bookable only via a secure link you share. Use this to fulfil a custom-date request.</p></span>
+          <span style={{ maxWidth: "40ch" }}><strong style={{ fontSize: 14, color: "var(--text-strong)" }}>Unlisted (private hold)</strong><p className="tk-body-sm tk-muted" style={{ margin: "2px 0 0" }}>Hidden from the website and search. Bookable only via a secure link you share. Use this to fulfil a custom-date request.</p></span>
           <Switch id="dep-unlisted" checked={form.visibility === "unlisted"} onChange={(e) => upd("visibility", e.target.checked ? "unlisted" : "public")} />
         </div>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, padding: "12px 14px", background: "var(--bg-sunken)", borderRadius: "var(--radius-md)" }}>
@@ -522,14 +522,14 @@ function DeparturesAdmin({ go, state, setState }) {
           <Switch id="dep-repeat" checked={form.repeat} onChange={(e) => upd("repeat", e.target.checked)} />
         </div>
         <FormField id="dep-notes" label="Internal note" optional><Textarea id="dep-notes" rows={2} value={form.notes} onChange={(e) => upd("notes", e.target.value)} /></FormField>
-        {chosenTour && form.capacity > 0 && <Alert tone="info" title={form.visibility === "unlisted" ? "Ready to hold privately" : "Ready to publish"}>{form.visibility === "unlisted" ? "Creates a private hold of " : "Opens "}{form.capacity} spots on {chosenTour.title}{form.date ? " for " + form.date : ""} at ${form.price || fromPrice || 0}/person{form.visibility === "unlisted" ? " — reachable only via a secure link." : "."}</Alert>}
+        {chosenTour && form.capacity > 0 && <Alert tone="info" title={form.visibility === "unlisted" ? "Ready to hold privately" : "Ready to publish"}>{form.visibility === "unlisted" ? "Creates a private hold of " : "Opens "}{form.capacity} spots on {chosenTour.title}{form.date ? " for " + form.date : ""} at ${form.price || fromPrice || 0}/person{form.visibility === "unlisted" ? ". Reachable only via a secure link." : "."}</Alert>}
       </Drawer>
       <Modal open={!!endDep} title="End departure & request reviews"
-        description={endDep ? endDep.tour + " on " + endDep.date + " — " + endDep.booked + " traveller" + (endDep.booked === 1 ? "" : "s") + " travelled." : ""}
+        description={endDep ? endDep.tour + " on " + endDep.date + ", " + endDep.booked + " traveller" + (endDep.booked === 1 ? "" : "s") + " travelled." : ""}
         onClose={() => setEndDep(null)}
-        actions={<><Button variant="secondary" onClick={() => setEndDep(null)}>Not yet</Button><Button iconStart="mail" onClick={() => { const id = endDep.id; const fallback = endDep.booked; window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.requestReviews(id), (res) => { const sent = (res && res.issued) ? res.issued.length : fallback; const skipped = (res && res.skipped) ? res.skipped.length : 0; setEnded(e => ({ ...e, [id]: true })); setEndDep(null); setToast("Departure closed — " + sent + " personal review invite" + (sent === 1 ? "" : "s") + " sent" + (skipped ? " (" + skipped + " skipped — already invited or no email)" : "")); }); }}>Send {endDep ? endDep.booked : 0} review invites</Button></>}>
+        actions={<><Button variant="secondary" onClick={() => setEndDep(null)}>Not yet</Button><Button iconStart="mail" onClick={() => { const id = endDep.id; const fallback = endDep.booked; window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.requestReviews(id), (res) => { const sent = (res && res.issued) ? res.issued.length : fallback; const skipped = (res && res.skipped) ? res.skipped.length : 0; setEnded(e => ({ ...e, [id]: true })); setEndDep(null); setToast("Departure closed: " + sent + " personal review invite" + (sent === 1 ? "" : "s") + " sent" + (skipped ? " (" + skipped + " skipped, already invited or no email)" : "")); }); }}>Send {endDep ? endDep.booked : 0} review invites</Button></>}>
         {endDep && <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <Alert tone="info" title="Each traveller gets their own private link">Only people who were on this departure can review it. The link is tied to their booking, so every review comes back marked <strong>Verified booking</strong> — then waits for your approval before it's public.</Alert>
+          <Alert tone="info" title="Each traveller gets their own private link">Only people who were on this departure can review it. The link is tied to their booking, so every review comes back marked <strong>Verified booking</strong>, then waits for your approval before it's public.</Alert>
           <div>
             <span className="tk-label" style={{ display: "block", marginBottom: 6 }}>Invites will go to</span>
             <div style={{ display: "grid", gap: 6 }}>
@@ -560,7 +560,7 @@ function DeparturesAdmin({ go, state, setState }) {
                 dep.booked = (res && res.booked != null) ? res.booked : dep.booked;
                 dep.spotsLeft = (res && res.spotsLeft != null) ? res.spotsLeft : Math.max(0, cap - dep.booked);
                 setCapDep(null);
-                setToast("Capacity updated — " + dep.tour + " on " + dep.date + " now seats " + cap + " (" + dep.spotsLeft + " left)");
+                setToast("Capacity updated: " + dep.tour + " on " + dep.date + " now seats " + cap + " (" + dep.spotsLeft + " left)");
               });
           }}>Save capacity</Button></>}>
         {capDep && <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -570,14 +570,14 @@ function DeparturesAdmin({ go, state, setState }) {
           <Alert tone={(+capVal >= Math.max(1, capDep.booked)) ? "info" : "warning"} title={(+capVal >= Math.max(1, capDep.booked)) ? "Availability preview" : "Below booked seats"}>
             {(+capVal >= Math.max(1, capDep.booked))
               ? capDep.booked + " booked · " + Math.max(0, (+capVal) - capDep.booked) + " spot" + (Math.max(0, (+capVal) - capDep.booked) === 1 ? "" : "s") + " left after saving."
-              : "You can't set capacity below the " + capDep.booked + " seats already booked — that would oversell the departure."}
+              : "You can't set capacity below the " + capDep.booked + " seats already booked. That would oversell the departure."}
           </Alert>
         </div>}
       </Modal>
       <Modal open={!!cancelDep} tone="danger" title="Cancel this departure?"
         description={cancelDep ? cancelDep.tour + " on " + cancelDep.date + " has " + cancelDep.booked + " booked traveller" + (cancelDep.booked === 1 ? "" : "s") + "." : ""}
         onClose={() => setCancelDep(null)}
-        actions={<><Button variant="secondary" onClick={() => setCancelDep(null)}>Keep departure</Button><Button variant="danger" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.cancelDeparture(cancelDep.id, "Departure cancelled"), () => { setToast("Departure cancelled — " + (cancelDep ? cancelDep.booked : 0) + " bookings flagged for refund"); setCancelDep(null); })}>Cancel departure</Button></>}>
+        actions={<><Button variant="secondary" onClick={() => setCancelDep(null)}>Keep departure</Button><Button variant="danger" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.cancelDeparture(cancelDep.id, "Departure cancelled"), () => { setToast("Departure cancelled: " + (cancelDep ? cancelDep.booked : 0) + " bookings flagged for refund"); setCancelDep(null); })}>Cancel departure</Button></>}>
         {cancelDep && cancelDep.booked > 0 && <Alert tone="warning" title="This affects existing bookings">All {cancelDep.booked} bookings on this departure will be marked for cancellation and the customers emailed. Refunds are handled in Payments.</Alert>}
       </Modal>
       {toast && <div style={{ position: "fixed", bottom: 20, insetInline: 0, display: "flex", justifyContent: "center", zIndex: 800 }}><Toast tone="success" onClose={() => setToast(null)}>{toast}</Toast></div>}

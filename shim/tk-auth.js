@@ -1,11 +1,11 @@
 /* ==========================================================================
- * TripKoach v2 web — consumer accounts & auth client (TRI-882 P1 shim).
+ * TripKoach v2 web: consumer accounts & auth client (TRI-882 P1 shim).
  *
- * `window.TK_AUTH` — a dependency-free wrapper over the P1 consumer auth
+ * `window.TK_AUTH`, a dependency-free wrapper over the P1 consumer auth
  * contract (Backend sibling TRI-881), built on the same-origin transport from
  * tk-api.js (TRI-861). Loaded FIRST alongside the other shims but wired only
  * from the auth/profile screens, and EVERY call site is gated behind
- * window.TK_CONFIG.USE_LIVE_API — so with the flag OFF this module is inert:
+ * window.TK_CONFIG.USE_LIVE_API, so with the flag OFF this module is inert:
  * the built app makes no auth calls whatsoever and stays byte-for-byte the
  * fixture prototype (login just walks to the bookings screen, profile shows
  * the DS placeholder person, etc).
@@ -23,13 +23,13 @@
  *   PUT  /me/notifications       → { notifications }
  *   GET  /me/bookings            → { bookings: [...] }
  *
- * Session is a server-side httpOnly cookie (tk_user_session) — the browser
+ * Session is a server-side httpOnly cookie (tk_user_session), the browser
  * carries it automatically via credentials:"include" (tk-api.js), so this
  * client holds NO token. It only caches the /me profile in memory to avoid
  * re-fetching it on every account sub-screen (AccountShell renders on each).
  *
  * Mapping is deliberately tolerant (accepts { user } envelope or a bare user,
- * snake_case or camelCase) so integration with Backend stays mechanical — same
+ * snake_case or camelCase) so integration with Backend stays mechanical, same
  * posture as tk-boot.js / tk-booking.js.
  * ======================================================================== */
 (function () {
@@ -63,7 +63,7 @@
       twoFactorEnabled: !!pick(u.twoFactorEnabled, u.two_factor_enabled),
       // TRI-941: soft email-verification signal (never gates checkout). Drives the badge + nudge.
       emailVerified: !!pick(u.emailVerified, u.email_verified),
-      // TRI-943: avatar. avatarUrl is null when rejected/hidden — FE shows default placeholder.
+      // TRI-943: avatar. avatarUrl is null when rejected/hidden, FE shows default placeholder.
       avatarUrl: pick(u.avatarUrl, u.avatar_url) || null,
       avatarStatus: pick(u.avatarStatus, u.avatar_status) || null,
       createdAt: pick(u.createdAt, u.created_at) || null,
@@ -136,7 +136,7 @@
         function (err) {
           mePromise = null;
           if (err && err.status === 401) return setMe(null);
-          throw err; // real transport/5xx error — let the caller show it
+          throw err; // real transport/5xx error, let the caller show it
         }
       );
       return mePromise;
@@ -153,7 +153,7 @@
     },
 
     // Resolves { user, linkedBookings } on a completed login, OR { mfaRequired: true } when the account
-    // has two-factor on (TRI-1029) — the caller then collects an authenticator code and calls loginMfa().
+    // has two-factor on (TRI-1029), the caller then collects an authenticator code and calls loginMfa().
     // The server has already set an mfa_pending session cookie in that case.
     login: function (email, password) {
       return api.post("/auth/login", { email: email, password: password }).then(function (body) {
@@ -180,7 +180,7 @@
     },
 
     requestReset: function (email) {
-      // Always resolves (backend returns 200 for any email — no user enumeration).
+      // Always resolves (backend returns 200 for any email, no user enumeration).
       return api.post("/auth/password-reset/request", { email: email }).then(
         function () { return true; },
         function () { return true; }
@@ -196,14 +196,14 @@
     // ('verified' | 'already_verified'); rejects with err.status===400 for an invalid/expired/used link.
     verifyEmail: function (token) {
       return api.post("/auth/verify-email", { token: token }).then(function (body) {
-        // On success the account is now verified — refresh the cached /me so badges update immediately.
+        // On success the account is now verified, refresh the cached /me so badges update immediately.
         if (meCache) meCache.emailVerified = true;
         return body || { ok: true };
       });
     },
 
     // Resend the verification email. Authed callers omit email (server uses the session); logged-out
-    // callers pass their email. Always resolves (server returns 200 for any input — no enumeration).
+    // callers pass their email. Always resolves (server returns 200 for any input, no enumeration).
     resendVerification: function (email) {
       return api.post("/auth/resend-verification", email ? { email: email } : {}).then(
         function (body) { return body || { ok: true }; },
@@ -224,7 +224,7 @@
     mfaStatus: function () {
       return api.get("/auth/mfa/status").then(function (body) { return { enabled: !!(body && body.enabled) }; });
     },
-    // Begin enrollment. Resolves { secret, otpauthUri, issuer } — the FE renders the QR from otpauthUri
+    // Begin enrollment. Resolves { secret, otpauthUri, issuer }, the FE renders the QR from otpauthUri
     // entirely client-side (the secret NEVER goes to a third-party image service).
     mfaEnroll: function () {
       return api.post("/auth/mfa/enroll", {}).then(function (body) {
@@ -256,7 +256,7 @@
     },
 
     // TRI-1012: permanently delete + anonymize my account. On success the server has scrubbed the
-    // PII, revoked every session and cleared the cookie — so we drop the cached /me locally too and
+    // PII, revoked every session and cleared the cookie, so we drop the cached /me locally too and
     // the caller redirects to login. Rejects with err.status===409 (code "active_bookings") when the
     // account still has upcoming trips to cancel; the screen surfaces that message.
     deleteAccount: function () {
@@ -272,7 +272,7 @@
       });
     },
 
-    // patch: { email:{type:bool,…}, whatsapp:{…} } — partial upsert.
+    // patch: { email:{type:bool,…}, whatsapp:{…} }, partial upsert.
     updateNotifications: function (patch) {
       return api.put("/me/notifications", patch).then(function (body) {
         return (body && body.notifications) || body || {};
@@ -285,7 +285,7 @@
       });
     },
 
-    // TRI-1016: the account "Reviews" page. Resolves { reviews, invites } —
+    // TRI-1016: the account "Reviews" page. Resolves { reviews, invites },
     // `reviews` are this account's own submissions (with moderation status),
     // `invites` are pending review-invite tokens ("Awaiting your review") that
     // the "Write your review" CTA submits against via TK_REVIEWS_API.submit.

@@ -12,7 +12,7 @@ const { DataTable, Badge, Button, IconButton, Icon, Price, Modal, Alert, SearchF
    GET /requests and every write funnels through TK_ADMIN_ACT (which re-renders the
    whole console on success); in fixture mode it runs the optimistic update inline. */
 
-// Status model — keyed by the LIVE BE enum (lowercase: new|contacted|scheduled|
+// Status model: keyed by the LIVE BE enum (lowercase: new|contacted|scheduled|
 // booked|closed, TRI-1137). Each maps to an existing DS badge tone (no new CSS), a
 // display label, and (where the flow continues) the next status "Advance" moves to.
 const REQ_STATUS = {
@@ -142,7 +142,7 @@ function RequestsAdmin({ go }) {
     (r.requestedDate ? " around " + r.requestedDate : "") + ". "
   );
   const mailLink = (r) => "mailto:" + encodeURIComponent(r.email) +
-    "?subject=" + encodeURIComponent("Your TripKoach request — " + r.tour) +
+    "?subject=" + encodeURIComponent("Your TripKoach request: " + r.tour) +
     "&body=" + encodeURIComponent("Hi " + (r.customerName || "") + ",\n\nThanks for your request for " + r.tour +
       (r.requestedDate ? " on " + r.requestedDate : "") + " for " + r.partySize + " traveller" + (r.partySize === 1 ? "" : "s") + ".\n\n");
 
@@ -178,10 +178,10 @@ function RequestsAdmin({ go }) {
         <DataTable density="compact"
           columns={[
             { key: "tour", header: "Tour", strong: true, render: (r) => <span style={{ display: "inline-block", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", verticalAlign: "bottom" }}>{r.tour}</span> },
-            { key: "requestedDate", header: "Requested date", render: (r) => <span style={{ fontWeight: 600, color: "var(--text-strong)" }}>{r.requestedDate || "—"}</span> },
+            { key: "requestedDate", header: "Requested date", render: (r) => <span style={{ fontWeight: 600, color: "var(--text-strong)" }}>{r.requestedDate || "-"}</span> },
             { key: "partySize", header: "Group", align: "end", render: (r) => <span className="tk-num">{r.partySize}</span> },
             { key: "customer", header: "Customer", render: (r) => <span><div style={{ fontWeight: 600, color: "var(--text-strong)" }}>{r.customerName}</div><div className="tk-caption">{r.email || r.phone || ""}</div></span> },
-            { key: "receivedAt", header: "Received", render: (r) => <span className="tk-caption">{r.receivedAt || "—"}</span> },
+            { key: "receivedAt", header: "Received", render: (r) => <span className="tk-caption">{r.receivedAt || "-"}</span> },
             { key: "status", header: "Status", render: (r) => <ReqStatusChip status={reqStatus(r)} /> },
           ]}
           rows={rows} getRowId={(r) => r.id}
@@ -190,7 +190,7 @@ function RequestsAdmin({ go }) {
           empty={<EmptyState icon="message-square" title={q || statusF ? "No matching requests" : "No custom-date requests yet"} body={q || statusF ? "Try a different search or status filter." : "When a traveller asks for a date that isn't scheduled, it shows up here."} />} />
       </div>
 
-      {/* Detail drawer — full request + all actions as large buttons for a clear triage view */}
+      {/* Detail drawer: full request + all actions as large buttons for a clear triage view */}
       <Drawer open={!!detail} title={detail ? detail.customerName : ""} subtitle={detail ? detail.tour : ""} onClose={() => setDetail(null)}
         footer={detail && <>
           <Button variant="secondary" onClick={() => setDetail(null)}>Close</Button>
@@ -201,12 +201,12 @@ function RequestsAdmin({ go }) {
           <div><ReqStatusChip status={reqStatus(detail)} /></div>
           <div className="tk-summary">
             <div className="tk-summary__line"><span>Tour</span><span style={{ fontWeight: 600, color: "var(--text-strong)" }}>{detail.tour}</span></div>
-            <div className="tk-summary__line"><span>Requested date</span><span style={{ fontWeight: 600, color: "var(--text-strong)" }}>{detail.requestedDate || "—"}</span></div>
+            <div className="tk-summary__line"><span>Requested date</span><span style={{ fontWeight: 600, color: "var(--text-strong)" }}>{detail.requestedDate || "-"}</span></div>
             <div className="tk-summary__line"><span>Group size</span><span style={{ fontWeight: 600, color: "var(--text-strong)" }}>{detail.partySize} traveller{detail.partySize === 1 ? "" : "s"}</span></div>
-            <div className="tk-summary__line"><span>Received</span><span style={{ fontWeight: 600, color: "var(--text-strong)" }}>{detail.receivedAt || "—"}</span></div>
-            <div className="tk-summary__line"><span>Email</span><span style={{ fontWeight: 600, color: "var(--text-strong)" }}>{detail.email ? <a href={mailLink(detail)} style={{ color: "var(--brand-ink)" }}>{detail.email}</a> : "—"}</span></div>
-            <div className="tk-summary__line"><span>Phone</span><span style={{ fontWeight: 600, color: "var(--text-strong)" }}>{detail.phone ? <a href={"tel:" + detail.phone} style={{ color: "var(--brand-ink)" }}>{detail.phone}</a> : "—"}</span></div>
-            {detail.indicativeTotalMinor != null && <div className="tk-summary__line"><span>Indicative total</span><span style={{ fontWeight: 600, color: "var(--text-strong)" }}><Price amount={detail.indicativeTotalMinor / 100} currency={detail.currency || "USD"} size="sm" /> <span className="tk-caption">· {detail.indicativeLabel || "indicative — confirmed on quote"}</span></span></div>}
+            <div className="tk-summary__line"><span>Received</span><span style={{ fontWeight: 600, color: "var(--text-strong)" }}>{detail.receivedAt || "-"}</span></div>
+            <div className="tk-summary__line"><span>Email</span><span style={{ fontWeight: 600, color: "var(--text-strong)" }}>{detail.email ? <a href={mailLink(detail)} style={{ color: "var(--brand-ink)" }}>{detail.email}</a> : "-"}</span></div>
+            <div className="tk-summary__line"><span>Phone</span><span style={{ fontWeight: 600, color: "var(--text-strong)" }}>{detail.phone ? <a href={"tel:" + detail.phone} style={{ color: "var(--brand-ink)" }}>{detail.phone}</a> : "-"}</span></div>
+            {detail.indicativeTotalMinor != null && <div className="tk-summary__line"><span>Indicative total</span><span style={{ fontWeight: 600, color: "var(--text-strong)" }}><Price amount={detail.indicativeTotalMinor / 100} currency={detail.currency || "USD"} size="sm" /> <span className="tk-caption">· {detail.indicativeLabel || "indicative, confirmed on quote"}</span></span></div>}
           </div>
           {detail.note && <div><span className="tk-label" style={{ display: "block", marginBottom: 4 }}>Their note</span><p className="tk-body-sm" style={{ margin: 0, padding: "10px 12px", background: "var(--bg-sunken)", borderRadius: "var(--radius-md)" }}>{detail.note}</p></div>}
           {detail.closeReason && <Alert tone="neutral" title="Closed">{detail.closeReason}</Alert>}
@@ -218,14 +218,14 @@ function RequestsAdmin({ go }) {
         </div>}
       </Drawer>
 
-      {/* Secure booking link — shown so the operator can copy/share even if the
+      {/* Secure booking link: shown so the operator can copy/share even if the
           clipboard write was blocked. */}
       <Modal open={!!linkModal} title="Secure booking link"
         description={linkModal ? "Share this with " + (linkModal.name || "the customer") + ". It opens their private, reserved booking (72-hour hold)." : ""}
         onClose={() => setLinkModal(null)}
         actions={<><Button variant="secondary" onClick={() => setLinkModal(null)}>Done</Button><Button iconStart="link" onClick={() => { if (linkModal && copyText(linkModal.url)) setToast("Link copied to clipboard"); }}>Copy link</Button></>}>
         {linkModal && <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <Alert tone="success" title="Copied to your clipboard">The link is on your clipboard — paste it into your reply. Only someone with this link can open the booking.</Alert>
+          <Alert tone="success" title="Copied to your clipboard">The link is on your clipboard. Paste it into your reply. Only someone with this link can open the booking.</Alert>
           <Input readOnly value={linkModal.url} onFocus={(e) => e.target.select()} style={{ fontFamily: "var(--font-mono, monospace)", fontSize: 12 }} />
         </div>}
       </Modal>

@@ -17,7 +17,7 @@ const TK_SYM = { USD: "$", GHS: "GH₵" };
 // the same window.TK_TERMS source). Native <details>/<summary> so it's keyboard- and
 // screen-reader-accessible with no JS or extra network cost; the text is admin-authored
 // plain prose (whiteSpace pre-wrap preserves its paragraphs). Callers guard on TK_TERMS,
-// so this only mounts when real copy is published — never a placeholder.
+// so this only mounts when real copy is published, never a placeholder.
 function TkTermsDisclosure() {
   return (
     <details className="tk-terms-disclosure" style={{ marginTop: "var(--space-2)" }}>
@@ -30,7 +30,7 @@ function TkTermsDisclosure() {
     </details>
   );
 }
-// null is meaningful for tier-priced departures (price varies by party size) — preserve it
+// null is meaningful for tier-priced departures (price varies by party size), preserve it
 // so the DeparturePicker can hide the per-departure price rather than showing "$0". (TRI-932)
 function cvt(usd, cur) { return usd == null ? null : (cur === "GHS" ? Math.round(usd * TK_FX.GHS) : usd); }
 function money(usd, cur) { return TK_SYM[cur] + cvt(usd, cur).toLocaleString(); }
@@ -41,7 +41,7 @@ function cvtDeps(deps, cur) { return (deps || []).map(d => ({ ...d, price: cvt(d
 // Route 3 selector; only the active track's departures are shown, so the picker is
 // never cluttered with every track at once. Departures with no track fall under a
 // "Standard" bucket. A tour with a single group (no tracks, or every departure on
-// one track) renders a plain picker with no selector — so a no-track tour shows no
+// one track) renders a plain picker with no selector, so a no-track tour shows no
 // empty section. `packages` (t0.packages) drives track ordering + display names.
 function GroupedDeparturePicker({ departures, value, onChange, currency, packages, legend, activePackageId, onPackageChange, routeSelectedElsewhere }) {
   const deps = departures || [];
@@ -152,7 +152,7 @@ function ReviewCard({ r }) {
 }
 // Bookings "Leave a review" modal. When `token` is present (the owner's one-time
 // review-invite token surfaced by /me/bookings, TRI-1014) the submit POSTs the
-// REAL review against that token via TK_REVIEWS_API.submit — the same verified,
+// REAL review against that token via TK_REVIEWS_API.submit, the same verified,
 // moderated path the emailed link uses. With no token (the fixture demo / DS
 // preview) it keeps the original toast-only behaviour, byte-identical.
 function ReviewModal({ tour, token, onClose, onSubmitted }) {
@@ -181,7 +181,7 @@ function ReviewModal({ tour, token, onClose, onSubmitted }) {
   }
 
   return (
-    <Modal open title={"Review " + tour.title} description="Share your experience. Reviews are checked by our team before they appear publicly — usually within a day." onClose={submitting ? undefined : onClose}
+    <Modal open title={"Review " + tour.title} description="Share your experience. Reviews are checked by our team before they appear publicly, usually within a day." onClose={submitting ? undefined : onClose}
       actions={<><Button variant="secondary" onClick={onClose} disabled={submitting}>Cancel</Button><Button disabled={!ok || submitting} iconStart="check" onClick={onSubmit}>{submitting ? "Submitting…" : "Submit review"}</Button></>}>
       <div style={{ display: "grid", gap: "var(--space-4)" }}>
         {err && <Alert tone="danger" title="We couldn't submit your review">{err}</Alert>}
@@ -213,7 +213,7 @@ function ReviewsSection({ tour, onWrite }) {
         <div className="tk-card" style={{ boxShadow: "none", border: "1px dashed var(--border-strong)" }}><div className="tk-card__body" style={{ padding: "var(--space-5)", textAlign: "center", gap: 6 }}>
           <Stars value={0} size={18} />
           <strong>No reviews yet</strong>
-          <p className="tk-body-sm tk-muted" style={{ margin: 0 }}>Reviews open to travellers after their departure — we email each guest a private link.</p>
+          <p className="tk-body-sm tk-muted" style={{ margin: 0 }}>Reviews open to travellers after their departure. We email each guest a private link.</p>
         </div></div>
       )}
     </div>
@@ -287,7 +287,7 @@ function ReviewInviteLive({ go, token }) {
     return stateCard("circle-alert", "danger", "This link isn't valid", "The review link is incomplete or has expired. If you travelled with us recently, check your latest email for the correct link.", <Button style={{ marginTop: 8 }} onClick={() => go("home")}>Explore tours</Button>);
   }
   if (phase === "gone") {
-    return stateCard("circle-check-big", "success", "You've already reviewed this trip", "Thanks — this invite has already been used. Your review is with our team and appears once it's approved.", <Button style={{ marginTop: 8 }} onClick={() => go("home")}>Back to tours</Button>);
+    return stateCard("circle-check-big", "success", "You've already reviewed this trip", "Thanks. This invite has already been used. Your review is with our team and appears once it's approved.", <Button style={{ marginTop: 8 }} onClick={() => go("home")}>Back to tours</Button>);
   }
   if (phase === "error") {
     return stateCard("triangle-alert", "warning", "Something went wrong", "We couldn't open your review invite just now. Please try again in a moment.", <Button style={{ marginTop: 8 }} onClick={() => load(true)}>Try again</Button>);
@@ -300,7 +300,7 @@ function ReviewInviteLive({ go, token }) {
         <div className="tk-card" style={{ boxShadow: "var(--elev-2)" }}><div className="tk-card__body" style={{ padding: "var(--space-7)", textAlign: "center", gap: "var(--space-3)", alignItems: "center" }}>
           <span style={{ width: 56, height: 56, borderRadius: "50%", background: "var(--success-bg)", color: "var(--success-fg)", display: "grid", placeItems: "center" }}><Icon name="circle-check-big" size={28} /></span>
           <h1 className="tk-h2" style={{ margin: 0 }}>Thank you{who ? ", " + String(who).split(" ")[0] : ""}!</h1>
-          <p className="tk-body" style={{ margin: 0, color: "var(--text-muted)", maxWidth: "40ch" }}>Your review is with our team. Once it's approved it'll appear on the {tour.title} page — usually within a day.</p>
+          <p className="tk-body" style={{ margin: 0, color: "var(--text-muted)", maxWidth: "40ch" }}>Your review is with our team. Once it's approved it'll appear on the {tour.title} page, usually within a day.</p>
           <Button style={{ marginTop: 8 }} onClick={() => go("home")}>Back to tours</Button>
         </div></div>
       ) : (
@@ -309,7 +309,7 @@ function ReviewInviteLive({ go, token }) {
             <div style={{ position: "relative", width: 60, height: 60, borderRadius: "var(--radius-md)", overflow: "hidden", flex: "none" }}><TourImage src={tour.image} alt={tour.title} label={tour.title} gi={0} showLabel={false} /></div>
             <div><span className="tk-overline" style={{ color: "var(--brand-ink)" }}>How was your trip?</span><h1 className="tk-h3" style={{ margin: "2px 0 0" }}>{tour.title}</h1></div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", background: "var(--success-bg)", borderRadius: "var(--radius-md)" }}><Icon name="shield-check" size={16} style={{ color: "var(--success-fg)" }} /><span className="tk-body-sm">Verified traveller — only you can use this private link.</span></div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", background: "var(--success-bg)", borderRadius: "var(--radius-md)" }}><Icon name="shield-check" size={16} style={{ color: "var(--success-fg)" }} /><span className="tk-body-sm">Verified traveller, only you can use this private link.</span></div>
           <div><span className="tk-label" style={{ display: "block", marginBottom: 4 }}>Your rating</span><StarInput value={rating} onChange={setRating} /></div>
           <FormField id="iv-title" label="Title" optional><Input id="iv-title" value={title} onChange={(e) => setTitle(e.target.value)} /></FormField>
           <FormField id="iv-text" label="Your review" required hint="At least 10 characters."><Textarea id="iv-text" rows={5} value={text} onChange={(e) => setText(e.target.value)} /></FormField>
@@ -337,7 +337,7 @@ function ReviewInvitePage({ go, token }) {
         <div className="tk-card" style={{ boxShadow: "var(--elev-2)" }}><div className="tk-card__body" style={{ padding: "var(--space-7)", textAlign: "center", gap: "var(--space-3)", alignItems: "center" }}>
           <span style={{ width: 56, height: 56, borderRadius: "50%", background: "var(--success-bg)", color: "var(--success-fg)", display: "grid", placeItems: "center" }}><Icon name="circle-check-big" size={28} /></span>
           <h1 className="tk-h2" style={{ margin: 0 }}>Thank you, {String(inv.name || "").split(" ")[0]}!</h1>
-          <p className="tk-body" style={{ margin: 0, color: "var(--text-muted)", maxWidth: "40ch" }}>Your review is with our team. Once it's approved it'll appear on the {tour.title} page — usually within a day.</p>
+          <p className="tk-body" style={{ margin: 0, color: "var(--text-muted)", maxWidth: "40ch" }}>Your review is with our team. Once it's approved it'll appear on the {tour.title} page, usually within a day.</p>
           <Button style={{ marginTop: 8 }} onClick={() => go("tour", tour.id || inv.tourId)}>Back to the tour</Button>
         </div></div>
       ) : (
@@ -346,7 +346,7 @@ function ReviewInvitePage({ go, token }) {
             <div style={{ position: "relative", width: 60, height: 60, borderRadius: "var(--radius-md)", overflow: "hidden", flex: "none" }}><TourImage src={tour.image} alt={tour.title} label={tour.title} gi={0} showLabel={false} /></div>
             <div><span className="tk-overline" style={{ color: "var(--brand-ink)" }}>How was your trip?</span><h1 className="tk-h3" style={{ margin: "2px 0 0" }}>{tour.title}</h1></div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", background: "var(--success-bg)", borderRadius: "var(--radius-md)" }}><Icon name="shield-check" size={16} style={{ color: "var(--success-fg)" }} /><span className="tk-body-sm">Verified — you travelled on <strong>{inv.date}</strong> (booking {inv.ref}).</span></div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", background: "var(--success-bg)", borderRadius: "var(--radius-md)" }}><Icon name="shield-check" size={16} style={{ color: "var(--success-fg)" }} /><span className="tk-body-sm">Verified, you travelled on <strong>{inv.date}</strong> (booking {inv.ref}).</span></div>
           <div><span className="tk-label" style={{ display: "block", marginBottom: 4 }}>Your rating</span><StarInput value={rating} onChange={setRating} /></div>
           <FormField id="iv-title" label="Title" optional><Input id="iv-title" value={title} onChange={(e) => setTitle(e.target.value)} /></FormField>
           <FormField id="iv-text" label="Your review" required hint="At least 10 characters."><Textarea id="iv-text" rows={5} value={text} onChange={(e) => setText(e.target.value)} /></FormField>
@@ -362,7 +362,7 @@ Object.assign(window, { Stars, StarInput, ReviewCard, ReviewModal, ReviewsSectio
 // Real, crawlable paths for the primary nav/footer destinations (TRI-1114).
 // These mirror app.jsx ROUTES so the DS <Header>/<Footer> emit genuine
 // <a href="/browse"> that search engines index and "open in new tab" / "copy
-// link" honour — previously every nav item was a dead `#browse` anchor. The
+// link" honour. Previously every nav item was a dead `#browse` anchor. The
 // delegated onNav handler below intercepts same-app clicks for SPA navigation
 // (progressive enhancement): plain clicks stay in the SPA, modified/new-tab
 // clicks fall through to a full load that the History router re-resolves.
@@ -384,8 +384,8 @@ const TK_GRADS = [
   "linear-gradient(145deg,#a8562f 0%,#5e2c18 100%)",
 ];
 // Tour imagery with a shared loading / error state (TRI-1117). A branded gradient
-// tile stands in until the photo decodes (loading state) and stays put — with the
-// region label — if it fails or is missing (error state), so a slow or dead CDN
+// tile stands in until the photo decodes (loading state) and stays put, with the
+// region label, if it fails or is missing (error state), so a slow or dead CDN
 // image never shows a blank box. `srcSet`/`sizes` make the hero responsive.
 function TourImage({ src, alt, label, gi = 0, showLabel = true, srcSet, sizes }) {
   const [err, setErr] = React.useState(false);
@@ -552,7 +552,7 @@ function Shell({ children, currency, setCurrency, go, screen }) {
   // Reactive session state (TRI-922). The prototype hardcoded `signedIn` on the
   // DS <Header> (avatar always) AND always rendered a custom "Sign in" button, so
   // a signed-in user still saw "Sign in". `LIVE_AUTH()` only tells us live-API
-  // mode is on — NOT whether a session exists — so we resolve /me and drive the
+  // mode is on (NOT whether a session exists), so we resolve /me and drive the
   // nav off the answer. cachedMe(): undefined = unknown, null = guest, obj = user.
   // Flag off ⇒ `live` is false and authed stays true → nav renders byte-identical
   // to the prototype (avatar + Sign in). We read the cache on every render (App
@@ -648,7 +648,7 @@ function Shell({ children, currency, setCurrency, go, screen }) {
   );
 }
 
-const PRICE_BANDS = [{ label: "Under $200", test: p => p < 200 }, { label: "$200–600", test: p => p >= 200 && p <= 600 }, { label: "$600–1,200", test: p => p > 600 && p <= 1200 }, { label: "$1,200+", test: p => p > 1200 }];
+const PRICE_BANDS = [{ label: "Under $200", test: p => p < 200 }, { label: "$200 to $600", test: p => p >= 200 && p <= 600 }, { label: "$600 to $1,200", test: p => p > 600 && p <= 1200 }, { label: "$1,200+", test: p => p > 1200 }];
 const DURATIONS = [{ label: "Half day", test: d => /half day|hrs/i.test(d) }, { label: "Full day", test: d => /full day/i.test(d) }, { label: "Multi-day", test: d => /days|nights?/i.test(d) }];
 function matchesFilters(t, f) {
   if (f.region.length && !f.region.includes(t.region)) return false;
@@ -716,7 +716,7 @@ function BrowseWeb({ go, currency, view, initialRegion, initialQuery }) {
   const [sort, setSort] = React.useState("pop");
   const matched = tours.filter(t => matchesFilters(t, filters) && (!query || (t.title + t.region + t.category).toLowerCase().includes(query.toLowerCase())));
   // Client sort over the summary fields the catalogue actually carries. "Departing
-  // soon" is intentionally absent — browse has no per-tour departure dates to sort by.
+  // soon" is intentionally absent. Browse has no per-tour departure dates to sort by.
   const num = (v) => (typeof v === "number" && !isNaN(v) ? v : 0);
   const SORTERS = {
     pop: (a, b) => num(b.reviews) - num(a.reviews) || num(b.rating) - num(a.rating),
@@ -727,16 +727,16 @@ function BrowseWeb({ go, currency, view, initialRegion, initialQuery }) {
   const shown = [...matched].sort(SORTERS[sort] || SORTERS.pop);
   return (
     <>
-      {/* TRI-1118 (#13): /browse is a listing page — its job is "see tours fast",
+      {/* TRI-1118 (#13): /browse is a listing page, its job is "see tours fast",
           so it gets a slim, listing-specific header (title + subtitle + search)
           instead of repeating the full-height home hero, which pushed the tour
           grid ~700px down (worse on mobile). The epic hero stays on home only. */}
-      {/* TRI-1148: listing header gains the AboutPage hero-background treatment —
+      {/* TRI-1148: listing header gains the AboutPage hero-background treatment:
           dark base + image at opacity .32 + top-to-bottom gradient so the
           title/subtitle/search stay AA-legible.
           TRI-1151: once this became a full photographic hero (not the old plain
           wash utility header of TRI-1118), it must share the same vertical frame
-          as its siblings — Regions/Stories/Marketplace all use space-12. Bumped
+          as its siblings, Regions/Stories/Marketplace all use space-12. Bumped
           space-8 → space-12 so the four page heroes read as one consistent band.
           The ~64px cost to grid position is negligible (TRI-1118's ~700px-pushdown
           concern was against the full home hero, not this header). */}
@@ -800,13 +800,13 @@ function pkgTour(t, pkgId) {
   return { ...t, tiers: p.tiers, price: p.tiers[p.tiers.length - 1].price, included: (p.includes || t.included), stops: p.stops, packageName: p.name, packageId: p.id, duration: p.duration || t.duration };
 }
 // TRI-1018 / TRI-999 · empty-departures date-interest capture. Live only when the flag is on AND the
-// enquiry client is present — flag off ⇒ this gate is false and the form falls back to a toast, keeping
+// enquiry client is present, flag off ⇒ this gate is false and the form falls back to a toast, keeping
 // the built prototype byte-identical.
 const LIVE_INTEREST = () => !!(window.TK_CONFIG && window.TK_CONFIG.USE_LIVE_API && window.TK_ENQUIRY && window.TK_ENQUIRY.interest);
 
 // TRI-1138 · custom-date-request feature flags (Backend TRI-1137: /config → `dateRequestsEnabled` +
-// `minRequestLeadDays`, surfaced on window.TK_FLAGS.customDateRequests by tk-boot). When the flag is off —
-// the flag-off prototype, or ops disabling the feature — `enabled` is false and the form degrades to the
+// `minRequestLeadDays`, surfaced on window.TK_FLAGS.customDateRequests by tk-boot). When the flag is off
+// (the flag-off prototype, or ops disabling the feature), `enabled` is false and the form degrades to the
 // legacy notify-only box, keeping the built prototype byte-identical. minLeadDays (default 3 / 72h, CEO #1)
 // drives the date picker's `min`.
 function customDateFlags() {
@@ -838,7 +838,7 @@ function humanLead(leadDays) {
 // language): FormField + Input(date/email/tel) + NumberStepper + Textarea + Button + Alert.
 function DateInterestForm({ tourId, packageId }) {
   const flags = customDateFlags();
-  const requestEnabled = flags.enabled; // CEO #2 — off ⇒ legacy notify-only box, no date UI
+  const requestEnabled = flags.enabled; // CEO #2: off ⇒ legacy notify-only box, no date UI
   const minDate = minRequestDate(flags.minLeadDays);
 
   const [email, setEmail] = React.useState("");
@@ -873,7 +873,7 @@ function DateInterestForm({ tourId, packageId }) {
     if (Object.keys(fe).length) { setFieldErr(fe); setPhase("idle"); return; }
     if (phase === "submitting") return;
 
-    // Flag-off / prototype: no live API — toast + success, exactly as the legacy box did.
+    // Flag-off / prototype: no live API, toast + success, exactly as the legacy box did.
     if (!LIVE_INTEREST()) { setPhase("done"); window.tkToast && window.tkToast("Thanks! We'll email you when dates open."); return; }
 
     setPhase("submitting"); setErr(null); setFieldErr({});
@@ -888,7 +888,7 @@ function DateInterestForm({ tourId, packageId }) {
       if (isRequest && res && res.indicativeTotalMinor != null) setIndicative(res.indicativeTotalMinor);
       setPhase("done");
     } catch (e) {
-      // 422 ⇒ server-side validation (sub-lead date / bad email) — surface inline on the date field.
+      // 422 ⇒ server-side validation (sub-lead date / bad email), surface inline on the date field.
       if (e && e.status === 422) {
         setFieldErr({ date: (e && e.message) || "Please choose a different date." });
         setPhase("idle");
@@ -900,17 +900,17 @@ function DateInterestForm({ tourId, packageId }) {
   }
 
   if (phase === "duplicate") return (
-    <Alert tone="info" title="Already requested">You've already requested this date — we'll be in touch.</Alert>
+    <Alert tone="info" title="Already requested">You've already requested this date, we'll be in touch.</Alert>
   );
   // Success + inline-error rendering below reuse the DS Alert (tones: info/success/error/warning) and
-  // FormField's `help`/`error`/`optional` props — no net-new visual language (Designer redline TRI-1140).
+  // FormField's `help`/`error`/`optional` props, no net-new visual language (Designer redline TRI-1140).
   if (phase === "done") {
     // Success copy differs by path: a dated request gets the 24h-SLA + secure-link promise (CEO #5,
     // verbatim); the legacy notify path keeps its "you're on the list" waitlist confirmation.
     if (isRequest) return (
       <Alert tone="success" title="Request received">
         A koach will confirm your date within 24 hours and send a secure link to book.
-        {indicative != null ? <><br /><span className="tk-caption">Estimated {money(indicative / 100, "USD")} — indicative, confirmed on quote.</span></> : null}
+        {indicative != null ? <><br /><span className="tk-caption">Estimated {money(indicative / 100, "USD")} (indicative, confirmed on quote).</span></> : null}
       </Alert>
     );
     return (
@@ -959,7 +959,7 @@ function DateInterestForm({ tourId, packageId }) {
 
 function TourWeb({ go, currency, slug }) {
   // Slug-addressable tour detail (TRI-888/C2). A slug is only ever passed in live
-  // mode; without one — the fixture prototype and every flag-off build — this
+  // mode; without one (the fixture prototype and every flag-off build) this
   // falls back to tours[0], so behaviour there is byte-for-byte unchanged.
   const tours = window.TK_DATA.tours;
   const t0 = (slug && tours.find(t => t.id === slug || t.slug === slug)) || tours[0];
@@ -976,12 +976,12 @@ function TourWeb({ go, currency, slug }) {
     if (!deps.length) return null;
     // TRI-1035: keep the initial departure inside the selected package so the route tab
     // and the pricing radio agree on load. Fall back to the whole list for no-package tours
-    // (or a package with no dates yet — the picker reconciles the radio to a real track).
+    // (or a package with no dates yet, the picker reconciles the radio to a real track).
     const inPkg = pkgId ? deps.filter(x => x.packageSlug === pkgId) : deps;
     const pool = inPkg.length ? inPkg : deps;
     return pool.some(x => x.id === "d2") ? "d2" : ((pool[1] || pool[0]).id);
   });
-  // TRI-1035: choosing a package (pricing radio OR route tab) is one action — move the
+  // TRI-1035: choosing a package (pricing radio OR route tab) is one action, move the
   // selected departure into that package so Reserve stays valid and both controls agree.
   const choosePackage = (id) => {
     setPkgId(id);
@@ -997,7 +997,7 @@ function TourWeb({ go, currency, slug }) {
   // TRI-1143 · secondary entry point to the custom-date request flow ON tours that DO have departures.
   // Board/CEO: a traveller should be able to request their own date even when dates are listed, not only
   // on the empty-departures case (TRI-1138). We reuse the SAME DateInterestForm + backend/inbox pipeline
-  // (POST /tours/:id/interest, intent "request") — no second pipeline. Gated behind the SAME
+  // (POST /tours/:id/interest, intent "request"), no second pipeline. Gated behind the SAME
   // date_requests_enabled flag: when it's off (or the flag-off prototype), `dateRequestsOn` is false and
   // the departures branch renders exactly as before (byte-identical). `showRequest` reveals the form on
   // demand so the primary "Reserve my spot" flow stays visually front-and-centre.
@@ -1033,7 +1033,7 @@ function TourWeb({ go, currency, slug }) {
           ) : null}
           <div className="tk-stack" style={{ gap: "var(--space-3)" }}>
             <h2 className="tk-h3">Group pricing</h2>
-            <p className="tk-body" style={{ color: "var(--text-muted)", marginTop: -6 }}>{"Per person, in " + currency + ". The bigger your group, the less each traveller pays — the price updates automatically at checkout."}</p>
+            <p className="tk-body" style={{ color: "var(--text-muted)", marginTop: -6 }}>{"Per person, in " + currency + ". The bigger your group, the less each traveller pays. The price updates automatically at checkout."}</p>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(" + (t.tiers ? t.tiers.length : 1) + ", 1fr)", gap: "var(--space-4)" }}>
               {(t.tiers || []).map((tier, i) => (
                 <div key={i} className="tk-card" style={{ borderColor: i === (t.tiers.length - 1) ? "var(--brand-ink)" : undefined }}><div className="tk-card__body" style={{ padding: "var(--space-5)", gap: 4, alignItems: "flex-start" }}>
@@ -1053,9 +1053,9 @@ function TourWeb({ go, currency, slug }) {
           <div>
             <h2 className="tk-h3" style={{ marginBottom: "var(--space-3)" }}>Details</h2>
             <Accordion defaultOpen={["itin"]} items={[
-              { id: "itin", title: t.stops ? "Route · stop by stop" : ((t.itinerary && t.itinerary[0] && String(t.itinerary[0][0]).startsWith("Day")) ? "Day by day" : "Itinerary"), content: t.stops ? <ol style={{ margin: 0, paddingInlineStart: 18, display: "grid", gap: 6 }}>{t.stops.map(s => <li key={s}>{s}</li>)}</ol> : <ol style={{ margin: 0, paddingInlineStart: 18, display: "grid", gap: 6 }}>{(t.itinerary || []).map(([time, what]) => <li key={time + what}><strong>{time}</strong> — {what}</li>)}</ol> },
+              { id: "itin", title: t.stops ? "Route · stop by stop" : ((t.itinerary && t.itinerary[0] && String(t.itinerary[0][0]).startsWith("Day")) ? "Day by day" : "Itinerary"), content: t.stops ? <ol style={{ margin: 0, paddingInlineStart: 18, display: "grid", gap: 6 }}>{t.stops.map(s => <li key={s}>{s}</li>)}</ol> : <ol style={{ margin: 0, paddingInlineStart: 18, display: "grid", gap: 6 }}>{(t.itinerary || []).map(([time, what]) => <li key={time + what}><strong>{time}</strong>: {what}</li>)}</ol> },
               { id: "inc", title: "What's included", content: <div style={{ display: "grid", gap: 8 }}>{t.included.map(i => <span key={i} style={{ display: "flex", gap: 8 }}><Icon name="check" size={15} style={{ color: "var(--success-fg)" }} />{i}</span>)}{t.excluded.map(i => <span key={i} style={{ display: "flex", gap: 8, color: "var(--text-muted)" }}><Icon name="x" size={15} />{i}</span>)}</div> },
-              { id: "meet", title: "Meeting point & getting there", content: <p>Your koach confirms the pickup point when you book — hotel pickup within Accra for day tours, airport pickup at KIA for multi-day trips.</p> },
+              { id: "meet", title: "Meeting point & getting there", content: <p>Your koach confirms the pickup point when you book: hotel pickup within Accra for day tours, airport pickup at KIA for multi-day trips.</p> },
               { id: "pol", title: "Cancellation policy", content: <p>Free cancellation until 7 days before departure. Between 7 and 2 days, half the total is held. Inside 48 hours the booking is non-refundable.</p> },
             ]} />
           </div>
@@ -1066,7 +1066,7 @@ function TourWeb({ go, currency, slug }) {
           <div className="tk-card" style={{ boxShadow: "var(--elev-3)" }}><div className="tk-card__body" style={{ gap: "var(--space-4)", padding: "var(--space-5)" }}>
             <div className="tk-stack" style={{ gap: 2 }}>
               {/* TRI-994: headline must map to the tier for the default party size (1 traveller),
-                  not the tour's base/6+ ("6 or more") tier. `t.price` is the base (cheapest) tier —
+                  not the tour's base/6+ ("6 or more") tier. `t.price` is the base (cheapest) tier.
                   showing it here made a solo booker see the biggest-group price. Group pricing table
                   below still lists every tier; the price recomputes at checkout as the count changes. */}
               <Price amount={cvt(window.TK_PRICE.perPerson(t, 1), currency)} currency={currency} size="lg" unit="per person" />
@@ -1076,7 +1076,7 @@ function TourWeb({ go, currency, slug }) {
               <GroupedDeparturePicker departures={t.departures} value={dep} onChange={setDep} currency={currency} packages={t0.packages} legend="Choose a departure" activePackageId={pkgId} onPackageChange={choosePackage} routeSelectedElsewhere={!!t0.packages} />
               <Button size="lg" block disabled={!dep} onClick={() => { window.TK_SEL = { tourId: t0.id, apiTourId: t0._apiId, packageId: pkgId, packageName: t.packageName, departureId: dep }; go("checkout"); }}>Reserve my spot</Button>
               <p className="tk-caption" style={{ display: "flex", gap: 6 }}><Icon name="wallet" size={14} />Nothing is charged today. Pay before departure.</p>
-              {/* TRI-1143 · "None of these dates work?" — the same custom-date request flow as the
+              {/* TRI-1143 · "None of these dates work?", the same custom-date request flow as the
                   empty-departures case, surfaced under the departure picker. Flag-gated + collapsed by
                   default so the primary Reserve flow is unchanged; opening it reveals the shared
                   DateInterestForm (same POST /tours/:id/interest → admin Requests inbox). */}
@@ -1086,7 +1086,7 @@ function TourWeb({ go, currency, slug }) {
                     // TRI-1144 · render the trigger as an in-flow, full-width text link that WRAPS.
                     // The DS <Button variant="link"> is a fixed-height inline-flex control whose base
                     // `.tk-btn` sets `white-space:nowrap`, so this full-sentence label could not wrap and
-                    // overflowed the booking card's right edge — the trailing word ("date") was clipped
+                    // overflowed the booking card's right edge, the trailing word ("date") was clipped
                     // (board screenshot). A plain link-styled <button> keeps the same action + native-button
                     // a11y but flows beneath the picker, stays inside the card (width:100%), and wraps on
                     // narrow/mobile widths. Icon is top-aligned so it sits with the first line when wrapped.
@@ -1109,7 +1109,7 @@ function TourWeb({ go, currency, slug }) {
                 </div>
               ) : null}
             </>) : (
-              // TRI-998/TRI-999/TRI-1018: no upcoming departures — replace the picker + "Reserve my spot"
+              // TRI-998/TRI-999/TRI-1018: no upcoming departures, replace the picker + "Reserve my spot"
               // with a graceful empty state + a REAL email-interest capture (POST /tours/:id/interest),
               // not a route to the generic contact form. The tour stays discoverable (board default) so
               // travellers can register interest and ops can schedule a departure for them.
@@ -1142,11 +1142,11 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
   const t0 = (sel && window.TK_DATA.tours.find(x => x.id === sel.tourId || x.slug === sel.tourId)) || window.TK_DATA.tours[0];
   const t = (t0.packages && sel && sel.packageId) ? pkgTour(t0, sel.packageId) : t0;
   // Traveller count (TRI-922). The prototype defaulted to 4 AND only exposed the
-  // count stepper on step 0 (Departure) — which the user never lands on, since
-  // checkout opens on step 1 — so it "assumed 4 travellers" with no way to change
+  // count stepper on step 0 (Departure), which the user never lands on, since
+  // checkout opens on step 1, so it "assumed 4 travellers" with no way to change
   // it. Live now defaults to 2 and renders a working count control on the
   // travellers step (below); flag off keeps the prototype default 4 (byte-identical).
-  // TRI-994: live default is 1 traveller (was 2) — a booking starts as a solo reservation and the
+  // TRI-994: live default is 1 traveller (was 2), a booking starts as a solo reservation and the
   // count control lets the guest add companions, recomputing the per-person tier price as they go.
   const [pax, setPax] = React.useState(() => LIVE_BOOK() ? 1 : 4);
   const [mode, setMode] = React.useState("later");
@@ -1158,13 +1158,13 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
   const [err, setErr] = React.useState(null);
   // Promo code (TRI-1013). The prototype rendered an inert <PromoCode state="idle" /> with no onApply and
   // never threaded a code into the booking, so "Apply" did nothing and the charge never moved. Live now
-  // prices the code against POST /bookings/quote (a read-only preview — no seat held, no redemption claimed)
+  // prices the code against POST /bookings/quote (a read-only preview, no seat held, no redemption claimed)
   // so the discount shows BEFORE payment, and threads the applied code into POST /bookings, where the
   // backend re-validates + re-applies it authoritatively at charge time. Flag off ⇒ inert (never rendered).
   const [promo, setPromo] = React.useState({ state: "idle", code: "", discount: 0, error: null });
   // Lead traveller prefill from the signed-in account (TRI-920, re-ported in TRI-927).
   // The fields live in state (not the DOM) so they survive the step unmount between
-  // Travellers → Review → Payment — previously the values were read from the DOM at
+  // Travellers → Review → Payment. Previously the values were read from the DOM at
   // pay time, after those inputs had unmounted, and the booking was submitted with an
   // empty lead → POST /bookings 422 (the TRI-926 checkout-blocking bug). Controlled
   // inputs also let the real profile populate once /me resolves. Flag off ⇒ liveAuth
@@ -1195,7 +1195,7 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
   }, [live, paxMax, pax]);
   // Live pricing mirrors the backend exactly (TRI-930): booking.ts charges the
   // selected departure's price × pax (unitPriceMinor returns the departure override
-  // ahead of any group tier), so surface that same number here — otherwise the
+  // ahead of any group tier), so surface that same number here, otherwise the
   // checkout would display the tier step-function price while Paystack charged the
   // flat departure price. Falls back to the tier function when a departure carries
   // no explicit price. Flag off ⇒ prototype tier step-function (byte-identical).
@@ -1206,7 +1206,7 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
 
   // Promo discount + net total (TRI-1013). Amounts are USD (currency of record), matching the backend quote;
   // cvt()/money() convert for display. Backend re-applies the code at charge time, so the charge is always
-  // authoritative — this preview just keeps the UI honest before the customer pays.
+  // authoritative. This preview just keeps the UI honest before the customer pays.
   const promoTourSlug = (window.TK_SEL && window.TK_SEL.tourId) || t0.id;
   async function applyPromo(rawCode) {
     const code = String(rawCode || "").trim().toUpperCase();
@@ -1271,13 +1271,13 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
         partySize: pax, totalUsd: bk.totalUsd != null ? bk.totalUsd : total, email: lead.email, payMode: mode,
         // TRI-1095: stash the capability token so the confirm page (which recovers
         // the ref from sessionStorage after the Paystack redirect) can reload the
-        // now token-gated booking. Not persisted anywhere durable — sessionStorage only.
+        // now token-gated booking. Not persisted anywhere durable, sessionStorage only.
         publicToken: bk.publicToken || null,
       });
       if (mode === "now") {
         const init = await window.TK_BOOKING.initPayment(bk.ref, { callbackUrl: window.location.origin + "/confirm?ref=" + encodeURIComponent(bk.ref), token: bk.publicToken || undefined });
         if (!window.TK_BOOKING.redirect(init)) throw new Error("Payment could not be started. Please try again.");
-        return; // full-page redirect to Paystack — SPA unloads here
+        return; // full-page redirect to Paystack, SPA unloads here
       }
       go("confirm");
       try { window.history.replaceState(window.history.state, "", "/confirm?ref=" + encodeURIComponent(bk.ref)); } catch (_) {}
@@ -1323,7 +1323,7 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
             {live
               ? (pax > 1 && <div className="tk-card"><div className="tk-card__body" style={{ gap: "var(--space-4)", padding: "var(--space-5)" }}>
                   {/* Exactly pax-1 companion fields, matching the chosen count (TRI-922). */}
-                  <span className="tk-overline">{pax === 2 ? "Traveller 2" : "Travellers 2–" + pax}</span>
+                  <span className="tk-overline">{pax === 2 ? "Traveller 2" : "Travellers 2 to " + pax}</span>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-4)" }}>
                     {Array.from({ length: pax - 1 }, (_, i) => (
                       <FormField key={i} id={"w-t" + (i + 2)} label={"Traveller " + (i + 2)} required><Input /></FormField>
@@ -1331,7 +1331,7 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
                   </div>
                 </div></div>)
               : <div className="tk-card"><div className="tk-card__body" style={{ gap: "var(--space-4)", padding: "var(--space-5)" }}>
-                  <span className="tk-overline">Travellers 2–4</span>
+                  <span className="tk-overline">Travellers 2 to 4</span>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-4)" }}>
                     <FormField id="w-t2" label="Traveller 2" required><Input /></FormField>
                     <FormField id="w-t3" label="Traveller 3" required error="Enter a name for traveller 3"><Input /></FormField>
@@ -1347,12 +1347,12 @@ function CheckoutWeb({ go, step, setStep, currency = "USD" }) {
               {t0.packages ? <div className="tk-summary__line"><span>Package</span><span>{t.packageName}</span></div> : null}
               <div className="tk-summary__line"><span>Departure</span><span>{d.date}, {d.time}</span></div>
               <div className="tk-summary__line"><span>Travellers</span><span>{pax}</span></div>
-              <div className="tk-summary__line"><span>Lead traveller</span><span>{liveAuth ? ((leadInfo.name || "—") + " · " + (leadInfo.email || "—")) : "Ama Mensah · ama@example.com"}</span></div>
+              <div className="tk-summary__line"><span>Lead traveller</span><span>{liveAuth ? ((leadInfo.name || "-") + " · " + (leadInfo.email || "-")) : "Ama Mensah · ama@example.com"}</span></div>
             </div></div>
             <Checkbox id="w-agree" label="I agree to the booking terms and cancellation policy" />
             {/* TRI-1150: let the traveller actually READ what they're agreeing to. Canonical
                 T&C (admin-set, window.TK_TERMS via /config) rendered in a native <details>
-                disclosure — keyboard + screen-reader friendly, zero extra bytes/JS, works on
+                disclosure, keyboard + screen-reader friendly, zero extra bytes/JS, works on
                 low-bandwidth. Hidden entirely until Content publishes real copy (no placeholder). */}
             {window.TK_TERMS ? <TkTermsDisclosure /> : null}
           </>}
@@ -1416,7 +1416,7 @@ function BookingsWeb({ go, currency = "USD" }) {
     return (
       <AccountShell current="bookings" go={go} title="Your bookings">
         <Tabs value={tab} onChange={setTab} tabs={[{ id: "all", label: "All", count: bookings.length }, { id: "pending", label: "Pending", count: pendingN }, { id: "confirmed", label: "Confirmed", count: count("confirmed") }, { id: "cancelled", label: "Cancelled", count: count("cancelled") }]} />
-        {pendingN > 0 && <Alert tone="warning" title={pendingN === 1 ? "One booking is waiting for payment" : pendingN + " bookings are waiting for payment"} action={<Button variant="link" size="sm" onClick={() => window.tkToast("Pay by card or mobile money — instructions are in your confirmation email")}>See how to pay</Button>}>Pay before your departure to lock in your spots.</Alert>}
+        {pendingN > 0 && <Alert tone="warning" title={pendingN === 1 ? "One booking is waiting for payment" : pendingN + " bookings are waiting for payment"} action={<Button variant="link" size="sm" onClick={() => window.tkToast("Pay by card or mobile money. Instructions are in your confirmation email")}>See how to pay</Button>}>Pay before your departure to lock in your spots.</Alert>}
         {bookings.length === 0
           ? <div className="tk-card"><div className="tk-card__body" style={{ padding: "var(--space-8)", alignItems: "center", textAlign: "center", gap: 10 }}><span className="tk-body-sm tk-muted">No bookings yet. When you book a tour it'll show up here.</span><Button variant="secondary" size="sm" onClick={() => go("browse")}>Browse tours</Button></div></div>
           : <div style={{ display: "grid", gap: 12 }}>
@@ -1426,7 +1426,7 @@ function BookingsWeb({ go, currency = "USD" }) {
               <div key={b.ref} style={{ display: "grid", gap: 8 }}>
                 <BookingRow reference={b.ref} title={b.tourTitle} date={b.departureLabel || b.date} travellers={paxLabel(b.partySize)} total={cvt(b.total, currency)} currency={currency} status={b.ds} image={imgFor(b)} onClick={() => go("booking", b.ref)} />
                 {rv.state === "open" && <div style={{ display: "flex", justifyContent: "flex-end" }}><Button variant="secondary" size="sm" iconStart="pencil" onClick={() => setReviewFor({ tour: tourFor(b), token: rv.token, ref: b.ref })}>Leave a review</Button></div>}
-                {rv.state === "submitted" && <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 6, color: "var(--success-fg)" }}><Icon name="circle-check-big" size={15} /><span className="tk-caption">Review submitted — thanks!</span></div>}
+                {rv.state === "submitted" && <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 6, color: "var(--success-fg)" }}><Icon name="circle-check-big" size={15} /><span className="tk-caption">Review submitted, thanks!</span></div>}
               </div>
               );
             })}
@@ -1441,7 +1441,7 @@ function BookingsWeb({ go, currency = "USD" }) {
   return (
     <AccountShell current="bookings" go={go} title="Your bookings">
       <Tabs value={tab} onChange={setTab} tabs={[{ id: "all", label: "All", count: 3 }, { id: "pending", label: "Pending", count: 1 }, { id: "confirmed", label: "Confirmed", count: 1 }, { id: "cancelled", label: "Cancelled", count: 1 }]} />
-      <Alert tone="warning" title="One booking is waiting for payment" action={<Button variant="link" size="sm" onClick={() => window.tkToast("Pay by card or mobile money — instructions are in your confirmation email")}>See how to pay</Button>}>TK-4821 is held until 7 Sep.</Alert>
+      <Alert tone="warning" title="One booking is waiting for payment" action={<Button variant="link" size="sm" onClick={() => window.tkToast("Pay by card or mobile money. Instructions are in your confirmation email")}>See how to pay</Button>}>TK-4821 is held until 7 Sep.</Alert>
       <div style={{ display: "grid", gap: 12 }}>
         {(tab === "all" ? all : all.filter(b => b.status === tab)).map(b => (
           <div key={b.ref} style={{ display: "grid", gap: 8 }}>
@@ -1465,14 +1465,14 @@ function ConfirmWebLive({ go, currency = "USD" }) {
   const ref = params.get("ref") || window.TK_BOOKING.lastRef();
   const reference = params.get("reference") || params.get("trxref") || "";
   const ctx = window.TK_BOOKING.loadCtx(ref) || {};
-  // TRI-1095: capability token — from the URL (?t=) or the stashed checkout ctx —
+  // TRI-1095: capability token, from the URL (?t=) or the stashed checkout ctx,
   // so the guest can reload their now token-gated booking after the redirect.
   const token = params.get("t") || ctx.publicToken || "";
   const [bk, setBk] = React.useState(null);
   const [phase, setPhase] = React.useState(ref ? "loading" : "pending");
   // TRI-1095 (part 2): only offer the account-scoped "my bookings" list to a
   // signed-in user. A guest checkout has no account, so surfacing it would imply
-  // one they don't have (and strand them at /login) — they use the receipt link.
+  // one they don't have (and strand them at /login). They use the receipt link.
   const [authed, setAuthed] = React.useState(null);
   React.useEffect(() => {
     let alive = true;
@@ -1509,7 +1509,7 @@ function ConfirmWebLive({ go, currency = "USD" }) {
             : ref
             ? <Button size="lg" iconStart="download" onClick={() => go("booking", ref)}>View &amp; download receipt</Button>
             : null}
-          {/* The "my bookings" list is an account feature — only for a signed-in
+          {/* The "my bookings" list is an account feature, only for a signed-in
               user (TRI-1095 part 2). Guests reach their booking via the receipt
               button above (token-scoped), never a login wall implying an account. */}
           {!failed && authed
@@ -1517,17 +1517,17 @@ function ConfirmWebLive({ go, currency = "USD" }) {
             : null}
         </>}>
         <div className="tk-card" style={{ width: "100%", textAlign: "start" }}><div className="tk-card__body" style={{ padding: "var(--space-5)" }}>
-          <div className="tk-summary__line"><span>Tour</span><span>{tourTitle || "—"}</span></div>
-          <div className="tk-summary__line"><span>Departure</span><span>{departureLabel || "—"}</span></div>
-          <div className="tk-summary__line"><span>Travellers</span><span>{partySize || "—"}</span></div>
-          <div className="tk-summary__total"><span>{paid ? "Total paid" : "Total due"}</span><span className="tk-num" style={{ fontWeight: 800 }}>{totalStr || "—"}</span></div>
+          <div className="tk-summary__line"><span>Tour</span><span>{tourTitle || "-"}</span></div>
+          <div className="tk-summary__line"><span>Departure</span><span>{departureLabel || "-"}</span></div>
+          <div className="tk-summary__line"><span>Travellers</span><span>{partySize || "-"}</span></div>
+          <div className="tk-summary__total"><span>{paid ? "Total paid" : "Total due"}</span><span className="tk-num" style={{ fontWeight: 800 }}>{totalStr || "-"}</span></div>
         </div></div>
         {loading
           ? <Alert tone="info" title="Just a moment">We're checking your payment status with Paystack.</Alert>
           : paid
-          ? <Alert tone="success" title="Payment received">We charged <strong>{totalStr}</strong> via Paystack. Your spots are confirmed — no further action needed.</Alert>
+          ? <Alert tone="success" title="Payment received">We charged <strong>{totalStr}</strong> via Paystack. Your spots are confirmed, no further action needed.</Alert>
           : failed
-          ? <Alert tone="warning" title="Payment not completed">Your payment didn't go through and nothing was charged. Your spots are still held under <strong>{ref}</strong> — try again, or switch to pay later.</Alert>
+          ? <Alert tone="warning" title="Payment not completed">Your payment didn't go through and nothing was charged. Your spots are still held under <strong>{ref}</strong>. Try again, or switch to pay later.</Alert>
           : <Alert tone="warning" title="How to pay">Your koach will email payment options (bank transfer, mobile money or card), quoting <strong>{ref}</strong>. Pay at least 5 days before departure to lock in your spots.</Alert>}
       </ConfirmationPanel>
     </div>
@@ -1551,7 +1551,7 @@ function ConfirmWeb({ go, currency = "USD" }) {
           <div className="tk-summary__total"><span>{paid ? "Total paid" : "Total due"}</span><span className="tk-num" style={{ fontWeight: 800 }}>{totalStr}</span></div>
         </div></div>
         {paid
-          ? <Alert tone="success" title="Payment received">We charged your card <strong>{totalStr}</strong> via Paystack. Your spots are confirmed — no further action needed.</Alert>
+          ? <Alert tone="success" title="Payment received">We charged your card <strong>{totalStr}</strong> via Paystack. Your spots are confirmed, no further action needed.</Alert>
           : <Alert tone="warning" title="How to pay">Your koach will email payment options (bank transfer, mobile money or card), quoting <strong>TK-4821</strong>. Pay at least 5 days before departure to lock in your spots.</Alert>}
       </ConfirmationPanel>
     </div>
@@ -1561,18 +1561,18 @@ function ConfirmWeb({ go, currency = "USD" }) {
 // A reopenable, ref-addressable view of a single booking (/booking/:ref), reached
 // from /me/bookings (row click) and from the post-payment /confirm page. Renders
 // the full confirmed-booking detail and a "Download receipt" action that opens a
-// self-contained, print-to-PDF HTML receipt — no third-party libraries. Live only
+// self-contained, print-to-PDF HTML receipt, no third-party libraries. Live only
 // (needs TK_BOOKING); the fixture prototype never links here.
 
 // Money formatters for the standalone receipt document (which can't reach the DS).
 function tkFmtUsd(n) { return "$" + (Number(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function tkFmtGhs(n) { return "GH₵" + (Number(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function tkFmtDate(iso) {
-  if (!iso) return "—";
+  if (!iso) return "-";
   try { return new Date(iso).toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }); }
   catch (_) { return String(iso); }
 }
-// TRI-1066: consolidated onto the one shared DS escaper (NS.escapeHtml) — same
+// TRI-1066: consolidated onto the one shared DS escaper (NS.escapeHtml), same
 // full-set (& < > " ') semantics as the old local copy, so the receipt renders
 // byte-for-byte identically.
 const tkEsc = NS.escapeHtml;
@@ -1590,16 +1590,16 @@ function tkReceiptHtml(d) {
   var travellers = Array.isArray(d.travellers) ? d.travellers : [];
   var lead = travellers.find(function (t) { return t.isLead; }) || travellers[0] || {};
   var paid = pay && (pay.status === "paid" || d.status === "confirmed" || d.status === "completed");
-  var depLabel = dep.date ? (dep.date + (dep.time ? ", " + dep.time : "")) : "—";
+  var depLabel = dep.date ? (dep.date + (dep.time ? ", " + dep.time : "")) : "-";
   var rows = [];
-  rows.push(["Booking reference", d.ref || "—"]);
-  rows.push(["Status", (d.status || "—").toUpperCase()]);
+  rows.push(["Booking reference", d.ref || "-"]);
+  rows.push(["Status", (d.status || "-").toUpperCase()]);
   rows.push(["Booked on", tkFmtDate(d.createdAt)]);
-  rows.push(["Tour", tour.title || "—"]);
+  rows.push(["Tour", tour.title || "-"]);
   rows.push(["Departure", depLabel]);
-  rows.push(["Travellers", String(q.partySize || travellers.length || "—")]);
-  rows.push(["Lead traveller", lead.name || "—"]);
-  rows.push(["Contact email", lead.email || "—"]);
+  rows.push(["Travellers", String(q.partySize || travellers.length || "-")]);
+  rows.push(["Lead traveller", lead.name || "-"]);
+  rows.push(["Contact email", lead.email || "-"]);
 
   var lineRows = "";
   lineRows += "<tr><td>" + tkEsc(tour.title || "Tour") + " × " + tkEsc(q.partySize || 1) +
@@ -1619,7 +1619,7 @@ function tkReceiptHtml(d) {
   var payBlock = pay && pay.reference ? (
     "<table class=\"info\">" +
     "<tr><td class=\"k\">Payment reference</td><td class=\"v\">" + tkEsc(pay.reference) + "</td></tr>" +
-    "<tr><td class=\"k\">Payment status</td><td class=\"v\">" + tkEsc((pay.status || "—").toUpperCase()) + "</td></tr>" +
+    "<tr><td class=\"k\">Payment status</td><td class=\"v\">" + tkEsc((pay.status || "-").toUpperCase()) + "</td></tr>" +
     (pay.method ? "<tr><td class=\"k\">Method</td><td class=\"v\">" + tkEsc(pay.method) + "</td></tr>" : "") +
     "<tr><td class=\"k\">Payment date</td><td class=\"v\">" + tkEsc(tkFmtDate(pay.at)) + "</td></tr>" +
     (pay.ghs != null ? "<tr><td class=\"k\">Amount charged</td><td class=\"v\"><strong>" + tkEsc(tkFmtGhs(pay.ghs)) + "</strong></td></tr>" : "") +
@@ -1721,7 +1721,7 @@ function BookingDetailWeb({ go, currency = "USD", bref }) {
 
   // Standalone page (NOT the auth-gated AccountShell): GET /bookings/:ref is
   // public, and this view is reachable from the post-payment /confirm page where
-  // a guest-checkout customer isn't signed in — bouncing them to login would
+  // a guest-checkout customer isn't signed in, bouncing them to login would
   // strand them from their own receipt.
   const Wrap = ({ children }) => (
     <div className="tk-container" style={{ paddingBlock: "var(--space-8) var(--space-12)", maxWidth: 720 }}>
@@ -1759,7 +1759,7 @@ function BookingDetailWeb({ go, currency = "USD", bref }) {
   const travellers = Array.isArray(dto.travellers) ? dto.travellers : [];
   const lead = travellers.find((t) => t.isLead) || travellers[0] || {};
   const paid = pay && (pay.status === "paid" || dto.status === "confirmed" || dto.status === "completed");
-  const depLabel = dep.date ? (dep.date + (dep.time ? ", " + dep.time : "")) : "—";
+  const depLabel = dep.date ? (dep.date + (dep.time ? ", " + dep.time : "")) : "-";
   const line = (label, value, opts) => (
     <div className="tk-summary__line" style={opts && opts.strong ? { fontWeight: 700 } : undefined}><span>{label}</span><span>{value}</span></div>
   );
@@ -1775,7 +1775,7 @@ function BookingDetailWeb({ go, currency = "USD", bref }) {
       </div>
 
       {paid
-        ? <Alert tone="success" title="Booking confirmed">Payment received — your spots are locked in. Download your receipt for your records.</Alert>
+        ? <Alert tone="success" title="Booking confirmed">Payment received. Your spots are locked in. Download your receipt for your records.</Alert>
         : (dto.status === "cancelled" || dto.status === "expired")
         ? <Alert tone="warning" title="This booking is no longer active">Reference {dto.ref} is {dto.status}.</Alert>
         : <Alert tone="warning" title="Payment pending">Your spots are held under {dto.ref}. Complete payment to confirm.</Alert>}
@@ -1785,9 +1785,9 @@ function BookingDetailWeb({ go, currency = "USD", bref }) {
         {line("Booking reference", dto.ref)}
         {line("Booked on", tkFmtDate(dto.createdAt))}
         {line("Departure", depLabel)}
-        {line("Travellers", String(q.partySize || travellers.length || "—"))}
-        {line("Lead traveller", lead.name || "—")}
-        {line("Contact email", lead.email || "—")}
+        {line("Travellers", String(q.partySize || travellers.length || "-"))}
+        {line("Lead traveller", lead.name || "-")}
+        {line("Contact email", lead.email || "-")}
       </div></div>
 
       <div className="tk-card" style={{ textAlign: "start" }}><div className="tk-card__body" style={{ padding: "var(--space-5)" }}>
@@ -1801,7 +1801,7 @@ function BookingDetailWeb({ go, currency = "USD", bref }) {
         <div className="tk-card" style={{ textAlign: "start" }}><div className="tk-card__body" style={{ padding: "var(--space-5)" }}>
           <h3 className="tk-h6" style={{ margin: "0 0 10px" }}>Payment</h3>
           {line("Payment reference", pay.reference)}
-          {line("Payment status", (pay.status || "—").toUpperCase())}
+          {line("Payment status", (pay.status || "-").toUpperCase())}
           {pay.method ? line("Method", pay.method) : null}
           {line("Payment date", tkFmtDate(pay.at))}
           {pay.ghs != null ? line("Amount charged", tkFmtGhs(pay.ghs), { strong: true }) : null}

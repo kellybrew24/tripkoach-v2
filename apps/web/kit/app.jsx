@@ -45,11 +45,11 @@ function routeFromPath(pathname, search) {
   const bk = path.match(/^\/booking\/(.+)$/);
   if (bk) return { screen: "booking", slug: decodeURIComponent(bk[1]) };
   // The emailed password-reset link (Backend TRI-881: APP_BASE_URL/reset-password
-  // ?token=…) lands here — reuse the ForgotWeb screen, which reads the token off
+  // ?token=…) lands here. Reuse the ForgotWeb screen, which reads the token off
   // the URL and opens on its "set a new password" stage.
   if (path === "/reset-password") return { screen: "forgot", slug: null };
   // The emailed email-verification link (Backend TRI-941: APP_BASE_URL/verify-email
-  // ?token=…) lands here — the VerifyEmailPage reads the token off the URL and
+  // ?token=…) lands here. The VerifyEmailPage reads the token off the URL and
   // POSTs /auth/verify-email, showing a success / expired / already-verified state.
   if (path === "/verify-email") return { screen: "verify", slug: null };
   // Tokenized review-invite deep link (TRI-894): the address Backend emails
@@ -127,7 +127,7 @@ function postNeedsHydration(slug) {
 // already-loaded fixtures / hydrated data so shared links read well.
 const TK_SITE_NAME = "TripKoach";
 const TK_DEFAULT_DESC =
-  "Guided small-group tours across Ghana — festivals, coastline, culture and nature, booked with a local koach.";
+  "Guided small-group tours across Ghana. Festivals, coastline, culture and nature, booked with a local koach.";
 function tkOrigin() {
   try { return (window.location.origin || "").replace(/\/+$/, ""); } catch (_) { return ""; }
 }
@@ -154,17 +154,17 @@ const TK_NOINDEX = ["login", "signup", "forgot", "verify", "checkout", "confirm"
   "bookings", "booking", "profile", "notifications", "account-settings", "review", "reviews",
   "notfound"];
 const TK_SCREEN_META = {
-  home: { title: "TripKoach — Guided tours across Ghana", desc: TK_DEFAULT_DESC },
-  browse: { title: "Browse tours — TripKoach", desc: "Explore guided tour packages across Ghana's regions. Filter by region, compare prices and reserve your spot." },
-  regions: { title: "Regions of Ghana — TripKoach", desc: "Nine regions, one koach. Discover the festivals, coastline, culture and nature that make each corner of Ghana worth the trip." },
-  marketplace: { title: "Marketplace — TripKoach", desc: "Travel gear, local crafts and trip add-ons curated for your Ghana adventure." },
-  esim: { title: "Travel eSIM — TripKoach", desc: "Stay connected across Ghana with a data eSIM that works the moment you land." },
-  pickup: { title: "Airport pickup — TripKoach", desc: "Book a vetted driver to meet you at Kotoka and get you to your first stop." },
-  club: { title: "Tourism clubs — TripKoach", desc: "Join a TripKoach tourism club and explore Ghana with a community of travellers." },
+  home: { title: "TripKoach: Guided tours across Ghana", desc: TK_DEFAULT_DESC },
+  browse: { title: "Browse tours: TripKoach", desc: "Explore guided tour packages across Ghana's regions. Filter by region, compare prices and reserve your spot." },
+  regions: { title: "Regions of Ghana: TripKoach", desc: "Nine regions, one koach. Discover the festivals, coastline, culture and nature that make each corner of Ghana worth the trip." },
+  marketplace: { title: "Marketplace: TripKoach", desc: "Travel gear, local crafts and trip add-ons curated for your Ghana adventure." },
+  esim: { title: "Travel eSIM: TripKoach", desc: "Stay connected across Ghana with a data eSIM that works the moment you land." },
+  pickup: { title: "Airport pickup: TripKoach", desc: "Book a vetted driver to meet you at Kotoka and get you to your first stop." },
+  club: { title: "Tourism clubs: TripKoach", desc: "Join a TripKoach tourism club and explore Ghana with a community of travellers." },
   about: { title: "About TripKoach", desc: "Why TripKoach exists and how a local koach makes exploring Ghana effortless." },
-  contact: { title: "Contact TripKoach", desc: "Plan a trip, ask a question or partner with us — we reply fast." },
-  blog: { title: "Stories — TripKoach", desc: "Field notes, destination guides and travel stories from across Ghana." },
-  notfound: { title: "Page not found — TripKoach", desc: "The page you were looking for doesn't exist. Browse guided tours across Ghana instead." },
+  contact: { title: "Contact TripKoach", desc: "Plan a trip, ask a question or partner with us. We reply fast." },
+  blog: { title: "Stories: TripKoach", desc: "Field notes, destination guides and travel stories from across Ghana." },
+  notfound: { title: "Page not found: TripKoach", desc: "The page you were looking for doesn't exist. Browse guided tours across Ghana instead." },
 };
 function tkOgImage(src, origin) {
   // Only trust absolute (CDN/R2) image URLs for social cards; anything else
@@ -180,14 +180,14 @@ function applyHead(screen, slug) {
   if (screen === "tour" && slug) {
     const t = ((window.TK_DATA && window.TK_DATA.tours) || []).find((x) => x.id === slug || x.slug === slug);
     if (t) {
-      meta = { title: t.title + " — TripKoach", desc: String(t.blurb || TK_DEFAULT_DESC).slice(0, 180) };
+      meta = { title: t.title + ": TripKoach", desc: String(t.blurb || TK_DEFAULT_DESC).slice(0, 180) };
       image = tkOgImage(t.image, origin);
       ogType = "product";
     }
   } else if (screen === "post" && slug) {
     const p = (window.TK_BLOG || []).find((x) => x.slug === slug);
     if (p) {
-      meta = { title: p.title + " — TripKoach Stories", desc: String(p.excerpt || TK_DEFAULT_DESC).slice(0, 180) };
+      meta = { title: p.title + ": TripKoach Stories", desc: String(p.excerpt || TK_DEFAULT_DESC).slice(0, 180) };
       image = tkOgImage(p.image || p.cover, origin);
       ogType = "article";
     }

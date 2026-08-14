@@ -1,5 +1,5 @@
 /* ==========================================================================
- * TripKoach v2 web — read-path bootstrap (TRI-861 Phase 1 shim).
+ * TripKoach v2 web: read-path bootstrap (TRI-861 Phase 1 shim).
  *
  * The DS-verbatim seam. The kit screens read their data SYNCHRONOUSLY from
  * window-globals (window.TK_DATA.tours, window.TK_REVIEWS, window.TK_DATA.regions,
@@ -29,7 +29,7 @@
 
   // ── TRI-1059: post-logout Back/bfcache exposure guard ──────────────────────
   // A page restored from the browser back/forward cache (bfcache) comes back
-  // with the exact JS heap + DOM it had before the user navigated away —
+  // with the exact JS heap + DOM it had before the user navigated away,
   // including, after a sign-out, the fully-rendered authenticated account view.
   // Pressing Back after logout would therefore resurrect the app for a
   // logged-out user (TRI-1058). When we detect a bfcache restore (`pageshow`
@@ -37,7 +37,7 @@
   // /me and gate to /login on 401. The Caddy `Cache-Control: no-store` on the
   // SPA document (TRI-1053 vhosts) already suppresses bfcache in Chrome/
   // Firefox; this is the belt-and-suspenders for engines that still restore.
-  // Live mode only — the fixtures/DS-preview build has no real session.
+  // Live mode only: the fixtures/DS-preview build has no real session.
   window.addEventListener("pageshow", function (e) {
     if (e && e.persisted && (window.TK_CONFIG || {}).USE_LIVE_API) window.location.reload();
   });
@@ -121,7 +121,7 @@
       });
     }
     if (detail.pricing) tour.pricing = detail.pricing;
-    // Only attach packages when there's at least one — the kit treats `t.packages`
+    // Only attach packages when there's at least one, the kit treats `t.packages`
     // as truthy ("this tour has routes") and reads packages[0].id, so an empty
     // array would crash. Absent/empty ⇒ the single-route tour path.
     if (Array.isArray(detail.packages) && detail.packages.length) tour.packages = detail.packages;
@@ -183,7 +183,7 @@
   // Fetch detail + availability + reviews for ONE tour and fold them into the
   // existing summary object IN PLACE (the tour screen reads it synchronously, so
   // mutating the object the catalogue already handed React keeps every reference
-  // valid). Idempotent — a hydrated tour short-circuits — and resolves even when
+  // valid). Idempotent (a hydrated tour short-circuits) and resolves even when
   // a sub-request fails, degrading to the summary while guaranteeing the arrays
   // TourWeb reads are defined so the screen can never throw.
   //
@@ -203,7 +203,7 @@
       enrichTourDetail(tour, d[0]);
       var deps = list(d[1], "departures").map(mapDeparture);
       // TRI-998: when the availability call resolved, ALWAYS adopt its (bookable-only)
-      // list — even when empty — so a tour with no upcoming departures can never fall
+      // list (even when empty) so a tour with no upcoming departures can never fall
       // back to stale fixture departures (the old "d2" seed) and launch a broken
       // checkout. Only keep any pre-existing departures if the sub-request failed.
       if (d[1] != null) tour.departures = deps;
@@ -224,7 +224,7 @@
 
   // The boot gate exposes on-demand hydration so slug-aware routing (app.jsx)
   // can pull any tour's detail/departures/reviews when its page opens. Resolves
-  // (never rejects) — an unknown slug or a fetch failure still lets the screen
+  // (never rejects), an unknown slug or a fetch failure still lets the screen
   // render from summary data rather than blocking on an error.
   window.TK_HYDRATE_TOUR = function (slug) {
     var D = window.TK_DATA || {};
@@ -240,7 +240,7 @@
   // ---- blog (TRI-917) -------------------------------------------------------
   // The blog screens read window.TK_BLOG (cards) + window.TK_BLOG_TAGS (chips)
   // synchronously; a post page reads the matching entry's `body` block array.
-  // The list endpoint ships card metadata only (no body) — each post's body is
+  // The list endpoint ships card metadata only (no body), each post's body is
   // fetched on demand via TK_HYDRATE_POST when its page opens (mirrors tours).
   function mapPostCard(p) {
     return {
@@ -269,7 +269,7 @@
     }).catch(function () { /* blog is non-critical to the catalogue boot; leave fixtures */ });
   }
   // Fetch one post's full body on demand and fold it into the TK_BLOG entry in
-  // place (BlogPost reads window.TK_BLOG synchronously). Idempotent — a post that
+  // place (BlogPost reads window.TK_BLOG synchronously). Idempotent, a post that
   // already carries a body array short-circuits. Resolves even on failure.
   window.TK_HYDRATE_POST = function (slug) {
     var posts = Array.isArray(window.TK_BLOG) ? window.TK_BLOG : [];
@@ -291,7 +291,7 @@
   // TRI-939: the USD→GHS DISPLAY rate is settings-driven. Pull it from /config and
   // set window.TK_FX.GHS so every screen's cvt()/money() converts from a single
   // source of truth (admin-editable) rather than a hardcoded constant. Tolerant:
-  // any failure leaves the in-code fallback (12) in place — the display never breaks.
+  // any failure leaves the in-code fallback (12) in place. The display never breaks.
   function loadConfig() {
     return api.get("/config").then(function (c) {
       var rate = c && (c.usdToGhsDisplayRate != null ? c.usdToGhsDisplayRate : c.usd_to_ghs_display_rate);
@@ -334,7 +334,7 @@
         .filter(Boolean);
 
       var tours = list(toursBody, "tours").map(mapTourSummary);
-      // We're live — drop the fixture reviews so nothing stale shows through; each
+      // We're live, drop the fixture reviews so nothing stale shows through; each
       // tour's approved reviews are merged back in as its page hydrates.
       commit(tours, regionNames);
       if (!tours.length) return; // empty catalogue is valid (screens have EmptyState)
@@ -349,7 +349,7 @@
   // Mutate the existing globals IN PLACE where kit helpers captured a reference
   // to the array (data.js's TK_REGION_TOURS closes over the original tours array;
   // TK_REVIEWS_FOR reads window.TK_REVIEWS fresh each call). Reassigning would
-  // orphan those closures — clearing + repushing keeps every helper valid.
+  // orphan those closures. Clearing + repushing keeps every helper valid.
   function commit(tours, regionNames) {
     var D = (window.TK_DATA = window.TK_DATA || {});
     if (!Array.isArray(D.tours)) D.tours = [];
@@ -429,7 +429,7 @@
   window.TK_BOOT = function (render) {
     var cfg = window.TK_CONFIG || {};
     if (!cfg.USE_LIVE_API || !api) {
-      render(); // fixtures — unchanged prototype
+      render(); // fixtures, unchanged prototype
       return;
     }
     renderLoading();

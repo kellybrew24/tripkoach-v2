@@ -1,11 +1,11 @@
 /* ==========================================================================
- * TripKoach v2 web — tokenized review redeem client (TRI-894 Phase 2 shim).
+ * TripKoach v2 web: tokenized review redeem client (TRI-894 Phase 2 shim).
  *
- * `window.TK_REVIEWS_API` — a dependency-free wrapper over the Phase-2 consumer
+ * `window.TK_REVIEWS_API`, a dependency-free wrapper over the Phase-2 consumer
  * WRITE contract (Backend sibling TRI-892), built on the same-origin transport
  * from tk-api.js (TRI-861). Loaded alongside the other shims but wired only from
  * the review-invite landing screen, and every call site is gated behind
- * window.TK_CONFIG.USE_LIVE_API — so with the flag OFF this module is inert: the
+ * window.TK_CONFIG.USE_LIVE_API, so with the flag OFF this module is inert: the
  * built app makes no review-submit calls whatsoever, staying byte-for-byte the
  * fixture prototype.
  *
@@ -15,20 +15,20 @@
  * the tour + traveller, then submits the review against the same token.
  *
  *   GET  /reviews/redeem/:token  → 200 { token, tour:{slug,title,image}, prefill:{name,email} }
- *                                  404 { error:{code:"not_found"} }  — unknown/invalid token
- *                                  410 { error:{code:"gone"} }       — already redeemed
+ *                                  404 { error:{code:"not_found"} }  , unknown/invalid token
+ *                                  410 { error:{code:"gone"} }       , already redeemed
  *   POST /reviews/redeem/:token  → 200 { id, status:"pending", rating, title, text, verified, message }
  *      body { rating:1..5 (int, required), title?:string, text?:string }
  *                                  422 { error:{code:"validation", field} }
  *                                  404 unknown token | 410 already redeemed
  *
  * A submitted review is created status=pending and is invisible to the public
- * read (GET /tours/:slug/reviews, approved-only) until an admin approves it —
+ * read (GET /tours/:slug/reviews, approved-only) until an admin approves it,
  * the landing screen reflects that in its post-submit "awaiting approval" state.
  *
  * Mapping is deliberately tolerant (snake_case or camelCase, envelope or bare
  * object) so integration with Backend stays mechanical while the exact JSON
- * firms up — same posture as tk-boot.js / tk-booking.js. TkApiError.status is
+ * firms up, same posture as tk-boot.js / tk-booking.js. TkApiError.status is
  * preserved so the screen can branch not_found (404) vs. gone (410).
  * ======================================================================== */
 (function () {

@@ -12,7 +12,7 @@ function payBadge(p) {
  * Human-readable, customer-scoped feed of booking lifecycle events
  * (created / paid / confirmed / cancelled / rescheduled / refunded / review),
  * newest first. Derived server-side from bookings + payments + reviews + the
- * booking slice of the audit log — this is NOT the staff audit log. Each row
+ * booking slice of the audit log. This is NOT the staff audit log. Each row
  * links back to its booking. Only rendered in live mode (fixtures have no feed).
  */
 const ACT_META = {
@@ -80,13 +80,13 @@ function ActivityTimeline({ items, status, go }) {
 
 /* ── Row-action menu that escapes table clipping (TRI-978 reopen) ──────────
  * The DS <RowMenu> renders its dropdown with position:absolute inside the row.
- * That dropdown is clipped by the table's overflow ancestors — `.tk-tablewrap`
+ * That dropdown is clipped by the table's overflow ancestors. `.tk-tablewrap`
  * has `overflow:hidden`, and (since TRI-978 #1) the single content scroll region
  * `.tk-shell__main` has `overflow-y:auto`. So clicking the three-dots on a
- * customer opened a menu that was cut off / "hidden in a div" — the board's bug.
+ * customer opened a menu that was cut off / "hidden in a div", the board's bug.
  * A CSS tweak can't defeat multiple nested overflow ancestors, so we render the
  * menu through a portal to <body> with position:fixed, anchored to the button's
- * viewport rect (flipping up when there isn't room below). App-layer only — the
+ * viewport rect (flipping up when there isn't room below). App-layer only. The
  * design system / _ds_bundle stay pristine. */
 function PortalRowMenu({ label = "Row actions", items = [], width = 220 }) {
   const [open, setOpen] = React.useState(false);
@@ -111,7 +111,7 @@ function PortalRowMenu({ label = "Row actions", items = [], width = 220 }) {
     document.addEventListener("click", close);
     document.addEventListener("keydown", onKey);
     window.addEventListener("resize", close);
-    // The menu is anchored to a viewport rect; any scroll invalidates it — close.
+    // The menu is anchored to a viewport rect; any scroll invalidates it, so close.
     window.addEventListener("scroll", close, true);
     return () => {
       document.removeEventListener("click", close);
@@ -132,7 +132,7 @@ function PortalRowMenu({ label = "Row actions", items = [], width = 220 }) {
           {items.map((it, i) => it.divider
             ? <div key={i} style={{ height: 1, background: "var(--border-subtle)", margin: "4px 0" }} />
             : it.section
-              // TRI-1083: non-interactive muted group label (e.g. "Recover access") — lets the flat
+              // TRI-1083: non-interactive muted group label (e.g. "Recover access"), lets the flat
               // PortalRowMenu read as a grouped section without a nested-flyout primitive (TRI-1081 §1).
               ? <div key={i} className="tk-caption tk-muted" role="presentation"
                   style={{ padding: "6px 12px 2px", fontWeight: 700, fontSize: 10.5, letterSpacing: "0.05em", textTransform: "uppercase" }}>{it.label}</div>
@@ -162,10 +162,10 @@ function CustomersAdmin({ go, state, setState }) {
   const [sort, setSort] = React.useState(null); // TRI-1097: header sort for the Customers table.
   // TRI-969: the list row only carries summary fields. The full profile
   // (emergency contact, dietary needs, preferences) + the complete booking
-  // history come from GET /admin/customers/:id — fetched when the drawer opens.
+  // history come from GET /admin/customers/:id, fetched when the drawer opens.
   const [detail, setDetail] = React.useState(null);
   const [detailStatus, setDetailStatus] = React.useState("idle");
-  // TRI-972: Activity tab — customer-scoped booking-lifecycle timeline, lazily
+  // TRI-972: Activity tab: customer-scoped booking-lifecycle timeline, lazily
   // fetched from GET /admin/customers/:id/activity the first time the tab opens.
   const [custTab, setCustTab] = React.useState("overview");
   const [activity, setActivity] = React.useState(null);
@@ -207,7 +207,7 @@ function CustomersAdmin({ go, state, setState }) {
   const applied = [];
   if (country) applied.push({ id: "country", label: "Country: " + country, onRemove: () => setCountry(null) });
   if (band) applied.push({ id: "band", label: "Value: " + bands.find(x => x.id === band).label, onRemove: () => setBand(null) });
-  // TRI-1010: "Email customer" used to just toast — open the staff member's mail client
+  // TRI-1010: "Email customer" used to just toast. It now opens the staff member's mail client
   // with a real mailto: to the customer's address (subject pre-filled with the trip context).
   const emailCustomer = (r) => {
     if (!r || !r.email) { setToast("No email on file for " + ((r && r.name) || "this customer")); return; }
@@ -220,11 +220,11 @@ function CustomersAdmin({ go, state, setState }) {
     { label: "Copy email address", icon: "receipt", onClick: () => { try { navigator.clipboard && navigator.clipboard.writeText(r.email); } catch (_) {} setToast(r.email + " copied"); } },
     { divider: true },
     // TRI-1008: real CSV download of this customer's bookings via the existing client
-    // helper (exportBookingsCsv, screens-bookings.jsx — global after bundling), instead
+    // helper (exportBookingsCsv, screens-bookings.jsx, global after bundling), instead
     // of a bare toast. custBookings(id) is the same A.bookings shape the Bookings export uses.
     { label: "Export bookings (CSV)", icon: "download", onClick: () => { const rows = custBookings(r.id); if (!rows.length) { setToast("No bookings to export for " + r.name); return; } exportBookingsCsv(rows); } },
   ];
-  // Detail view — prefer the fetched profile (live), fall back to the list row / fixtures.
+  // Detail view: prefer the fetched profile (live), fall back to the list row / fixtures.
   const detailBookings = detail && Array.isArray(detail.bookings) ? detail.bookings : null;
   const bookingList = detailBookings ? detailBookings : (open ? custBookings(open.id) : []);
   const spendAmount = detail && typeof detail.totalSpend === "number" ? detail.totalSpend : (open ? spend(open.id) : 0);
@@ -233,7 +233,7 @@ function CustomersAdmin({ go, state, setState }) {
   const emName = (detail && detail.emergencyName) || (open && open.emergencyName) || "";
   const emPhone = (detail && detail.emergencyPhone) || (open && open.emergencyPhone) || "";
   const emDietRaw = (detail && detail.dietaryNeeds) || (open && open.diet) || "";
-  const emDiet = emDietRaw && emDietRaw !== "—" ? emDietRaw : "";
+  const emDiet = emDietRaw && emDietRaw !== "-" ? emDietRaw : "";
   const prefLang = (detail && detail.language) || (open && open.language) || "";
   const prefCurrency = (detail && detail.displayCurrency) || (open && open.displayCurrency) || "";
   const twoFA = detail ? detail.twoFactorEnabled : (open ? open.twoFactorEnabled : null);
@@ -259,7 +259,7 @@ function CustomersAdmin({ go, state, setState }) {
               <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <span style={{ flex: "none", width: 34, height: 34, borderRadius: "50%", background: "var(--brand-wash)", color: "var(--brand-gold-deep)", display: "grid", placeItems: "center", fontWeight: 800, fontSize: 12.5 }}>{r.initials}</span>
                 <span style={{ minWidth: 0 }}><div style={{ fontWeight: 600, color: "var(--text-strong)", display: "flex", alignItems: "center", gap: 6 }}>{r.name}
-                  {/* TRI-941: email-verification chip — only in live mode (fixtures leave emailVerified undefined). */}
+                  {/* TRI-941: email-verification chip, only in live mode (fixtures leave emailVerified undefined). */}
                   {r.emailVerified === true && <span className="tk-badge tk-badge--confirmed" title="Email verified"><Icon name="circle-check-big" size={11} /></span>}
                   {r.emailVerified === false && <span className="tk-badge tk-badge--pending" title="Email not verified">Unverified</span>}
                 </div><div className="tk-caption" style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{r.email}</div></span></span>) },
@@ -281,7 +281,7 @@ function CustomersAdmin({ go, state, setState }) {
             <div style={{ minWidth: 0 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <strong className="tk-h5">{open.name}</strong>
-                {/* TRI-941: account verification state (live only — undefined for fixtures). */}
+                {/* TRI-941: account verification state (live only, undefined for fixtures). */}
                 {open.emailVerified === true && <span className="tk-badge tk-badge--confirmed">Email verified</span>}
                 {open.emailVerified === false && <span className="tk-badge tk-badge--pending">Email unverified</span>}
                 {pendingCount > 0 && <span className="tk-badge tk-badge--pending">Has pending</span>}
@@ -312,13 +312,13 @@ function CustomersAdmin({ go, state, setState }) {
           <section>
             <h3 className="tk-h6" style={{ marginBottom: 8 }}>Emergency contact &amp; needs</h3>
             <div className="tk-summary" style={{ padding: 0 }}>
-              {[["Emergency contact", emName || "—"], ["Emergency number", emPhone || "—"], ["Dietary needs", emDiet || "—"]].map(([k, v]) => <div className="tk-summary__line" key={k}><span>{k}</span><span style={{ fontWeight: 600, color: "var(--text-strong)" }}>{v}</span></div>)}
+              {[["Emergency contact", emName || "-"], ["Emergency number", emPhone || "-"], ["Dietary needs", emDiet || "-"]].map(([k, v]) => <div className="tk-summary__line" key={k}><span>{k}</span><span style={{ fontWeight: 600, color: "var(--text-strong)" }}>{v}</span></div>)}
             </div>
           </section>
           {open.hasAccount && (prefLang || prefCurrency || twoFA != null) && <section>
             <h3 className="tk-h6" style={{ marginBottom: 8 }}>Account preferences</h3>
             <div className="tk-summary" style={{ padding: 0 }}>
-              {[["Language", prefLang || "—"], ["Display currency", prefCurrency || "—"], ["Two-factor auth", twoFA == null ? "—" : (twoFA ? "Enabled" : "Off")]].map(([k, v]) => <div className="tk-summary__line" key={k}><span>{k}</span><span style={{ fontWeight: 600, color: "var(--text-strong)" }}>{v}</span></div>)}
+              {[["Language", prefLang || "-"], ["Display currency", prefCurrency || "-"], ["Two-factor auth", twoFA == null ? "-" : (twoFA ? "Enabled" : "Off")]].map(([k, v]) => <div className="tk-summary__line" key={k}><span>{k}</span><span style={{ fontWeight: 600, color: "var(--text-strong)" }}>{v}</span></div>)}
             </div>
           </section>}
           <section>
@@ -366,7 +366,7 @@ function exportReconciliation(payments) {
       triggerBlobDownload(blob, filename || "reconciliation.csv");
       window.tkToast("Reconciliation export downloaded");
     }).catch((e) => {
-      window.tkToast(e && e.message ? "Export failed — " + e.message : "Export failed");
+      window.tkToast(e && e.message ? "Export failed: " + e.message : "Export failed");
     });
     return;
   }
@@ -397,7 +397,7 @@ function PaymentsAdmin({ go, state }) {
   // TRI-1033: every stat + row is stated in USD-of-record so this page reconciles with the Bookings page
   // (which shows USD). A Paystack charge row's `amount` is GHS (the real money moved, ~15.6× the USD), so
   // summing it under a "$" was the currency mismatch the reporter saw. `usdOf` prefers the true USD-of-record
-  // and only falls back to `amount` for genuine non-GHS rows — GHS rows without a USD figure contribute 0
+  // and only falls back to `amount` for genuine non-GHS rows. GHS rows without a USD figure contribute 0
   // rather than leaking a GHS magnitude into a USD total.
   const usdOf = (p) => p.usd != null ? p.usd : (p.currency === "GHS" ? 0 : p.amount);
   const totalPaid = A.payments.filter(p => p.status === "paid").reduce((s, p) => s + usdOf(p), 0);
@@ -411,7 +411,7 @@ function PaymentsAdmin({ go, state }) {
   const { StatCard } = NS;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <Alert tone="info" title="Payments run through Paystack">Card, bank and mobile-money payments are handled by Paystack's hosted checkout — TripKoach never stores card details. Transactions sync here automatically; you can still mark pay-later bookings paid by hand when money arrives another way.</Alert>
+      <Alert tone="info" title="Payments run through Paystack">Card, bank and mobile-money payments are handled by Paystack's hosted checkout. TripKoach never stores card details. Transactions sync here automatically; you can still mark pay-later bookings paid by hand when money arrives another way.</Alert>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 16 }}>
         <StatCard label="Collected" value={"$" + totalPaid.toLocaleString()} icon="wallet" delta="+8%" deltaDir="up" hint="this month" />
         <StatCard label="Outstanding (pay later)" value={"$" + outstanding.toLocaleString()} icon="clock" deltaDir="flat" delta="4 bookings" />
@@ -441,7 +441,7 @@ function PaymentsAdmin({ go, state }) {
           rows={rows} getRowId={r => r.id}
           rowActions={(r) => r.status === "pending"
             ? <Button size="sm" variant="secondary" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.markPaid(r.id), () => { patchPayment(r, "paid"); window.tkToast("Marked " + r.id + " as paid"); })}>Mark paid</Button>
-            : r.status === "paid" ? <IconButton icon="receipt" label="Issue refund" variant="ghost" size="sm" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.refundPayment(r.id), () => { patchPayment(r, "refunded"); window.tkToast("Refund started for " + r.id); })} /> : null /* TRI-1010: dropped the dead "Retry" ellipsis — failed/refunded rows have no admin action (the customer re-pays through Paystack; there is no server retry). */}
+            : r.status === "paid" ? <IconButton icon="receipt" label="Issue refund" variant="ghost" size="sm" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.refundPayment(r.id), () => { patchPayment(r, "refunded"); window.tkToast("Refund started for " + r.id); })} /> : null /* TRI-1010: dropped the dead "Retry" ellipsis. Failed/refunded rows have no admin action (the customer re-pays through Paystack; there is no server retry). */}
           empty={<EmptyState icon="wallet" title="No transactions" body="Payments appear here once money starts moving." />} />
       </div>
     </div>
@@ -497,10 +497,10 @@ function PromosAdmin({ go }) {
  * Three recovery actions an admin runs on ANOTHER admin's account, launched from
  * the Staff row menu's "Recover access" group: clear a lockout, regenerate the
  * target's MFA recovery codes, and force MFA re-enrolment. Reuses Modal/Alert/
- * Button + the canonical MFA codes grid — no new DS primitives. Regenerated codes
+ * Button + the canonical MFA codes grid. No new DS primitives. Regenerated codes
  * are shown exactly ONCE and are never stored client-side; reopening the action
  * mints a fresh set (and re-invalidates). If the TRI-1082 backend requires a fresh
- * re-auth for these sensitive writes it answers 401/403 with a step-up code — we
+ * re-auth for these sensitive writes it answers 401/403 with a step-up code, we
  * then collect a current authenticator/recovery code for the ACTING admin and retry. */
 function RecoverAccessModal({ kind, target, onClose, onToast }) {
   const [busy, setBusy] = React.useState(false);
@@ -514,7 +514,7 @@ function RecoverAccessModal({ kind, target, onClose, onToast }) {
   const firstName = String(target.name || "").trim().split(/\s+/)[0] || name;
   const revealed = kind === "codes" && Array.isArray(codes);
 
-  // Backend contract for step-up isn't final (TRI-1082 in flight) — match on a few plausible
+  // Backend contract for step-up isn't final (TRI-1082 in flight). Match on a few plausible
   // codes/messages so the re-auth prompt still appears whatever exact shape it lands on.
   const isStepUp = (e) => {
     if (!e || (e.status !== 401 && e.status !== 403)) return false;
@@ -530,7 +530,7 @@ function RecoverAccessModal({ kind, target, onClose, onToast }) {
       (res) => { setBusy(false); onOk(res); },
       (e) => {
         setBusy(false);
-        if (isStepUp(e)) { setErr(stepUp && reauth ? "That code didn't match — enter a current code and try again." : null); setStepUp(true); return; }
+        if (isStepUp(e)) { setErr(stepUp && reauth ? "That code didn't match. Enter a current code and try again." : null); setStepUp(true); return; }
         if (e && e.status === 401) { window.dispatchEvent(new CustomEvent("tk-admin-401")); return; } // real session expiry → login
         setErr((e && e.message) || "Something went wrong. Please try again.");
       }
@@ -555,26 +555,26 @@ function RecoverAccessModal({ kind, target, onClose, onToast }) {
   if (kind === "reset") return (
     <Modal open tone="danger" title={"Reset two-factor for " + name + "?"} onClose={busy ? undefined : onClose}
       actions={<><Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button>
-        <Button variant="danger" disabled={busy} onClick={() => call(window.TK_ADMIN_API.resetStaffMfa, () => { onToast("Two-factor reset — " + name + " must re-enrol at next sign-in."); onClose(); })}>{busy ? "Resetting…" : "Reset two-factor"}</Button></>}>
+        <Button variant="danger" disabled={busy} onClick={() => call(window.TK_ADMIN_API.resetStaffMfa, () => { onToast("Two-factor reset. " + name + " must re-enrol at next sign-in."); onClose(); })}>{busy ? "Resetting…" : "Reset two-factor"}</Button></>}>
       {errBlock}
       <Alert tone="warning" title="This removes their authenticator app">At their next sign-in {firstName} will be required to set up two-factor again from scratch.</Alert>
-      <p className="tk-body-sm tk-muted" style={{ marginTop: "var(--space-3)" }}>{firstName} still needs their own password to finish re-enrolment — this doesn't sign them in for you or reveal their password.</p>
+      <p className="tk-body-sm tk-muted" style={{ marginTop: "var(--space-3)" }}>{firstName} still needs their own password to finish re-enrolment. This doesn't sign them in for you or reveal their password.</p>
       {stepUpField}
     </Modal>
   );
 
-  // kind === "codes" — step 1 confirm
+  // kind === "codes": step 1 confirm
   if (!revealed) return (
     <Modal open title={"Regenerate recovery codes for " + name} onClose={busy ? undefined : onClose}
       actions={<><Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button>
         <Button disabled={busy} onClick={() => call(window.TK_ADMIN_API.regenerateStaffRecoveryCodes, (res) => setCodes((res && res.recoveryCodes) || []))}>{busy ? "Generating…" : "Generate codes"}</Button></>}>
       {errBlock}
-      <Alert tone="warning" title="This replaces their current codes">This creates 10 new one-time recovery codes and immediately invalidates {firstName}'s current codes. You'll see the new codes once, on the next screen — we never store them in a readable form, so they can't be recovered later.</Alert>
+      <Alert tone="warning" title="This replaces their current codes">This creates 10 new one-time recovery codes and immediately invalidates {firstName}'s current codes. You'll see the new codes once, on the next screen. We never store them in a readable form, so they can't be recovered later.</Alert>
       {stepUpField}
     </Modal>
   );
 
-  // kind === "codes" — step 2, codes revealed ONCE. No backdrop/Escape close (onClose no-op); only Done exits.
+  // kind === "codes": step 2, codes revealed ONCE. No backdrop/Escape close (onClose no-op); only Done exits.
   return (
     <Modal open title={"New recovery codes for " + name} onClose={function () {}}
       actions={<Button onClick={() => { onToast("Recovery codes regenerated for " + name + "."); onClose(); }}>Done</Button>}>
@@ -607,7 +607,7 @@ function UsersAdmin({ go }) {
     || (Array.isArray(_perms) ? _perms.indexOf("users.manage") !== -1 : !!(_perms && _perms["users.manage"]));
   // TRI-996: screens read the mutable A.staff global directly, so a successful
   // write must both mutate the shared record AND force a re-render (TRI-980
-  // pattern) — run only from the TK_ADMIN_ACT success callback, never on failure.
+  // pattern), run only from the TK_ADMIN_ACT success callback, never on failure.
   const [, forceRerender] = React.useReducer((x) => x + 1, 0);
   const initialsOf = (name) => String(name || "").split(/\s+/).map(w => w.charAt(0)).join("").slice(0, 2).toUpperCase();
   const applyStaff = (id, patch) => {
@@ -638,8 +638,8 @@ function UsersAdmin({ go }) {
     if (r.status === "disabled")
       items.push({ label: "Re-enable account", icon: "circle-check-big", onClick: () => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.enableStaff(r.id), () => { applyStaff(r.id, { status: "active" }); setToast(r.name + " re-enabled"); }) });
     else if (r.status !== "invited")
-      items.push({ label: "Disable account", icon: "log-out", danger: true, onClick: () => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.disableStaff(r.id), () => { applyStaff(r.id, { status: "disabled" }); setToast(r.name + " disabled — signed out everywhere"); }) });
-    // TRI-1083: "Recover access" group — admin-only, and never on your own row or a pending invite
+      items.push({ label: "Disable account", icon: "log-out", danger: true, onClick: () => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.disableStaff(r.id), () => { applyStaff(r.id, { status: "disabled" }); setToast(r.name + " disabled, signed out everywhere"); }) });
+    // TRI-1083: "Recover access" group: admin-only, and never on your own row or a pending invite
     // (an invited account has no lockout/MFA state yet). Inline grouped section (TRI-1081 §1), not a flyout.
     if (canManageUsers && r.id !== myId && r.status !== "invited") {
       items.push({ divider: true });
@@ -651,7 +651,7 @@ function UsersAdmin({ go }) {
         : { label: "Clear lockout", icon: "lock", disabled: true, hint: "Not locked" });
       // TRI-1080: both MFA actions require the target to actually have 2FA enabled.
       // Regenerating codes hits a backend 409 ("enable MFA first") when off, and there's
-      // nothing to reset when off — so gate both on r.mfaEnabled with a "2FA not enabled"
+      // nothing to reset when off, so gate both on r.mfaEnabled with a "2FA not enabled"
       // hint. Clear lockout stays independent (gated on r.locked above). For a not-yet-
       // enrolled locked-out admin the right recovery is Clear lockout → they enroll at login.
       items.push(r.mfaEnabled
@@ -673,7 +673,7 @@ function UsersAdmin({ go }) {
       () => { applyStaff(edit.id, { name: name, role: role, jobTitle: jobTitle }); setToast("Staff member updated"); setEdit(null); }
     );
   };
-  // TRI-1011: the role→permission matrix is real RBAC — the same rows the API guards resolve per request.
+  // TRI-1011: the role→permission matrix is real RBAC. The same rows the API guards resolve per request.
   // Hydrate from GET /admin/roles/permissions and persist each toggle to PUT /admin/roles/permissions, so
   // what an admin sees here is exactly what Operators/Read-only staff can do. (These defaults are only the
   // design-preview seed for the non-LIVE bundle; LIVE overwrites them from the server on mount.)
@@ -698,13 +698,13 @@ function UsersAdmin({ go }) {
   const roleBadge = (r) => ({ admin: <Badge tone="solid">Admin</Badge>, operator: <span className="tk-badge tk-badge--confirmed">Operator</span>, viewer: <Badge tone="neutral">Read-only</Badge> }[r]);
   const statusBadge = (s) => ({ active: <span className="tk-badge tk-badge--confirmed">Active</span>, invited: <span className="tk-badge tk-badge--pending">Invited</span>, disabled: <Badge tone="neutral">Disabled</Badge> }[s]);
   // TRI-1080: 2FA state per staff row. MFA is org-enforced (TRI-912), so "Off" means
-  // "not yet enrolled" (forced at next login) — muted, not alarming. Pending invites
+  // "not yet enrolled" (forced at next login). Muted, not alarming. Pending invites
   // have no MFA state yet, so we show a dash. This badge also gates the recovery menu.
   const mfaBadge = (r) => r.status === "invited"
-    ? <span className="tk-muted">—</span>
+    ? <span className="tk-muted">-</span>
     : r.mfaEnabled
       ? <span className="tk-badge tk-badge--confirmed" title="Two-factor authentication is enabled">On</span>
-      : <span className="tk-badge tk-badge--neutral" title="Not yet enrolled — enforced at next login">Off</span>;
+      : <span className="tk-badge tk-badge--neutral" title="Not yet enrolled, enforced at next login">Off</span>;
   const toggle = (perm, role) => {
     if (role === "admin") return; // admin is locked all-on; RoleMatrix disables its cells anyway
     const next = !(perms[perm] && perms[perm][role]);
@@ -714,7 +714,7 @@ function UsersAdmin({ go }) {
     if (!LIVE || !window.TK_ADMIN_API || !window.TK_ADMIN_API.saveRolePermissions) return;
     setPermsBusy(true);
     window.TK_ADMIN_API.saveRolePermissions({ [role]: { [perm]: next } })
-      .then((res) => { if (res && res.matrix) setPerms(res.matrix); setToast(next ? "Permission granted — takes effect immediately" : "Permission revoked — takes effect immediately"); })
+      .then((res) => { if (res && res.matrix) setPerms(res.matrix); setToast(next ? "Permission granted: takes effect immediately" : "Permission revoked: takes effect immediately"); })
       .catch((e) => { setPerms(prev); setToast((e && e.message) ? e.message : "Couldn't save permission change"); })
       .then(() => setPermsBusy(false));
   };
@@ -759,15 +759,15 @@ function UsersAdmin({ go }) {
         footer={<><Button variant="secondary" onClick={() => setInvite(false)}>Cancel</Button><Button iconStart="mail" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.inviteStaff({ email: (document.getElementById("iv-email") || {}).value, name: (document.getElementById("iv-name") || {}).value, role: (document.getElementById("iv-role") || {}).value || "operator" }), () => { setToast("Invite sent"); setInvite(false); })}>Send invite</Button></>}>
         <FormField id="iv-email" label="Work email" required><Input type="email" iconStart="mail" /></FormField>
         <FormField id="iv-name" label="Full name"><Input /></FormField>
-        <FormField id="iv-role" label="Role" help="You can change this later"><Select defaultValue="operator" options={[{ value: "admin", label: "Admin — full access" }, { value: "operator", label: "Operator — day-to-day ops" }, { value: "viewer", label: "Read-only — view but not change" }]} /></FormField>
+        <FormField id="iv-role" label="Role" help="You can change this later"><Select defaultValue="operator" options={[{ value: "admin", label: "Admin: full access" }, { value: "operator", label: "Operator: day-to-day ops" }, { value: "viewer", label: "Read-only: view but not change" }]} /></FormField>
       </Drawer>
       <Drawer open={!!edit} title="Edit staff member" subtitle={edit ? edit.email : ""} onClose={() => setEdit(null)}
         footer={<><Button variant="secondary" onClick={() => setEdit(null)}>Cancel</Button><Button iconStart="check" onClick={saveEdit}>Save changes</Button></>}>
         {edit && <>
           <FormField id="se-name" label="Full name"><Input defaultValue={edit.name} /></FormField>
           <FormField id="se-role" label="Role" help="Changing to Operator or Read-only removes admin access. The last active admin can't be demoted.">
-            <Select defaultValue={edit.role} options={[{ value: "admin", label: "Admin — full access" }, { value: "operator", label: "Operator — day-to-day ops" }, { value: "viewer", label: "Read-only — view but not change" }]} /></FormField>
-          <FormField id="se-title" label="Job title" help="Shown on their profile — e.g. Operations Lead"><Input defaultValue={edit.jobTitle} /></FormField>
+            <Select defaultValue={edit.role} options={[{ value: "admin", label: "Admin: full access" }, { value: "operator", label: "Operator: day-to-day ops" }, { value: "viewer", label: "Read-only: view but not change" }]} /></FormField>
+          <FormField id="se-title" label="Job title" help="Shown on their profile, e.g. Operations Lead"><Input defaultValue={edit.jobTitle} /></FormField>
           {edit.status === "invited" && <Alert tone="info" title="Invite pending">This person hasn't accepted their invite yet. Role and name changes apply now; use “Resend invite” from the row menu if they need a fresh link.</Alert>}
         </>}
       </Drawer>
@@ -783,7 +783,7 @@ function SettingsAdmin({ go }) {
   const [tab, setTab] = React.useState("general");
   const [toast, setToast] = React.useState(null);
   // A14/C19 (TRI-898): hydrate from GET /api/admin/settings and surface BOTH
-  // USD→GHS rates distinctly — the editable customer-facing display rate and the
+  // USD→GHS rates distinctly: the editable customer-facing display rate and the
   // read-only charge rate owned by the FX cron. Flag off → LIVE is false, `data`
   // stays null, and every field keeps its prototype defaultValue (byte-identical).
   const [data, setData] = React.useState(null);
@@ -828,8 +828,8 @@ function SettingsAdmin({ go }) {
             <FormField id="s-cur" label="Currency of record"><Select defaultValue="USD" options={[{ value: "USD", label: "US Dollar (USD)" }, { value: "GHS", label: "Ghana Cedi (GHS)" }]} /></FormField>
             <FormField id="s-disp" label="Also display prices in" help="An approximate second currency shown to customers"><Select defaultValue="none" options={[{ value: "none", label: "Don't show a second currency" }, { value: "GHS", label: "Ghana Cedi (GHS)" }]} /></FormField>
             <FormField id="s-rate" label="USD → GHS display rate" help="Used only for the approximate figure"><Input defaultValue="15.6" /></FormField>
-            {chargeRate && <FormField id="s-charge" label="USD → GHS charge rate (automated)" help={"Drives what customers are actually charged in GHS · source " + (chargeRate.source || "FX cron") + ". Set by the daily FX automation — not editable here."}><Input defaultValue={chargeRate.value} readOnly disabled /></FormField>}
-            {chargeRate && <Alert tone="info" title="Two separate rates">The <strong>display rate</strong> above is only for the approximate figure shown to customers. The <strong>charge rate</strong> is what builds each Paystack charge and is owned by the daily FX cron — editing the display rate never changes it.</Alert>}
+            {chargeRate && <FormField id="s-charge" label="USD → GHS charge rate (automated)" help={"Drives what customers are actually charged in GHS · source " + (chargeRate.source || "FX cron") + ". Set by the daily FX automation. Not editable here."}><Input defaultValue={chargeRate.value} readOnly disabled /></FormField>}
+            {chargeRate && <Alert tone="info" title="Two separate rates">The <strong>display rate</strong> above is only for the approximate figure shown to customers. The <strong>charge rate</strong> is what builds each Paystack charge and is owned by the daily FX cron. Editing the display rate never changes it.</Alert>}
           </Section>
         </>}
         {tab === "policy" && <>
@@ -839,20 +839,20 @@ function SettingsAdmin({ go }) {
           </Section>
           {/* TRI-1150: the single canonical Terms & Conditions both agree-gates (checkout + sign-up)
               read via /config. Distinct from the cancellation blurb above. Leave blank until Content
-              provides the real document — the customer disclosure stays hidden while it's empty, so
+              provides the real document. The customer disclosure stays hidden while it's empty, so
               no placeholder ever ships. */}
-          <Section title="Terms & Conditions" hint="The full T&C customers can read before agreeing at checkout and sign-up. Leave blank until Content has real copy — it won't show to customers while empty.">
+          <Section title="Terms & Conditions" hint="The full T&C customers can read before agreeing at checkout and sign-up. Leave blank until Content has real copy. It won't show to customers while empty.">
             <FormField id="s-terms" label="Terms & Conditions text" help="Plain text; line breaks and paragraphs are preserved. This is the one source both agree-gates use."><Textarea rows={10} /></FormField>
           </Section>
         </>}
         {tab === "notify" && <>
-          {/* TRI-1009: these are transactional/system emails with no per-toggle backend — the
+          {/* TRI-1009: these are transactional/system emails with no per-toggle backend, the
               notifier always sends them and there is no setting the sending code consults. They
               were previously plain/read-only switches that no Save ever persisted, which read as
               broken toggles. Mark them honestly as system-managed and always on (read-only), and
               add a note so it's clear they aren't hand-editable here. (Post-trip review requests
               are issued per departure from the Departures screen, not a global toggle.) */}
-          <Alert tone="info" title="These emails are system-managed">Booking, payment, departure and staff-alert emails are transactional and always on — they can't be switched off here. They're shown for reference so you know exactly what the system sends.</Alert>
+          <Alert tone="info" title="These emails are system-managed">Booking, payment, departure and staff-alert emails are transactional and always on. They can't be switched off here. They're shown for reference so you know exactly what the system sends.</Alert>
           <Section title="Customer emails" hint="Automatic emails sent on booking events. Always on.">
             <Switch id="n1" label="Booking confirmation email" checked readOnly disabled />
             <Switch id="n2" label="Payment reminder before deadline" checked readOnly disabled />
@@ -889,11 +889,11 @@ function Forbidden({ go }) {
  * prototype below is byte-identical.
  *
  * Two entry points share one drawer:
- *   • First-time enroll (the DS gap) — mode "enroll": begin enroll → scan the
+ *   • First-time enroll (the DS gap), mode "enroll": begin enroll → scan the
  *     setup key → verify a 6-digit code → save recovery codes.
- *   • Reconfigure — mode "reconfigure": confirm a current code (disables the old
+ *   • Reconfigure, mode "reconfigure": confirm a current code (disables the old
  *     factor) → then the same enroll flow. Permanent self-service turn-off is
- *     intentionally NOT surfaced — policy requires 2FA for all staff.
+ *     intentionally NOT surfaced. Policy requires 2FA for all staff.
  */
 function MfaCodeBoxes({ code, setCode, error }) {
   const refs = React.useRef([]);
@@ -937,7 +937,7 @@ function MfaEnrollDrawer({ open, mode, onClose, onEnabled, setToast }) {
       return;
     }
     // On open, seed the starting step from mode. The drawer is always mounted (open just toggles),
-    // so the useState initializer above ran while mode was still "enroll" — we can't rely on it to
+    // so the useState initializer above ran while mode was still "enroll", we can't rely on it to
     // land reconfigure on "confirm". Without this, reconfigure opened straight into "scan" with no
     // enroll data, so the QR never rendered (TRI-987).
     if (mode === "reconfigure") setStep("confirm"); // confirm a current code → disables old factor → enroll
@@ -955,7 +955,7 @@ function MfaEnrollDrawer({ open, mode, onClose, onEnabled, setToast }) {
     setBusy(true); setErr(null);
     window.TK_ADMIN_API.mfaVerifyEnroll(code.join("")).then(
       (r) => { setRecoveryCodes((r && r.recoveryCodes) || []); setStep("codes"); setBusy(false); onEnabled && onEnabled(); },
-      (e) => { setBusy(false); setErr((e && e.message) || "That code didn't match — check your authenticator app and try again."); });
+      (e) => { setBusy(false); setErr((e && e.message) || "That code didn't match. Check your authenticator app and try again."); });
   };
 
   const secretPretty = data && data.secret ? data.secret.replace(/\s+/g, "").replace(/(.{4})/g, "$1 ").trim() : "";
@@ -979,7 +979,7 @@ function MfaEnrollDrawer({ open, mode, onClose, onEnabled, setToast }) {
         <>
           <ol className="tk-body-sm" style={{ margin: 0, paddingInlineStart: 18, display: "flex", flexDirection: "column", gap: 6, color: "var(--text-body)" }}>
             <li>Open your authenticator app (Google Authenticator, Authy, 1Password…).</li>
-            <li>Scan the QR code below — or add an account with the setup key.</li>
+            <li>Scan the QR code below, or add an account with the setup key.</li>
             <li>Enter the 6-digit code it shows to finish.</li>
           </ol>
           {data && data.otpauthUri && (
@@ -1002,7 +1002,7 @@ function MfaEnrollDrawer({ open, mode, onClose, onEnabled, setToast }) {
       )}
       {step === "codes" && (
         <>
-          <Alert tone="success" title="Two-factor is on">Save these one-time recovery codes somewhere safe — each works once if you ever lose your authenticator.</Alert>
+          <Alert tone="success" title="Two-factor is on">Save these one-time recovery codes somewhere safe. Each works once if you ever lose your authenticator.</Alert>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: "12px 14px", background: "var(--bg-sunken)", borderRadius: "var(--radius-md)" }}>
             {(recoveryCodes || []).map((c) => <span key={c} className="tk-num" style={{ fontSize: 14, letterSpacing: "0.04em", color: "var(--text-strong)" }}>{c}</span>)}
             <span className="tk-caption tk-muted" style={{ gridColumn: "1 / -1" }}>These won't be shown again.</span>
@@ -1037,7 +1037,7 @@ function MfaManageDrawer({ open, onClose, status, onReconfigure, onChanged, setT
         <span><strong style={{ fontSize: 14, color: "var(--text-strong)" }}>Recovery codes</strong><p className="tk-body-sm tk-muted" style={{ margin: "2px 0 0" }}>{remaining == null ? "Use these if you lose your phone." : remaining + " unused. Regenerating replaces all of them."}</p></span>
         <Button variant="secondary" size="sm" disabled={busy} onClick={regen}>{busy ? "Generating…" : "Regenerate"}</Button>
       </div>
-      {codes && <><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: "12px 14px", background: "var(--bg-sunken)", borderRadius: "var(--radius-md)" }}>{codes.map((c) => <span key={c} className="tk-num" style={{ fontSize: 14, letterSpacing: "0.04em", color: "var(--text-strong)" }}>{c}</span>)}<span className="tk-caption tk-muted" style={{ gridColumn: "1 / -1" }}>Save these now — they won't be shown again.</span></div><Button variant="secondary" size="sm" iconStart="copy" style={{ marginTop: 10 }} onClick={() => { try { navigator.clipboard && navigator.clipboard.writeText(codes.join("\n")); setToast && setToast("Recovery codes copied"); } catch (_) {} }}>Copy codes</Button></>}
+      {codes && <><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: "12px 14px", background: "var(--bg-sunken)", borderRadius: "var(--radius-md)" }}>{codes.map((c) => <span key={c} className="tk-num" style={{ fontSize: 14, letterSpacing: "0.04em", color: "var(--text-strong)" }}>{c}</span>)}<span className="tk-caption tk-muted" style={{ gridColumn: "1 / -1" }}>Save these now. They won't be shown again.</span></div><Button variant="secondary" size="sm" iconStart="copy" style={{ marginTop: 10 }} onClick={() => { try { navigator.clipboard && navigator.clipboard.writeText(codes.join("\n")); setToast && setToast("Recovery codes copied"); } catch (_) {} }}>Copy codes</Button></>}
       <Alert tone="warning" title="Turning 2FA off isn't allowed">Policy requires two-factor for all staff. Use Reconfigure to switch to a new device; contact an admin to reset a lost one.</Alert>
     </Drawer>
   );
@@ -1056,7 +1056,7 @@ function AccountProfileAdmin({ go, user }) {
   const [pwBusy, setPwBusy] = React.useState(false);
   const [pwErr, setPwErr] = React.useState(null);
   // TRI-1000: real change-password. This drawer previously just closed + toasted
-  // "Password updated" without ever calling the API (nothing changed — the exact
+  // "Password updated" without ever calling the API (nothing changed, the exact
   // failure Samuel hit). Live → POST /api/admin/me/password (wrong current → 401
   // shown inline). Flag off → keep the demo behaviour (byte-identical prototype).
   function submitPw() {
@@ -1074,7 +1074,7 @@ function AccountProfileAdmin({ go, user }) {
   const u = user || { name: "Kwame Boateng", role: "Admin", rawRole: "admin", initials: "KB", email: "kwame@tripkoach.com", jobTitle: null };
   const isAdmin = (u.rawRole || "").toLowerCase() === "admin";
   const [nameVal, setNameVal] = React.useState(u.name || "");
-  const [phoneVal, setPhoneVal] = React.useState(u.phone || ""); // TRI-1079: phone was a no-op fake — now round-trips
+  const [phoneVal, setPhoneVal] = React.useState(u.phone || ""); // TRI-1079: phone was a no-op fake, now round-trips
   const [titleVal, setTitleVal] = React.useState(u.jobTitle || "");
   const touch = () => setDirty(true);
 
@@ -1088,7 +1088,7 @@ function AccountProfileAdmin({ go, user }) {
       // after a full reload/re-login, but SPA navigation away and back showed the
       // saved phone/name as lost. Root cause: `user` is derived every render from the
       // in-memory session (window.TK_ADMIN_SESSION.staff), and this screen seeds its
-      // fields from that via useState on mount — but a successful save never wrote the
+      // fields from that via useState on mount, but a successful save never wrote the
       // fresh values back into the session, so the next remount re-seeded from stale
       // data. Sync the returned DTO into the session cache so the derived identity
       // stays current across navigation without a reload.
@@ -1143,7 +1143,7 @@ function AccountProfileAdmin({ go, user }) {
         </div>
         {LIVE ? (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, paddingTop: 14, borderTop: "1px solid var(--border-subtle)" }}>
-            <span><strong style={{ fontSize: 14.5, color: "var(--text-strong)" }}>Two-factor authentication {mfa ? <span className={"tk-badge " + (mfa.enabled ? "tk-badge--confirmed" : "tk-badge--pending")}>{mfa.enabled ? "On" : "Off"}</span> : null}</strong><p className="tk-body-sm tk-muted" style={{ margin: "2px 0 0" }}>{mfa == null ? "Checking status…" : mfa.enabled ? "Authenticator app · required for all staff." : "Required for all staff — set it up to secure your account."}</p></span>
+            <span><strong style={{ fontSize: 14.5, color: "var(--text-strong)" }}>Two-factor authentication {mfa ? <span className={"tk-badge " + (mfa.enabled ? "tk-badge--confirmed" : "tk-badge--pending")}>{mfa.enabled ? "On" : "Off"}</span> : null}</strong><p className="tk-body-sm tk-muted" style={{ margin: "2px 0 0" }}>{mfa == null ? "Checking status…" : mfa.enabled ? "Authenticator app · required for all staff." : "Required for all staff. Set it up to secure your account."}</p></span>
             {mfa == null
               ? <Button variant="secondary" size="sm" disabled>Manage</Button>
               : mfa.enabled
@@ -1215,7 +1215,7 @@ const PREF_ALERT_ROWS = [
   { id: "pf-al-dailySummary", key: "dailySummary", label: "Daily summary email", hint: "Yesterday's numbers, sent at 07:00 GMT.", def: false },
 ];
 function PreferencesAdmin({ go }) {
-  // TRI-1009: this screen was a front-end-only fake — every control toasted "saved"
+  // TRI-1009: this screen was a front-end-only fake, every control toasted "saved"
   // but nothing persisted and no endpoint existed. Now hydrate from GET /me/preferences
   // and persist via PATCH /me/preferences (backed by the staff_preferences table, which
   // has existed since migration 007 but had no reader/writer). Flag off → LIVE false,
@@ -1442,7 +1442,7 @@ function ReviewsAdmin({ go }) {
   const [toast, setToast] = React.useState(null);
   // TRI-978 #3: the screen reads the TK_REVIEWS module global directly, so a
   // moderation mutation (approve/reject/unpublish/restore) left the row where it
-  // was until a manual refresh re-hydrated /reviews — e.g. "Approve & publish"
+  // was until a manual refresh re-hydrated /reviews, e.g. "Approve & publish"
   // kept the review in Pending. Apply the new state to the shared record and
   // force a re-render AFTER the write resolves (TK_ADMIN_ACT only runs the
   // success callback on a confirmed write), so the row moves tabs immediately.
@@ -1463,7 +1463,7 @@ function ReviewsAdmin({ go }) {
       ]} />
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
         <Select aria-label="Tour" value={tour} onChange={(e) => setTour(e.target.value)} style={{ width: 240 }} options={[{ value: "", label: "All tours" }, ...tours.map(t => ({ value: t, label: t }))]} />
-        <Select aria-label="Minimum rating" value={minRating} onChange={(e) => setMinRating(e.target.value)} style={{ width: 160 }} options={[{ value: "", label: "Any rating" }, { value: "4", label: "4★ & up" }, { value: "3", label: "3★ & up" }, { value: "1", label: "1–2★ only" }]} />
+        <Select aria-label="Minimum rating" value={minRating} onChange={(e) => setMinRating(e.target.value)} style={{ width: 160 }} options={[{ value: "", label: "Any rating" }, { value: "4", label: "4★ & up" }, { value: "3", label: "3★ & up" }, { value: "1", label: "1 to 2★ only" }]} />
         <span className="tk-caption" style={{ marginInlineStart: "auto" }}>{rows.length} review{rows.length !== 1 ? "s" : ""}</span>
       </div>
       {tab === "pending" && counts.pending > 0 && <Alert tone="info" title={counts.pending + " review" + (counts.pending > 1 ? "s" : "") + " awaiting moderation"}>Approve to publish on the tour page, or reject to keep it hidden. Nothing goes live until you approve it.</Alert>}
@@ -1484,16 +1484,16 @@ function ReviewsAdmin({ go }) {
               </div>
               {r.title && <strong style={{ fontSize: 15 }}>{r.title}</strong>}
               <p className="tk-body" style={{ margin: 0 }}>{r.text}</p>
-              {!r.verified && <Alert tone="warning" title="No matching booking">This reviewer has no completed booking for this tour — likely spam. Reject unless you can verify it.</Alert>}
+              {!r.verified && <Alert tone="warning" title="No matching booking">This reviewer has no completed booking for this tour. Likely spam. Reject unless you can verify it.</Alert>}
               {r.reply && <div style={{ padding: "10px 12px", background: "var(--bg-sunken)", borderRadius: "var(--radius-md)", borderInlineStart: "3px solid var(--brand)" }}><span style={{ fontWeight: 700, fontSize: 12.5, color: "var(--brand-ink)" }}>Your reply</span><p className="tk-body-sm" style={{ margin: "4px 0 0" }}>{r.reply}</p></div>}
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "flex-end", borderTop: "1px solid var(--border-subtle)", paddingTop: 10 }}>
                 {tab === "pending" && <>
-                  <Button variant="secondary" size="sm" iconStart="x" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.rejectReview(r.id), () => { applyStatus(r.id, "rejected"); setToast("Review rejected — it stays hidden"); })}>Reject</Button>
-                  <Button size="sm" iconStart="check" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.approveReview(r.id), () => { applyStatus(r.id, "approved"); setToast("Approved — now live on the tour page"); })}>Approve & publish</Button>
+                  <Button variant="secondary" size="sm" iconStart="x" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.rejectReview(r.id), () => { applyStatus(r.id, "rejected"); setToast("Review rejected: it stays hidden"); })}>Reject</Button>
+                  <Button size="sm" iconStart="check" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.approveReview(r.id), () => { applyStatus(r.id, "approved"); setToast("Approved: now live on the tour page"); })}>Approve & publish</Button>
                 </>}
                 {tab === "approved" && <>
                   <Button variant="secondary" size="sm" iconStart="message-circle" onClick={() => setReply(r)}>{r.reply ? "Edit reply" : "Reply"}</Button>
-                  <Button variant="secondary" size="sm" iconStart="eye-off" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.unpublishReview(r.id), () => { applyStatus(r.id, "pending"); setToast("Unpublished — hidden from the tour page"); })}>Unpublish</Button>
+                  <Button variant="secondary" size="sm" iconStart="eye-off" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.unpublishReview(r.id), () => { applyStatus(r.id, "pending"); setToast("Unpublished: hidden from the tour page"); })}>Unpublish</Button>
                 </>}
                 {tab === "rejected" && <Button variant="secondary" size="sm" iconStart="rotate-ccw" onClick={() => window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.restoreReview(r.id), () => { applyStatus(r.id, "pending"); setToast("Moved back to Pending"); })}>Restore to pending</Button>}
               </div>
@@ -1502,7 +1502,7 @@ function ReviewsAdmin({ go }) {
         </div>
       )}
       <Drawer open={!!reply} title="Reply to review" subtitle={reply ? reply.author + " · " + reply.tour : ""} onClose={() => setReply(null)}
-        footer={<><Button variant="secondary" onClick={() => setReply(null)}>Cancel</Button><Button iconStart="check" style={{ marginInlineStart: "auto" }} onClick={() => { const v = (document.getElementById("rv-reply") || {}).value || ""; const id = reply && reply.id; window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.replyReview(id, v), () => { applyReply(id, v); setReply(null); setToast("Reply saved — shown publicly under the review"); }); }}>Save reply</Button></>}>
+        footer={<><Button variant="secondary" onClick={() => setReply(null)}>Cancel</Button><Button iconStart="check" style={{ marginInlineStart: "auto" }} onClick={() => { const v = (document.getElementById("rv-reply") || {}).value || ""; const id = reply && reply.id; window.TK_ADMIN_ACT(() => window.TK_ADMIN_API.replyReview(id, v), () => { applyReply(id, v); setReply(null); setToast("Reply saved: shown publicly under the review"); }); }}>Save reply</Button></>}>
         {reply && <><div className="tk-card" style={{ boxShadow: "none", border: "1px solid var(--border-subtle)", marginBottom: "var(--space-4)" }}><div className="tk-card__body" style={{ padding: "var(--space-4)", gap: 4 }}><AdminStars value={reply.rating} /><p className="tk-body-sm" style={{ margin: 0 }}>{reply.text}</p></div></div>
         <FormField id="rv-reply" label="Your public reply" hint="Speak as TripKoach. Warm, brief and specific."><Textarea id="rv-reply" rows={4} defaultValue={reply.reply || ""} /></FormField></>}
       </Drawer>

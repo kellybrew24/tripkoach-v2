@@ -25,7 +25,7 @@ function navGroups(role) {
     { label: "Operations", items: [
       // TRI-978 #2: the badge was a hardcoded stub (always "5"), contradicting the
       // dashboard's real "Pending confirmation" figure. Drive it off the real,
-      // hydrated bookings so it matches — pending = awaiting confirmation.
+      // hydrated bookings so it matches (pending = awaiting confirmation).
       { id: "bookings", label: "Bookings", icon: "ticket", badge: ((window.TK_ADMIN && window.TK_ADMIN.bookings) || []).filter(function (b) { return b.status === "pending"; }).length || undefined },
       // TRI-1139: custom-date requests inbox (TRI-1136 B1, CEO #3). Same RBAC as Bookings
       // (NOT admin-only) so operators triage them. "New" count drives the live badge.
@@ -67,9 +67,9 @@ function buildNotifications(role, go) {
   const out = [];
   // Bookings awaiting confirmation (held, payment pending).
   (A.bookings || []).filter((b) => b.status === "pending").slice(0, 6).forEach((b) => {
-    out.push({ id: "pending:" + b.ref, icon: "ticket", tone: "pending", text: "Booking " + b.ref + " awaiting confirmation — " + b.tour, time: b.created || "", onClick: () => go("bookings", b.ref) });
+    out.push({ id: "pending:" + b.ref, icon: "ticket", tone: "pending", text: "Booking " + b.ref + " awaiting confirmation: " + b.tour, time: b.created || "", onClick: () => go("bookings", b.ref) });
   });
-  // Failed payments — skip cancelled bookings (moot) and dedupe by reference.
+  // Failed payments: skip cancelled bookings (moot) and dedupe by reference.
   const cancelled = new Set((A.bookings || []).filter((b) => b.status === "cancelled").map((b) => b.ref));
   const seen = {};
   (A.payments || []).filter((p) => p.status === "failed").forEach((p) => {
@@ -178,7 +178,7 @@ function tkAuthed() { const s = tkSession(); return !LIVE || (s && !s.unauthenti
 
 function AdminApp() {
   const first = adminRouteFromPath(window.location.pathname);
-  // When live and not signed in, start on the login screen regardless of URL — EXCEPT the emailed
+  // When live and not signed in, start on the login screen regardless of URL, EXCEPT the emailed
   // password-reset link (/reset-password?token=…, TRI-1000) and the staff-invite accept link
   // (/accept-invite?token=…, TRI-1032), which a not-yet-active invitee / locked-out operator must be
   // able to open without a session to set their password.
@@ -194,7 +194,7 @@ function AdminApp() {
   // (window.TK_ADMIN.*, window.TK_REVIEWS) that mutations update in place; those
   // in-place edits don't trigger React on their own. TK_ADMIN_ACT broadcasts
   // "tk-admin-mutated" after every successful write, so bumping this counter here
-  // re-renders the whole tree and every mounted screen re-reads its global live —
+  // re-renders the whole tree and every mounted screen re-reads its global live,
   // no manual refresh, and it covers the entire family of admin mutations at once.
   const [, bumpDataRev] = React.useReducer((x) => x + 1, 0);
   React.useEffect(() => {
@@ -255,7 +255,7 @@ function AdminApp() {
   };
 
   // Accessibility enhancement layer. Applied to the DS components' RENDERED
-  // OUTPUT only — design-system/ source stays byte-for-byte pristine. These are
+  // OUTPUT only; design-system/ source stays byte-for-byte pristine. These are
   // additive ARIA annotations (never restyle): the AppShell renders its content
   // region as a plain <div class="tk-shell__main"> (no main landmark); card
   // section titles use <h3 class="tk-h5"> directly under the page <h1> (skips
@@ -272,7 +272,7 @@ function AdminApp() {
     document.querySelectorAll(".tk-navitem").forEach((b) => {
       // Use the button's full visible text (label + any badge, e.g. "Bookings 5")
       // so the accessible name still contains the visible label when the icon
-      // rail hides it — and never mismatches it.
+      // rail hides it, and never mismatches it.
       const name = b.textContent.replace(/\s+/g, " ").trim();
       if (name && !b.getAttribute("aria-label")) b.setAttribute("aria-label", name);
     });
@@ -289,7 +289,7 @@ function AdminApp() {
   // The `initialScreen` gate above only runs once (useState initializer). signOut
   // sets TK_ADMIN_SESSION → {unauthenticated:true} then routes to /login via
   // pushState; a browser Back is then a `popstate` that setScreen()s straight
-  // back to a protected route (e.g. dashboard) with NO auth check — re-rendering
+  // back to a protected route (e.g. dashboard) with NO auth check, re-rendering
   // the authenticated console (still-hydrated TK_ADMIN.* globals and all) for a
   // signed-out user. Forcing the login screen here whenever we're live-but-
   // unauthenticated on a protected route closes that hole for the popstate,
@@ -341,7 +341,7 @@ function AdminApp() {
     : [];
   const actions = {
     tours: <Button size="sm" iconStart="plus" onClick={() => go("tour-edit", "new")}>Create tour</Button>,
-    // TRI-982: the Bookings page had TWO Export buttons — this PageHeader one was a
+    // TRI-982: the Bookings page had TWO Export buttons; this PageHeader one was a
     // dead no-op (no onClick). The real CSV export lives in the Bookings FilterBar
     // (exportBookingsCsv, wired in TRI-968). Removed the duplicate; no header action
     // for bookings now.
@@ -350,15 +350,15 @@ function AdminApp() {
   }[screen];
 
   // TRI-978 #4: the notifications bell was a hardcoded 3-item fixture (TK-4821 /
-  // TK-4610 / Cape Coast — none of which exist). Derive a real "needs attention"
+  // TK-4610 / Cape Coast, none of which exist). Derive a real "needs attention"
   // feed from the already-hydrated console data (no new backend surface): bookings
   // awaiting confirmation, failed payments on live bookings, and departures that
   // are nearly full. Passing our own non-empty array also prevents the frozen DS
   // TopBar from falling back to its built-in demo notifications when the feed is
-  // empty — instead we show an explicit "all caught up" row.
+  // empty. Instead we show an explicit "all caught up" row.
   const notifs = buildNotifications(role, go);
   // TRI-1128: mark the given ids read and persist, pruned to the live feed so the
-  // stored set stays bounded. Marking read only clears the unread badge — the row
+  // stored set stays bounded. Marking read only clears the unread badge; the row
   // remains actionable in the panel until its underlying condition resolves.
   const markNotifRead = (ids) => setNotifRead((prev) => {
     const live = new Set(notifs.map((n) => n.id));
@@ -390,12 +390,12 @@ function AdminApp() {
 }
 
 /* App frame. The prototype's demo control bar (screen switcher + role/view
-   toggles) has been removed for production — navigation is real URL routing
+   toggles) has been removed for production. Navigation is real URL routing
    and screens render their real (loaded, non-error) state by default. */
 function Frame({ children }) {
   return <>{children}</>;
 }
-// Render through the boot gate (TRI-861) — see web/kit/app.jsx. Admin renders
+// Render through the boot gate (TRI-861); see web/kit/app.jsx. Admin renders
 // from fixtures for now; the gate is in place for live read wiring to drop in.
 (window.TK_BOOT || ((fn) => fn()))(() =>
   ReactDOM.createRoot(document.getElementById("root")).render(<AdminApp />)

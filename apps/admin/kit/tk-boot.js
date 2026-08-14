@@ -1,5 +1,5 @@
 /* ==========================================================================
- * TripKoach v2 admin — auth gate + write-path API shim (TRI-870 Phase 3).
+ * TripKoach v2 admin: auth gate + write-path API shim (TRI-870 Phase 3).
  *
  * Same pattern as the consumer app (TRI-861): the DS-verbatim admin screens
  * read their data SYNCHRONOUSLY from window-globals (window.TK_ADMIN.*,
@@ -26,7 +26,7 @@
  * Mapping is deliberately tolerant (accepts snake_case or camelCase, integer
  * minor units or whole-currency numbers, `{items:[…]}`/`{tours:[…]}`/bare-array
  * envelopes) so integration stays mechanical as the exact DTOs firm up with
- * Backend — mirrors web/kit/tk-boot.js.
+ * Backend. Mirrors web/kit/tk-boot.js.
  * ======================================================================== */
 (function () {
   var TkApiError = (window.TK_API && window.TK_API.TkApiError) || function (s, c, m) {
@@ -46,7 +46,7 @@
 
   // ── TRI-1059: post-logout Back/bfcache exposure guard ──────────────────────
   // A page restored from the browser back/forward cache (bfcache) comes back
-  // with the exact JS heap + DOM it had before the user navigated away —
+  // with the exact JS heap + DOM it had before the user navigated away,
   // including, after a sign-out, the fully-rendered authenticated console view.
   // Pressing Back after logout would therefore resurrect the console for a
   // logged-out user (TRI-1058). When we detect a bfcache restore (`pageshow`
@@ -54,7 +54,7 @@
   // then re-checks the staff session (revoked → 401 → /login). The Caddy
   // `Cache-Control: no-store` on the SPA document (TRI-1053 vhosts) already
   // suppresses bfcache in Chrome/Firefox; this is the belt-and-suspenders for
-  // engines that still restore. Live mode only — the fixtures/DS-preview build
+  // engines that still restore. Live mode only: the fixtures/DS-preview build
   // has no real session, so it keeps normal bfcache behaviour.
   window.addEventListener("pageshow", function (e) {
     if (e && e.persisted && live()) window.location.reload();
@@ -195,7 +195,7 @@
       capacity: cap, booked: pick(d.booked, (typeof cap === "number" ? cap - spots : undefined), 0), spotsLeft: spots,
       status: d.status || (spots <= 0 ? "sold-out" : "scheduled"),
       // TRI-1139: public|unlisted. Unlisted departures back a custom/private date
-      // request (TRI-1136 B1) — they're bookable only via a secure ?t= link and are
+      // request (TRI-1136 B1); they're bookable only via a secure ?t= link and are
       // excluded from every public read. The admin list badges them so ops can tell
       // a private hold apart from a normally-listed date.
       visibility: d.visibility || "public",
@@ -210,12 +210,12 @@
       id: pick(r.id, r.requestId, r.request_id, r.enquiryId, r.enquiry_id),
       tourId: pick(r.tourId, r.tourSlug, r.tour_id, r.tour_slug),
       // BE list projection returns the title as `tourName` (TRI-1137 listRequests).
-      tour: pick(r.tour, r.tourName, r.tourTitle, r.tour_title) || pick(r.tourSlug, r.tourId, r.tour_id) || "—",
+      tour: pick(r.tour, r.tourName, r.tourTitle, r.tour_title) || pick(r.tourSlug, r.tourId, r.tour_id) || "-",
       requestedDate: fmtDate(rawDate),
       requestedDateRaw: (typeof rawDate === "string" ? rawDate.slice(0, 10) : ""),
       partySize: pick(r.partySize, r.party_size, r.pax, r.travellers, 1),
       // Interest enquiries don't capture a name; fall back to the email so the row isn't blank.
-      customerName: pick(r.customerName, r.name, r.customer_name) || pick(r.email, r.customerEmail) || "—",
+      customerName: pick(r.customerName, r.name, r.customer_name) || pick(r.email, r.customerEmail) || "-",
       email: pick(r.email, r.customerEmail, r.customer_email) || "",
       phone: pick(r.phone, r.customerPhone, r.customer_phone) || "",
       receivedAt: fmtDate(pick(r.receivedAt, r.received_at, r.createdAt, r.created_at)),
@@ -259,7 +259,7 @@
       id: pick(p.id, p.ref, p.reference),
       ref: pick(p.bookingRef, p.booking_ref, p.ref),
       customer: pick(p.customer, p.customerName, p.customer_name),
-      // `amount` is the figure IN THE ROW'S CURRENCY (GHS for a Paystack charge — the real money moved);
+      // `amount` is the figure IN THE ROW'S CURRENCY (GHS for a Paystack charge, the real money moved);
       // never mislabel it. TRI-1033: `usd`/`ghs` must stay NULL when the row carries no real figure so the
       // screen can tell "no USD-of-record" (legacy/refund rows) apart from "$0" and avoid printing a GHS
       // number under a $ sign. Only the true USD-of-record / GHS-charge sources feed them (no amount fallback).
@@ -289,7 +289,7 @@
       id: pick(u.id, u.staffId), name: u.name || "", email: u.email || "",
       role: u.role || "viewer", status: u.status || "active", initials: u.initials || initials(u.name),
       jobTitle: pick(u.jobTitle, u.job_title) || "",
-      last: pick(u.last, u.lastActive, u.last_active_at, "—"),
+      last: pick(u.last, u.lastActive, u.last_active_at, "-"),
       // TRI-1080: lock + MFA state drive the Staff "Locked"/"2FA" badges and the
       // "Recover access" row-menu gating. This whitelist mapper drops any DTO field
       // it doesn't list, so these MUST be forwarded explicitly (TRI-992 lesson).
@@ -304,7 +304,7 @@
       country: c.country || "", joined: fmtDate(pick(c.joined, c.createdAt, c.created_at)),
       bookings: pick(c.bookings, c.bookingCount, 0), initials: c.initials || initials(c.name),
       emergencyName: c.emergencyName || "", emergencyPhone: c.emergencyPhone || "",
-      diet: pick(c.dietaryNeeds, c.diet) || "—",
+      diet: pick(c.dietaryNeeds, c.diet) || "-",
       language: c.language || "", displayCurrency: c.displayCurrency || "",
       twoFactorEnabled: c.twoFactorEnabled === undefined ? null : c.twoFactorEnabled,
       // TRI-941: account/verification state (guests have no account → hasAccount=false, emailVerified=null).
@@ -349,7 +349,7 @@
   // ---- write serialisers: kit form values → API body ------------------------
   // USD is the currency of record. Prices go out as whole-currency numbers with
   // an explicit currency, mirroring the read contract (Backend converts to GHS
-  // pesewas at charge time — the FE never computes FX).
+  // pesewas at charge time; the FE never computes FX).
   function tourBody(v) {
     var b = { title: v.title, region: v.region, category: v.category, duration: v.duration,
       blurb: v.blurb, currency: v.currency || "USD", published: !!v.published };
@@ -387,7 +387,7 @@
         var err = (p && p.error) || {};
         reject(TkApiError(xhr.status || 0, err.code || null, err.message || ("Upload failed (HTTP " + xhr.status + ")")));
       };
-      xhr.onerror = function () { reject(TkApiError(0, "network", "Upload failed — network error")); };
+      xhr.onerror = function () { reject(TkApiError(0, "network", "Upload failed, network error")); };
       xhr.send(file);
     });
   }
@@ -411,11 +411,11 @@
     mfaVerifyEnroll: function (code) { return req("POST", "/auth/mfa/verify", { code: code }); },
     mfaDisable: function (code) { return req("POST", "/auth/mfa/disable", { code: code }); },
     mfaRegenerateCodes: function () { return req("POST", "/auth/mfa/recovery-codes"); },
-    // password — change (authed self-service) + forgot/reset (public) (TRI-1000)
+    // password: change (authed self-service) + forgot/reset (public) (TRI-1000)
     changePassword: function (currentPassword, newPassword) { return req("POST", "/me/password", { currentPassword: currentPassword, newPassword: newPassword }); },
     requestPasswordReset: function (email) { return req("POST", "/auth/password-reset/request", { email: email }); },
     consumePasswordReset: function (token, password) { return req("POST", "/auth/password-reset/consume", { token: token, password: password }); },
-    // staff invite accept (public — the opaque token IS the credential) (TRI-1032)
+    // staff invite accept (public, the opaque token IS the credential) (TRI-1032)
     previewInvite: function (token) { return req("GET", "/staff/accept", undefined, { query: { token: token } }); },
     acceptInvite: function (token, password) { return req("POST", "/staff/accept", { token: token, password: password }); },
     // catalogue
@@ -459,7 +459,7 @@
     // TRI-1007: re-send the booking confirmation email. Resolves { ref, outcome, to } where outcome is
     // 'sent' | 'skipped' (transport off) | 'failed' | 'no_recipient'; 409 for cancelled/failed bookings.
     resendBookingConfirmation: function (ref) { return req("POST", "/bookings/" + encodeURIComponent(ref) + "/resend"); },
-    // TRI-1007: Customers row-menu — re-send the confirmation for a customer's most recent booking.
+    // TRI-1007: Customers row-menu, re-send the confirmation for a customer's most recent booking.
     resendCustomerLastConfirmation: function (id) { return req("POST", "/customers/" + encodeURIComponent(id) + "/resend-confirmation"); },
     // payments
     listPayments: function () { return req("GET", "/payments"); },
@@ -496,7 +496,7 @@
     saveSettings: function (v) { return req("PATCH", "/settings", v || {}); },
     listStaff: function () { return req("GET", "/staff"); },
     inviteStaff: function (v) { return req("POST", "/staff", v); },
-    // TRI-996: staff row actions — update role/name/job-title, resend invite, disable/enable.
+    // TRI-996: staff row actions: update role/name/job-title, resend invite, disable/enable.
     // All guarded server-side by perm('users.manage'); the last-active-admin guard returns 409.
     updateStaff: function (id, v) { return req("PATCH", "/staff/" + encodeURIComponent(id), v || {}); },
     resendStaffInvite: function (id) { return req("POST", "/staff/" + encodeURIComponent(id) + "/resend-invite"); },
@@ -506,7 +506,7 @@
     // TRI-1083 (TRI-1080 §1 / TRI-1082 backend): admin recovery actions on ANOTHER admin's account.
     // All guarded server-side by perm('users.manage'). If the backend requires a fresh re-auth for
     // these sensitive writes it returns 401/403 with a step-up code; `body` carries the confirm code
-    // on retry. recovery-codes returns { recoveryCodes: [...] } shown ONCE — never persisted here.
+    // on retry. recovery-codes returns { recoveryCodes: [...] } shown ONCE, never persisted here.
     clearStaffLockout: function (id, body) { return req("POST", "/staff/" + encodeURIComponent(id) + "/clear-lockout", body); },
     regenerateStaffRecoveryCodes: function (id, body) { return req("POST", "/staff/" + encodeURIComponent(id) + "/recovery-codes", body); },
     resetStaffMfa: function (id, body) { return req("POST", "/staff/" + encodeURIComponent(id) + "/reset-mfa", body); },
@@ -514,14 +514,14 @@
     // (admin is locked all-on server-side). Guards resolve permissions per request, so edits take effect live.
     getRolePermissions: function () { return req("GET", "/roles/permissions"); },
     saveRolePermissions: function (matrix) { return req("PUT", "/roles/permissions", { matrix: matrix || {} }); },
-    // reviews moderation (TRI-893) — unpublish & restore both return a review to 'pending' (hidden)
+    // reviews moderation (TRI-893): unpublish & restore both return a review to 'pending' (hidden)
     listReviews: function () { return req("GET", "/reviews"); },
     approveReview: function (id) { return req("POST", "/reviews/" + encodeURIComponent(id) + "/approve"); },
     rejectReview: function (id) { return req("POST", "/reviews/" + encodeURIComponent(id) + "/reject"); },
     unpublishReview: function (id) { return req("POST", "/reviews/" + encodeURIComponent(id) + "/unpublish"); },
     restoreReview: function (id) { return req("POST", "/reviews/" + encodeURIComponent(id) + "/restore"); },
     replyReview: function (id, reply) { return req("POST", "/reviews/" + encodeURIComponent(id) + "/reply", { reply: reply }); },
-    // blog / CMS (TRI-917) — authoring CRUD, guarded server-side by content.manage
+    // blog / CMS (TRI-917): authoring CRUD, guarded server-side by content.manage
     listBlog: function () { return req("GET", "/blog"); },
     getBlog: function (id) { return req("GET", "/blog/" + encodeURIComponent(id)); },
     saveBlog: function (v) {
@@ -536,7 +536,7 @@
     // TRI-972: customer activity/events timeline (bookings, cancellations, reschedules, refunds, reviews)
     getCustomerActivity: function (id) { return req("GET", "/customers/" + encodeURIComponent(id) + "/activity"); },
     listGuides: function () { return req("GET", "/guides"); },
-    // guides write path (TRI-1005) — POST/PATCH/DELETE /guides all exist server-side
+    // guides write path (TRI-1005): POST/PATCH/DELETE /guides all exist server-side
     // (guarded by tours.edit). createGuide → save, updateGuide/setGuideStatus → edit
     // + on-leave/active toggle, deleteGuide → remove from the lead-guide picker.
     getGuide: function (id) { return req("GET", "/guides/" + encodeURIComponent(id)); },
@@ -574,12 +574,12 @@
     if (err.status === 403) return "You don't have permission to do that.";
     if (err.status === 422 || (err.fields && Object.keys(err.fields).length)) {
       var f = err.fields ? Object.keys(err.fields).map(function (k) { return err.fields[k]; }).join(" ") : "";
-      return err.message ? err.message + (f ? " — " + f : "") : (f || "Please check the form and try again.");
+      return err.message ? err.message + (f ? ": " + f : "") : (f || "Please check the form and try again.");
     }
     return err.message || "Something went wrong. Please try again.";
   }
   // TRI-980: SYSTEMIC re-render seam. Admin screens read mutable module globals
-  // (window.TK_ADMIN.*, window.TK_REVIEWS) directly — a successful mutation that
+  // (window.TK_ADMIN.*, window.TK_REVIEWS) directly; a successful mutation that
   // updates the shared record does NOT, on its own, make the mounted screen
   // re-read it, so the row stayed stale until a manual refresh re-hydrated the
   // console (reviews approve/publish, payments mark-paid, refund, …). Every write
@@ -606,7 +606,7 @@
       if (err && err.status === 401) window.dispatchEvent(new CustomEvent("tk-admin-401"));
       if (opts.onError) opts.onError(err);
       else toast(errMessage(err));
-      // Do NOT run the optimistic update on failure — the write didn't persist.
+      // Do NOT run the optimistic update on failure; the write didn't persist.
       throw err;
     });
   };
@@ -619,9 +619,9 @@
     var to = res.to ? " to " + res.to : "";
     switch (res.outcome) {
       case "sent": return "Confirmation re-sent" + to + ".";
-      case "skipped": return "Email sending is off in this environment — nothing was sent.";
-      case "no_recipient": return "No contact email on file — nothing was sent.";
-      default: return "Couldn't send the confirmation — check the email log.";
+      case "skipped": return "Email sending is off in this environment. Nothing was sent.";
+      case "no_recipient": return "No contact email on file. Nothing was sent.";
+      default: return "Couldn't send the confirmation. Check the email log.";
     }
   };
   // Summarise a bulk resend (array of per-ref results, some may be rejections caught as {outcome:'error'}).
@@ -629,7 +629,7 @@
     if (!results) return "Confirmation resent to " + count + " customers";
     var sent = results.filter(function (r) { return r && r.outcome === "sent"; }).length;
     if (sent === results.length) return "Confirmation re-sent to " + sent + " customer" + (sent === 1 ? "" : "s") + ".";
-    if (sent === 0) return "No confirmations sent — recipients had no email, sending is off, or the bookings can't be resent.";
+    if (sent === 0) return "No confirmations sent: recipients had no email, sending is off, or the bookings can't be resent.";
     return "Re-sent " + sent + " of " + results.length + " confirmations (the rest had no email or can't be resent).";
   };
 
@@ -755,7 +755,7 @@
   };
   window.TK_ADMIN_HYDRATE = hydrate;
   window.TK_BOOT = function (render) {
-    if (!live()) { render(); return; } // fixtures — unchanged prototype
+    if (!live()) { render(); return; } // fixtures, unchanged prototype
     renderLoading();
     API.me().then(function (me) {
       window.TK_ADMIN_SESSION = sessionFromMe(me);

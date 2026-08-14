@@ -950,7 +950,7 @@ function TopBar({
   const stop = e => e.stopPropagation();
   const items = notificationItems.length ? notificationItems : [{
     icon: "ticket",
-    text: "New booking TK-4821 — Accra City Tour",
+    text: "New booking TK-4821: Accra City Tour",
     time: "2 min ago",
     tone: "pending"
   }, {
@@ -1663,7 +1663,7 @@ function MediaManager({
       textAlign: "center",
       padding: 8
     }
-  }, "Upload failed \u2014 retry"), /*#__PURE__*/React.createElement("div", {
+  }, "Upload failed. Retry"), /*#__PURE__*/React.createElement("div", {
     className: "tk-media-tile__bar"
   }, /*#__PURE__*/React.createElement("button", {
     type: "button",
@@ -2532,7 +2532,7 @@ Object.assign(__ds_scope, { Alert });
 // components/commerce/PaymentForm.jsx
 try { (() => {
 /* Payments are handled entirely by Paystack. TripKoach never collects, sees or stores
-   card details — the customer is handed off to Paystack's secure checkout. So this form
+   card details. The customer is handed off to Paystack's secure checkout. So this form
    has no card fields: pay-now is a hosted-redirect hand-off, pay-later holds the booking. */
 function PaymentForm({
   mode = "later",
@@ -2571,7 +2571,7 @@ function PaymentForm({
     checked: mode === "now",
     disabled: !payNowEnabled,
     onChange: () => onModeChange && onModeChange("now"),
-    description: payNowEnabled ? "Secure checkout by Paystack — card, bank or mobile money." : "Card payment is coming soon.",
+    description: payNowEnabled ? "Secure checkout by Paystack: card, bank or mobile money." : "Card payment is coming soon.",
     trailing: payNowEnabled ? /*#__PURE__*/React.createElement(__ds_scope.Icon, {
       name: "shield-check",
       size: 18,
@@ -2595,7 +2595,7 @@ function PaymentForm({
   }, "Your booking is held as ", /*#__PURE__*/React.createElement("strong", null, "Pending"), ". We'll email payment instructions and remind you before the deadline."), mode === "now" && state === "failed" && /*#__PURE__*/React.createElement(__ds_scope.Alert, {
     tone: "error",
     title: "Payment wasn't completed"
-  }, "Your payment didn't go through at Paystack. Nothing was charged and your spots are still held \u2014 try again, or switch to pay later."), mode === "now" && state === "succeeded" && /*#__PURE__*/React.createElement(__ds_scope.Alert, {
+  }, "Your payment didn't go through at Paystack. Nothing was charged and your spots are still held. Try again, or switch to pay later."), mode === "now" && state === "succeeded" && /*#__PURE__*/React.createElement(__ds_scope.Alert, {
     tone: "success",
     title: "Payment received"
   }, "Paystack confirmed your payment. Your booking is confirmed."), mode === "now" && (state === "idle" || state === "processing") && /*#__PURE__*/React.createElement("div", {
@@ -2673,7 +2673,7 @@ function PaymentForm({
     style: {
       margin: 0
     }
-  }, "TripKoach never sees or stores your card details \u2014 Paystack handles them. You\u2019ll only ever pay on Paystack\u2019s secured page; we never ask for card details, PIN or one-time codes by email, phone or text.")), state === "processing" && /*#__PURE__*/React.createElement("div", {
+  }, "TripKoach never sees or stores your card details. Paystack handles them. You\u2019ll only ever pay on Paystack\u2019s secured page; we never ask for card details, PIN or one-time codes by email, phone or text.")), state === "processing" && /*#__PURE__*/React.createElement("div", {
     className: "tk-row",
     style: {
       gap: 10,
@@ -3217,7 +3217,7 @@ Object.assign(__ds_scope, { CheckoutStepper });
 
 // components/navigation/Logo.jsx
 try { (() => {
-/** The TripKoach badge. Only the supplied PNG is ever used as the mark — never redrawn. */
+/** The TripKoach badge. Only the supplied PNG is ever used as the mark, never redrawn. */
 function Logo({
   size = 36,
   wordmark = true,
@@ -3473,7 +3473,7 @@ try { (() => {
   function tour(id) {
     return byId[id] || {
       title: id,
-      region: "—",
+      region: "-",
       price: 0
     };
   }
@@ -3512,7 +3512,7 @@ try { (() => {
     initials: "KA",
     emergencyName: "Abena Asante",
     emergencyPhone: "+1 416 555 0200",
-    diet: "—"
+    diet: "-"
   }, {
     id: "c4",
     name: "Lena Fischer",
@@ -3536,7 +3536,7 @@ try { (() => {
     initials: "NO",
     emergencyName: "Kwabena Owusu",
     emergencyPhone: "+233 20 555 0178",
-    diet: "—"
+    diet: "-"
   }, {
     id: "c6",
     name: "David Okonkwo",
@@ -3674,7 +3674,7 @@ try { (() => {
     role: "viewer",
     status: "invited",
     initials: "ES",
-    last: "—"
+    last: "-"
   }, {
     id: "u5",
     name: "Yaw Darko",
@@ -3735,7 +3735,7 @@ try { (() => {
     status: "active",
     rating: 4.8,
     trips: 168,
-    bio: "Coastal heritage specialist — castles, festivals and the fishing towns."
+    bio: "Coastal heritage specialist: castles, festivals and the fishing towns."
   }, {
     id: "kojo",
     name: "Kojo Antwi",
@@ -4131,7 +4131,7 @@ function AdminApp() {
   const notifs = [{
     icon: "ticket",
     tone: "pending",
-    text: "New booking TK-4821 — Accra City Tour",
+    text: "New booking TK-4821: Accra City Tour",
     time: "2 min ago",
     onClick: () => go("bookings", "TK-4821")
   }, {
@@ -4171,7 +4171,7 @@ function AdminApp() {
   }), body));
 }
 
-/* Demo control bar — not part of the product */
+/* Demo control bar, not part of the product */
 function Frame({
   children,
   demo,
@@ -4344,7 +4344,7 @@ function AuthFrame({
       maxWidth: "40ch",
       fontSize: 14.5
     }
-  }, "Tours, departures, bookings and payments \u2014 one console for the whole operation.")), /*#__PURE__*/React.createElement("p", {
+  }, "Tours, departures, bookings and payments: one console for the whole operation.")), /*#__PURE__*/React.createElement("p", {
     style: {
       position: "relative",
       fontSize: 12,
@@ -4934,7 +4934,7 @@ function BookingDrawer({
     tone: "success"
   }] : []), ...(cur === "cancelled" ? [{
     type: "cancelled",
-    text: "Booking <strong>cancelled</strong>" + (reason ? " — " + reason : ""),
+    text: "Booking <strong>cancelled</strong>" + (reason ? ": " + reason : ""),
     actor: "You",
     time: "Just now",
     tone: "danger"
@@ -6007,7 +6007,7 @@ function CustomersAdmin({
     style: {
       padding: 0
     }
-  }, [["Emergency contact", open.emergencyName || "—"], ["Emergency number", open.emergencyPhone || "—"], ["Dietary needs", open.diet || "—"]].map(([k, v]) => /*#__PURE__*/React.createElement("div", {
+  }, [["Emergency contact", open.emergencyName || "-"], ["Emergency number", open.emergencyPhone || "-"], ["Dietary needs", open.diet || "-"]].map(([k, v]) => /*#__PURE__*/React.createElement("div", {
     className: "tk-summary__line",
     key: k
   }, /*#__PURE__*/React.createElement("span", null, k), /*#__PURE__*/React.createElement("span", {
@@ -6074,7 +6074,7 @@ function PaymentsAdmin({
   }, /*#__PURE__*/React.createElement(Alert, {
     tone: "info",
     title: "Payments run through Paystack"
-  }, "Card, bank and mobile-money payments are handled by Paystack's hosted checkout \u2014 TripKoach never stores card details. Transactions sync here automatically; you can still mark pay-later bookings paid by hand when money arrives another way."), /*#__PURE__*/React.createElement("div", {
+  }, "Card, bank and mobile-money payments are handled by Paystack's hosted checkout. TripKoach never stores card details. Transactions sync here automatically; you can still mark pay-later bookings paid by hand when money arrives another way."), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
       gridTemplateColumns: "repeat(4,1fr)",
@@ -6573,7 +6573,7 @@ function UsersAdmin({
       label: "Actions for " + r.name,
       variant: "ghost",
       size: "sm",
-      onClick: () => window.tkToast("Manage " + r.name + " — edit role or remove")
+      onClick: () => window.tkToast("Manage " + r.name + ": edit role or remove")
     })
   })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h3", {
     className: "tk-h5",
@@ -6669,13 +6669,13 @@ function UsersAdmin({
     defaultValue: "operator",
     options: [{
       value: "admin",
-      label: "Admin — full access"
+      label: "Admin: full access"
     }, {
       value: "operator",
-      label: "Operator — day-to-day ops"
+      label: "Operator: day-to-day ops"
     }, {
       value: "viewer",
-      label: "Read-only — view but not change"
+      label: "Read-only: view but not change"
     }]
   }))), toast && /*#__PURE__*/React.createElement("div", {
     style: {
@@ -7871,7 +7871,7 @@ function ReviewsAdmin({
       label: "3★ & up"
     }, {
       value: "1",
-      label: "1–2★ only"
+      label: "1 to 2★ only"
     }]
   }), /*#__PURE__*/React.createElement("span", {
     className: "tk-caption",
@@ -7957,7 +7957,7 @@ function ReviewsAdmin({
   }, r.text), !r.verified && /*#__PURE__*/React.createElement(Alert, {
     tone: "warning",
     title: "No matching booking"
-  }, "This reviewer has no completed booking for this tour \u2014 likely spam. Reject unless you can verify it."), r.reply && /*#__PURE__*/React.createElement("div", {
+  }, "This reviewer has no completed booking for this tour. Likely spam. Reject unless you can verify it."), r.reply && /*#__PURE__*/React.createElement("div", {
     style: {
       padding: "10px 12px",
       background: "var(--bg-sunken)",
@@ -7988,11 +7988,11 @@ function ReviewsAdmin({
     variant: "secondary",
     size: "sm",
     iconStart: "x",
-    onClick: () => setToast("Review rejected — it stays hidden")
+    onClick: () => setToast("Review rejected. It stays hidden")
   }, "Reject"), /*#__PURE__*/React.createElement(Button, {
     size: "sm",
     iconStart: "check",
-    onClick: () => setToast("Approved — now live on the tour page")
+    onClick: () => setToast("Approved. Now live on the tour page")
   }, "Approve & publish")), tab === "approved" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Button, {
     variant: "secondary",
     size: "sm",
@@ -8002,7 +8002,7 @@ function ReviewsAdmin({
     variant: "secondary",
     size: "sm",
     iconStart: "eye-off",
-    onClick: () => setToast("Unpublished — hidden from the tour page")
+    onClick: () => setToast("Unpublished. Hidden from the tour page")
   }, "Unpublish")), tab === "rejected" && /*#__PURE__*/React.createElement(Button, {
     variant: "secondary",
     size: "sm",
@@ -8023,7 +8023,7 @@ function ReviewsAdmin({
       },
       onClick: () => {
         setReply(null);
-        setToast("Reply saved — shown publicly under the review");
+        setToast("Reply saved. Shown publicly under the review");
       }
     }, "Save reply"))
   }, reply && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
@@ -8375,7 +8375,7 @@ function ToursAdmin({
       key: "rating",
       header: "Rating",
       align: "end",
-      render: r => r.rating ? "★ " + r.rating : "—"
+      render: r => r.rating ? "★ " + r.rating : "-"
     }],
     rows: rows,
     getRowId: r => r.id,
@@ -8454,7 +8454,7 @@ function TourEdit({
     setNewRegion("");
     setAddingRegion(false);
     touch();
-    setToast("Region “" + v + "” added — now live in browse filters and the Regions page");
+    setToast("Region “" + v + "” added. Now live in browse filters and the Regions page");
   };
   const media = (t.image ? [{
     id: "m0",
@@ -8714,7 +8714,7 @@ function TourEdit({
     hint: "Drafts are hidden from the website until published."
   }, /*#__PURE__*/React.createElement(Switch, {
     id: "e-pub",
-    label: published ? "Published — live on the website" : "Draft — hidden from travellers",
+    label: published ? "Published, live on the website" : "Draft, hidden from travellers",
     checked: published,
     onChange: () => {
       setPublished(!published);
@@ -8838,7 +8838,7 @@ function DeparturesAdmin({
   });
   const save = () => {
     setAdding(false);
-    setToast("Departure added — " + (chosenTour ? chosenTour.title : "tour") + (chosenPkg ? " · " + chosenPkg.name : "") + (form.date ? " on " + form.date : "") + (form.repeat ? " (+ weekly repeats)" : ""));
+    setToast("Departure added: " + (chosenTour ? chosenTour.title : "tour") + (chosenPkg ? " · " + chosenPkg.name : "") + (form.date ? " on " + form.date : "") + (form.repeat ? " (+ weekly repeats)" : ""));
   };
   const util = d => Math.round(d.booked / d.capacity * 100);
   const capBar = d => {
@@ -8917,7 +8917,7 @@ function DeparturesAdmin({
     style: {
       marginInlineStart: 8
     }
-  }, "Watch the utilization bar \u2014 red means near capacity."), /*#__PURE__*/React.createElement(Button, {
+  }, "Watch the utilization bar. Red means near capacity."), /*#__PURE__*/React.createElement(Button, {
     size: "sm",
     iconStart: "plus",
     style: {
@@ -8999,7 +8999,7 @@ function DeparturesAdmin({
       label: "Adjust capacity",
       variant: "ghost",
       size: "sm",
-      onClick: () => window.tkToast("Capacity editor — open the departure to adjust")
+      onClick: () => window.tkToast("Capacity editor: open the departure to adjust")
     }), /*#__PURE__*/React.createElement(IconButton, {
       icon: "x",
       label: "Cancel departure",
@@ -9045,7 +9045,7 @@ function DeparturesAdmin({
   })), /*#__PURE__*/React.createElement(FormField, {
     id: "dep-package",
     label: "Package / type",
-    hint: chosenPkg ? chosenPkg.blurb : "This tour has no package types — departures use the standard rate."
+    hint: chosenPkg ? chosenPkg.blurb : "This tour has no package types. Departures use the standard rate."
   }, /*#__PURE__*/React.createElement(Select, {
     id: "dep-package",
     value: form.packageId,
@@ -9182,7 +9182,7 @@ function DeparturesAdmin({
   }, "Opens ", form.capacity, " spots on ", chosenTour.title, form.date ? " for " + form.date : "", " at $", form.price || fromPrice || 0, "/person.")), /*#__PURE__*/React.createElement(Modal, {
     open: !!endDep,
     title: "End departure & request reviews",
-    description: endDep ? endDep.tour + " on " + endDep.date + " — " + endDep.booked + " traveller" + (endDep.booked === 1 ? "" : "s") + " travelled." : "",
+    description: endDep ? endDep.tour + " on " + endDep.date + ": " + endDep.booked + " traveller" + (endDep.booked === 1 ? "" : "s") + " travelled." : "",
     onClose: () => setEndDep(null),
     actions: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Button, {
       variant: "secondary",
@@ -9197,7 +9197,7 @@ function DeparturesAdmin({
           [id]: true
         }));
         setEndDep(null);
-        setToast("Departure closed — " + n + " personal review invite" + (n === 1 ? "" : "s") + " sent");
+        setToast("Departure closed: " + n + " personal review invite" + (n === 1 ? "" : "s") + " sent");
       }
     }, "Send ", endDep ? endDep.booked : 0, " review invites"))
   }, endDep && /*#__PURE__*/React.createElement("div", {
@@ -9209,7 +9209,7 @@ function DeparturesAdmin({
   }, /*#__PURE__*/React.createElement(Alert, {
     tone: "info",
     title: "Each traveller gets their own private link"
-  }, "Only people who were on this departure can review it. The link is tied to their booking, so every review comes back marked ", /*#__PURE__*/React.createElement("strong", null, "Verified booking"), " \u2014 then waits for your approval before it's public."), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+  }, "Only people who were on this departure can review it. The link is tied to their booking, so every review comes back marked ", /*#__PURE__*/React.createElement("strong", null, "Verified booking"), ". Then waits for your approval before it's public."), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
     className: "tk-label",
     style: {
       display: "block",
@@ -9269,7 +9269,7 @@ function DeparturesAdmin({
     }, "Keep departure"), /*#__PURE__*/React.createElement(Button, {
       variant: "danger",
       onClick: () => {
-        setToast("Departure cancelled — " + (cancelDep ? cancelDep.booked : 0) + " bookings flagged for refund");
+        setToast("Departure cancelled: " + (cancelDep ? cancelDep.booked : 0) + " bookings flagged for refund");
         setCancelDep(null);
       }
     }, "Cancel departure"))
@@ -9303,12 +9303,12 @@ try { (() => {
 // Copied omelette starter. Re-running copy_starter_component with this kind overwrites this file with the latest version (page content is unaffected).
 
 /* BEGIN USAGE */
-// Android.jsx — Simplified Android (Material 3) device frame
+// Android.jsx: Simplified Android (Material 3) device frame
 // Status bar + top app bar + content + gesture nav + keyboard.
 // Based on Figma M3 spec. No dependencies, no image assets.
 // Exports (to window): AndroidDevice, AndroidStatusBar, AndroidAppBar, AndroidListItem, AndroidNavBar, AndroidKeyboard
 //
-// Usage — wrap your screen content in <AndroidDevice> to get the bezel, status
+// Usage: wrap your screen content in <AndroidDevice> to get the bezel, status
 // bar and gesture nav (props: title, large, keyboard, dark):
 //
 //   <AndroidDevice title="Inbox" large>
@@ -9560,7 +9560,7 @@ function AndroidNavBar({
 }
 
 // ─────────────────────────────────────────────────────────────
-// Device frame — wraps everything
+// Device frame, wraps everything
 // ─────────────────────────────────────────────────────────────
 function AndroidDevice({
   children,
@@ -9573,7 +9573,7 @@ function AndroidDevice({
 }) {
   return (
     /*#__PURE__*/
-    // data-om-starter: inert presence marker — Claude Design's starter-usage
+    // data-om-starter: inert presence marker, Claude Design's starter-usage
     // probe reads it; it renders nothing. Keep it on this root element.
     React.createElement("div", {
       "data-om-starter": "android-frame",
@@ -9606,7 +9606,7 @@ function AndroidDevice({
 }
 
 // ─────────────────────────────────────────────────────────────
-// Keyboard — Gboard (Material 3)
+// Keyboard: Gboard (Material 3)
 // ─────────────────────────────────────────────────────────────
 function AndroidKeyboard() {
   let _k = 0;
@@ -9984,18 +9984,18 @@ window.TK_DATA = {
     spotsLeft: 11,
     tag: "Most booked",
     image: TK_IMG("accra-city-tour"),
-    blurb: "Feel the pulse of the capital — history, culture, flavor. Iconic sites, vibrant markets, and street food in just a few hours.",
+    blurb: "Feel the pulse of the capital: history, culture, flavor. Iconic sites, vibrant markets, and street food in just a few hours.",
     highlights: ["Black Star Gate at Independence Square", "Kwame Nkrumah Memorial Park", "Jamestown harbor and lighthouse", "Makola Market with a guided street-food tasting"],
     included: ["Private transportation", "Bottled water + 1 non-alcoholic drink", "Professional guided tour", "Local street-food experience", "Hotel pickup within Accra"],
     excluded: ["Travel to Accra", "Tips and personal expenses"],
-    pricing: [["Solo traveler", "$100 USD"], ["2–5 travelers (per person)", "$75 USD"], ["Group of 6+ (per person)", "$65 USD"]],
+    pricing: [["Solo traveler", "$100 USD"], ["2 to 5 travelers (per person)", "$75 USD"], ["Group of 6+ (per person)", "$65 USD"]],
     itinerary: [["09:00", "Hotel pickup within Accra"], ["09:30", "Black Star Gate & Independence Square"], ["10:30", "Kwame Nkrumah Memorial Park"], ["11:30", "Jamestown harbor and lighthouse"], ["12:15", "Makola Market + street-food tasting"], ["13:00", "Drop-off at your hotel"]],
     packages: [{
       id: "route1",
-      name: "Route 1 — Classic Capital Loop",
+      name: "Route 1: Classic Capital Loop",
       tag: "Heritage & Food · half day",
-      blurb: "The iconic first-timer's loop — landmarks, Jamestown and a guided street-food tasting.",
-      duration: "Half day · 3–4 hrs",
+      blurb: "The iconic first-timer's loop: landmarks, Jamestown and a guided street-food tasting.",
+      duration: "Half day · 3 to 4 hrs",
       tiers: [{
         minPax: 1,
         price: 100
@@ -10006,14 +10006,14 @@ window.TK_DATA = {
         minPax: 6,
         price: 65
       }],
-      stops: ["Hotel pickup in Accra", "Black Star Gate at Independence Square", "Kwame Nkrumah Memorial Park and mausoleum", "Jamestown lighthouse and harbor walk", "Makola Market — guided orientation", "Guided street-food tasting: kelewele, koose, sugar bread", "Hotel drop-off"],
+      stops: ["Hotel pickup in Accra", "Black Star Gate at Independence Square", "Kwame Nkrumah Memorial Park and mausoleum", "Jamestown lighthouse and harbor walk", "Makola Market: guided orientation", "Guided street-food tasting: kelewele, koose, sugar bread", "Hotel drop-off"],
       includes: ["Private transportation", "Bottled water + 1 non-alcoholic drink", "Professional guided tour", "Makola street-food tasting", "Hotel pickup within Accra"]
     }, {
       id: "route2",
-      name: "Route 2 — Culture & Arts Focus",
+      name: "Route 2: Culture & Arts Focus",
       tag: "Art, History & Osu · half day",
-      blurb: "For art and culture lovers — the National Museum, Du Bois Centre and Osu's galleries.",
-      duration: "Half day · 3–4 hrs",
+      blurb: "For art and culture lovers: the National Museum, Du Bois Centre and Osu's galleries.",
+      duration: "Half day · 3 to 4 hrs",
       tiers: [{
         minPax: 1,
         price: 100
@@ -10024,14 +10024,14 @@ window.TK_DATA = {
         minPax: 6,
         price: 65
       }],
-      stops: ["Hotel pickup in Accra", "National Museum of Ghana — kente, gold weights, pre-colonial history", "W.E.B. Du Bois Centre — Pan-African history", "Artists Alliance Gallery, Osu — contemporary art and crafts", "Labadi Beach promenade", "Oxford Street, Osu — street food and people-watching", "Optional extension: +233 Jazz Bar (live Afrobeats and highlife)"],
+      stops: ["Hotel pickup in Accra", "National Museum of Ghana: kente, gold weights, pre-colonial history", "W.E.B. Du Bois Centre: Pan-African history", "Artists Alliance Gallery, Osu: contemporary art and crafts", "Labadi Beach promenade", "Oxford Street, Osu: street food and people-watching", "Optional extension: +233 Jazz Bar (live Afrobeats and highlife)"],
       includes: ["Private transportation", "Bottled water + 1 non-alcoholic drink", "Professional guided tour", "National Museum & Du Bois Centre entry", "Hotel pickup within Accra"]
     }, {
       id: "route3",
-      name: "Route 3 — Heritage Deep Dive",
+      name: "Route 3: Heritage Deep Dive",
       tag: "Forts, History & Sea · half day",
-      blurb: "A deeper heritage day — forts, the Chorkor smokehouse and Accra's old town.",
-      duration: "Half day · 3–4 hrs",
+      blurb: "A deeper heritage day: forts, the Chorkor smokehouse and Accra's old town.",
+      duration: "Half day · 3 to 4 hrs",
       tiers: [{
         minPax: 1,
         price: 100
@@ -10042,7 +10042,7 @@ window.TK_DATA = {
         minPax: 6,
         price: 65
       }],
-      stops: ["Hotel pickup in Accra", "W.E.B. Du Bois Centre — Pan-African context briefing", "Kwame Nkrumah Memorial Park — extended guided session", "Usher Fort (Ussher Town) — 17th-century Dutch fort in Jamestown", "Chorkor smokehouse — open-air fish smoking along the seafront", "Accra old-town walk — colonial architecture and the Ga community quarter", "Street-food close: chichinga, fried yam, fresh sugar-cane juice", "Hotel drop-off"],
+      stops: ["Hotel pickup in Accra", "W.E.B. Du Bois Centre: Pan-African context briefing", "Kwame Nkrumah Memorial Park: extended guided session", "Usher Fort (Ussher Town): 17th-century Dutch fort in Jamestown", "Chorkor smokehouse: open-air fish smoking along the seafront", "Accra old-town walk: colonial architecture and the Ga community quarter", "Street-food close: chichinga, fried yam, fresh sugar-cane juice", "Hotel drop-off"],
       includes: ["Private transportation", "Bottled water + 1 non-alcoholic drink", "Professional guided tour", "Usher Fort entry", "Hotel pickup within Accra"]
     }],
     defaultPackage: "route1",
@@ -10084,12 +10084,12 @@ window.TK_DATA = {
     spotsLeft: 6,
     tag: "Best seller",
     image: TK_IMG("discover-ghana-in-10-days"),
-    blurb: "Ten days across the breadth of Ghana — Accra's arts and nightlife, Cape Coast and Elmina's heritage castles, a Safari Valley game drive, Aburi's botanical gardens, and Boti Falls' twin cataracts. Built for first-time visitors who want depth without forced marches.",
+    blurb: "Ten days across the breadth of Ghana: Accra's arts and nightlife, Cape Coast and Elmina's heritage castles, a Safari Valley game drive, Aburi's botanical gardens, and Boti Falls' twin cataracts. Built for first-time visitors who want depth without forced marches.",
     highlights: ["Cape Coast & Elmina heritage castles", "Kakum National Park canopy walkway", "Safari Valley Resort game drive", "Aburi Botanical Gardens and Boti Falls"],
     included: ["All ground transport in private 4WD", "9 nights mid-range accommodation", "Daily breakfast, 4 lunches, 3 dinners", "Licensed TripKoach guide", "All entrance fees per itinerary", "Safari Valley Resort game drive"],
     excluded: ["International flights", "Ghana entry visa (visa-on-arrival available)", "Travel insurance (mandatory)", "Tips and personal expenses"],
-    pricing: [["Solo traveler", "$2,900 USD"], ["2 adults", "$2,610 USD"], ["Couple (sharing 1 room)", "$2,465 USD"], ["Family of 3–5 (per person)", "$2,320 USD"], ["Group of 6+ (per person)", "$2,175 USD"]],
-    itinerary: [["Day 1", "Arrive Accra — airport pickup, welcome dinner, trip briefing"], ["Day 2", "Accra city day + nightlife: Black Star Gate, Nkrumah Park, Jamestown, Makola"], ["Day 3", "Accra arts & culture: Du Bois Centre, National Museum, live jazz"], ["Day 4", "Drive to Cape Coast via Assin Manso Ancestral Slave River"], ["Day 5", "Cape Coast Castle, Elmina Castle, Kakum canopy walkway"], ["Day 6", "Safari Valley Resort game drive, bonfire dinner"], ["Day 7", "Tetteh Quarshie Cocoa Farm + Aburi Botanical Gardens"], ["Day 8", "Boti Falls + shea-butter waterfall massage"], ["Day 9", "Return Accra — shopping and nightlife showcase"], ["Day 10", "Farewell breakfast, airport drop-off"]],
+    pricing: [["Solo traveler", "$2,900 USD"], ["2 adults", "$2,610 USD"], ["Couple (sharing 1 room)", "$2,465 USD"], ["Family of 3 to 5 (per person)", "$2,320 USD"], ["Group of 6+ (per person)", "$2,175 USD"]],
+    itinerary: [["Day 1", "Arrive Accra: airport pickup, welcome dinner, trip briefing"], ["Day 2", "Accra city day + nightlife: Black Star Gate, Nkrumah Park, Jamestown, Makola"], ["Day 3", "Accra arts & culture: Du Bois Centre, National Museum, live jazz"], ["Day 4", "Drive to Cape Coast via Assin Manso Ancestral Slave River"], ["Day 5", "Cape Coast Castle, Elmina Castle, Kakum canopy walkway"], ["Day 6", "Safari Valley Resort game drive, bonfire dinner"], ["Day 7", "Tetteh Quarshie Cocoa Farm + Aburi Botanical Gardens"], ["Day 8", "Boti Falls + shea-butter waterfall massage"], ["Day 9", "Return Accra: shopping and nightlife showcase"], ["Day 10", "Farewell breakfast, airport drop-off"]],
     departures: [{
       id: "d1",
       date: "Mon 7 Sep 2026",
@@ -10111,7 +10111,7 @@ window.TK_DATA = {
     }]
   }, {
     id: "a-christmas-like-no-other",
-    title: "A Christmas Like No Other — The Ankos Festival",
+    title: "A Christmas Like No Other: The Ankos Festival",
     region: "Western",
     duration: "5 days",
     category: "Cultural Discovery",
@@ -10121,7 +10121,7 @@ window.TK_DATA = {
     reviews: 31,
     spotsLeft: 8,
     image: TK_IMG("a-christmas-like-no-other"),
-    blurb: "The Ankos Festival experience on Ghana's western coast — masquerades, brass bands and a Christmas week like nowhere else."
+    blurb: "The Ankos Festival experience on Ghana's western coast: masquerades, brass bands and a Christmas week like nowhere else."
   }, {
     id: "coastal-festival-trio",
     title: "Coastal festival trio (Aboakyer · Bakatue · Fetu Afahye)",
@@ -10134,7 +10134,7 @@ window.TK_DATA = {
     reviews: 18,
     spotsLeft: 5,
     image: TK_IMG("coastal-festival-trio"),
-    blurb: "Three of the coast's great festivals in one journey — deer hunt at Winneba, canoe regatta at Elmina, Fetu Afahye in Cape Coast."
+    blurb: "Three of the coast's great festivals in one journey: deer hunt at Winneba, canoe regatta at Elmina, Fetu Afahye in Cape Coast."
   }, {
     id: "coastal-history-trail",
     title: "Coastal History Trail (Cape Coast & Elmina)",
@@ -10157,7 +10157,7 @@ window.TK_DATA = {
     spotsLeft: 4,
     tag: "Jul 2026",
     image: TK_IMG("edina-bakatue-festival-2026"),
-    blurb: "Royal processions, canoe regattas, and coastal celebrations across Ghana's most iconic landmarks. 6–13 July 2026."
+    blurb: "Royal processions, canoe regattas, and coastal celebrations across Ghana's most iconic landmarks. 6 to 13 July 2026."
   }, {
     id: "northern-savannah-safari",
     title: "Northern and Savannah region tour",
@@ -10214,7 +10214,7 @@ window.TK_DATA = {
     currency: "USD",
     spotsLeft: 4,
     image: TK_IMG("luxury-wellness-tour"),
-    blurb: "Slow days in the Eastern hills — spa, shea-butter waterfall massage, and quiet luxury lodges."
+    blurb: "Slow days in the Eastern hills: spa, shea-butter waterfall massage, and quiet luxury lodges."
   }],
   bookings: [{
     ref: "TK-4821",
@@ -10247,7 +10247,7 @@ window.TK_DATA = {
   regions: ["Greater Accra", "Central", "Eastern", "Western", "Volta", "Savannah", "Northern", "Upper East"]
 };
 
-/* Group pricing — per-person rate falls as the party grows. Real tiers for the two
+/* Group pricing: per-person rate falls as the party grows. Real tiers for the two
    tours the live site publishes; a consistent group-discount default for the rest.
    tour.price stays the "from" (largest-group, cheapest) rate shown on cards. */
 (function () {
@@ -10300,11 +10300,11 @@ window.TK_DATA = {
       for (var i = 0; i < tiers.length; i++) if (tiers[i].minPax > pax) return tiers[i];
       return null;
     },
-    /** "1", "2–5", "6+" band label for a tier at index i. */
+    /** "1", "2 to 5", "6+" band label for a tier at index i. */
     band: function (tiers, i) {
       var lo = tiers[i].minPax,
         hi = i < tiers.length - 1 ? tiers[i + 1].minPax - 1 : null;
-      return hi == null ? lo + "+" : lo === hi ? "" + lo : lo + "\u2013" + hi;
+      return hi == null ? lo + "+" : lo === hi ? "" + lo : lo + " to " + hi;
     }
   };
 
@@ -10328,8 +10328,8 @@ window.TK_DATA = {
     verified: true,
     status: "approved",
     title: "Our koach made the city come alive",
-    text: "Kwame knew every street and every story. Jamestown and the market were the highlight \u2014 we never felt rushed and lunch was incredible. Booking and pickup were smooth.",
-    reply: "Thank you Ama! Kwame says hello \u2014 come back for the coast next time."
+    text: "Kwame knew every street and every story. Jamestown and the market were the highlight. We never felt rushed and lunch was incredible. Booking and pickup were smooth.",
+    reply: "Thank you Ama! Kwame says hello. Come back for the coast next time."
   }, {
     id: "r2",
     tourId: tt(0).id,
@@ -10698,7 +10698,7 @@ function SignupScreen({
   }, "Takes a minute. You only need it once.")), taken && /*#__PURE__*/React.createElement(ErrorSummary, {
     errors: [{
       id: "s-email",
-      message: "That email is already registered — log in instead"
+      message: "That email is already registered. Log in instead"
     }]
   }), /*#__PURE__*/React.createElement("form", {
     className: "tk-stack",
@@ -11270,10 +11270,10 @@ const M_PRICE = [{
   label: "Under $200",
   test: p => p < 200
 }, {
-  label: "$200–600",
+  label: "$200 to $600",
   test: p => p >= 200 && p <= 600
 }, {
-  label: "$600–1,200",
+  label: "$600 to $1,200",
   test: p => p > 600 && p <= 1200
 }, {
   label: "$1,200+",
@@ -11534,7 +11534,7 @@ function BrowseScreen({
   }, "Loading tours")), view !== "loading" && isEmpty && /*#__PURE__*/React.createElement(EmptyState, {
     icon: "compass",
     title: "No tours match those filters",
-    body: "Try widening the price range or clearing a region \u2014 there are 11 tours running this season.",
+    body: "Try widening the price range or clearing a region. There are 11 tours running this season.",
     action: /*#__PURE__*/React.createElement(Button, {
       variant: "secondary",
       onClick: () => {
@@ -11676,7 +11676,7 @@ function CheckoutScreen({
     }, /*#__PURE__*/React.createElement("span", null, paid ? "Total paid" : "Total due"), /*#__PURE__*/React.createElement("span", null, M(total))))), paid ? /*#__PURE__*/React.createElement(Alert, {
       tone: "success",
       title: "Payment received"
-    }, "We charged your card ", /*#__PURE__*/React.createElement("strong", null, M(total)), " via Paystack. Your spots are confirmed \u2014 no further action needed.") : /*#__PURE__*/React.createElement(Alert, {
+    }, "We charged your card ", /*#__PURE__*/React.createElement("strong", null, M(total)), " via Paystack. Your spots are confirmed. No further action needed.") : /*#__PURE__*/React.createElement(Alert, {
       tone: "warning",
       title: "How to pay"
     }, "Your koach will email payment options (bank transfer, mobile money or card) to ", /*#__PURE__*/React.createElement("strong", null, "ama@example.com"), ", quoting ", /*#__PURE__*/React.createElement("strong", null, "TK-4821"), ". Pay at least 5 days before departure to lock in your spots.")), /*#__PURE__*/React.createElement("div", {
@@ -12313,7 +12313,7 @@ function TourDetailScreen({
         }
       }, (t.itinerary || [["09:00", "Hotel pickup"], ["13:00", "Drop-off"]]).map(([time, what]) => /*#__PURE__*/React.createElement("li", {
         key: time + what
-      }, /*#__PURE__*/React.createElement("strong", null, time), " \u2014 ", what)))
+      }, /*#__PURE__*/React.createElement("strong", null, time), ": ", what)))
     }, {
       id: "inc",
       title: "What's included",
@@ -12352,7 +12352,7 @@ function TourDetailScreen({
     }, {
       id: "pol",
       title: "Cancellation policy",
-      content: /*#__PURE__*/React.createElement("p", null, "Free cancellation until 7 days before departure. Between 7 and 2 days, 50% is held. Inside 48 hours the booking is non-refundable. Payments are not live yet, so nothing is charged today \u2014 see the full policy at checkout.")
+      content: /*#__PURE__*/React.createElement("p", null, "Free cancellation until 7 days before departure. Between 7 and 2 days, 50% is held. Inside 48 hours the booking is non-refundable. Payments are not live yet, so nothing is charged today. See the full policy at checkout.")
     }]
   })), pt.packages ? /*#__PURE__*/React.createElement("div", {
     className: "tk-stack",
@@ -12790,7 +12790,7 @@ window.TK_BLOG = [{
     "x": "Here is how the koach would build the day. Kakum pairs naturally with the coast, because it sits so close to it. Do the canopy walk at opening, when you are fresh and the forest is quiet, then drive back down to the coast for the afternoon and stand inside the castles at Cape Coast and Elmina. Treetops in the morning, history by the sea after lunch. It is one of the finest single days in the whole country."
   }, {
     "t": "ul",
-    "x": ["Wear closed shoes with grip. The climb to the walkway is steep and can be slick after rain.", "Bring water and a small bag. It is humid work, and there is nowhere to buy much on the trail.", "Fees are paid at the gate, with separate rates for the park and the canopy walkway. Check the current rate on arrival.", "Keep your voice down on the bridges. It is a wildlife park, not a fairground.", "Guides are included and worth it. Ask questions — that is how a good walk becomes a great one."]
+    "x": ["Wear closed shoes with grip. The climb to the walkway is steep and can be slick after rain.", "Bring water and a small bag. It is humid work, and there is nowhere to buy much on the trail.", "Fees are paid at the gate, with separate rates for the park and the canopy walkway. Check the current rate on arrival.", "Keep your voice down on the bridges. It is a wildlife park, not a fairground.", "Guides are included and worth it. Ask questions. That is how a good walk becomes a great one."]
   }, {
     "t": "p",
     "x": "Stand in the middle of that fourth bridge, high over the forest, with nothing but green in every direction and a hornbill flapping past below you, and you understand why people cross the world for this. The koach just wants you to do it early, do it slow, and do it right."
@@ -13380,7 +13380,7 @@ function NotificationsWeb({
     style: {
       marginTop: -8
     }
-  }, "Choose what we send and how. Booking confirmations and payment reminders are always on \u2014 they're part of your trip."), /*#__PURE__*/React.createElement("div", {
+  }, "Choose what we send and how. Booking confirmations and payment reminders are always on. They're part of your trip."), /*#__PURE__*/React.createElement("div", {
     className: "tk-card"
   }, /*#__PURE__*/React.createElement("div", {
     className: "tk-card__body",
@@ -13406,7 +13406,7 @@ function NotificationsWeb({
     defaultChecked: true
   }), /*#__PURE__*/React.createElement(Row, {
     label: "Review reminders",
-    hint: "After your trip, an invite to review the tour \u2014 with a nudge if you haven't yet.",
+    hint: "After your trip, an invite to review the tour, with a nudge if you haven't yet.",
     defaultChecked: true
   }), /*#__PURE__*/React.createElement(Row, {
     label: "Trip inspiration & offers",
@@ -13517,7 +13517,7 @@ function AccountSettingsWeb({
     }]
   }))), /*#__PURE__*/React.createElement(Switch, {
     id: "s-saver",
-    label: "Data saver \u2014 lighter images on slow connections",
+    label: "Data saver: lighter images on slow connections",
     defaultChecked: true,
     onChange: touch
   }))), /*#__PURE__*/React.createElement("div", {
@@ -13772,7 +13772,7 @@ function LoginWeb({
       marginTop: 4,
       marginBottom: "var(--space-6)"
     }
-  }, creating ? "Takes a minute — you only need it once." : "Welcome back. Enter your details to continue."), wrong && !creating && /*#__PURE__*/React.createElement(Alert, {
+  }, creating ? "Takes a minute. You only need it once." : "Welcome back. Enter your details to continue."), wrong && !creating && /*#__PURE__*/React.createElement(Alert, {
     tone: "error",
     title: "We couldn't log you in",
     style: {
@@ -13934,7 +13934,7 @@ function AuthShell({
       marginTop: 12,
       maxWidth: "42ch"
     }
-  }, "We'll help you back in \u2014 resetting your password only takes a moment."))), /*#__PURE__*/React.createElement("div", {
+  }, "We'll help you back in. Resetting your password only takes a moment."))), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       alignItems: "center",
@@ -14303,7 +14303,7 @@ function ReviewsWeb({
     style: {
       color: "var(--warning-fg)"
     }
-  }, "Checked before it appears publicly \u2014 usually within a day."), r.reply && /*#__PURE__*/React.createElement("div", {
+  }, "Checked before it appears publicly, usually within a day."), r.reply && /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: 6,
       padding: "10px 12px",
@@ -14493,7 +14493,7 @@ function BlogIndex({
       marginTop: "var(--space-4)",
       maxWidth: "56ch"
     }
-  }, "Practical guides and field notes from the koaches who lead the trips \u2014 how to time a canopy walk, catch a festival, or spend your first 24 hours in Accra."))), /*#__PURE__*/React.createElement("section", {
+  }, "Practical guides and field notes from the koaches who lead the trips: how to time a canopy walk, catch a festival, or spend your first 24 hours in Accra."))), /*#__PURE__*/React.createElement("section", {
     className: "tk-container",
     style: {
       maxWidth: 1200,
@@ -14845,7 +14845,7 @@ const TESTIMONIALS = [{
   initials: "ML",
   name: "Marcus & Lia",
   meta: "First-time visitors · London",
-  quote: "We almost did not come — too many what-ifs. TripKoach handled every one. The pickup, the eSIM, the koach who answered our eleven o'clock questions. Worth every cedi."
+  quote: "We almost did not come. Too many what-ifs. TripKoach handled every one. The pickup, the eSIM, the koach who answered our eleven o'clock questions. Worth every cedi."
 }, {
   initials: "KA",
   name: "Kojo Asante",
@@ -14855,7 +14855,7 @@ const TESTIMONIALS = [{
   initials: "AO",
   name: "Ama Owusu-Afriyie",
   meta: "Diaspora visit · Toronto",
-  quote: "Five days, two regions, no friction. The itinerary read like a friend wrote it — because the koach who built it had actually been there last month."
+  quote: "Five days, two regions, no friction. The itinerary read like a friend wrote it, because the koach who built it had actually been there last month."
 }];
 function Section({
   children,
@@ -14960,7 +14960,7 @@ function HomeWeb({
       marginTop: "var(--space-5)",
       color: "rgba(255,255,255,.9)"
     }
-  }, "Guided day trips and multi-day journeys with local koaches \u2014 from a morning in Accra to a ten-day loop of castles, canopy walks and savanna. Reserve now, pay now or later."), /*#__PURE__*/React.createElement("div", {
+  }, "Guided day trips and multi-day journeys with local koaches: from a morning in Accra to a ten-day loop of castles, canopy walks and savanna. Reserve now, pay now or later."), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: 12,
@@ -15215,7 +15215,7 @@ function HomeWeb({
     icon: "wifi",
     tag: "Free 5GB",
     title: "eSIM on arrival",
-    body: "Land connected. A Ghana eSIM with 5GB free, activated before you step off the plane — no SIM-swap queues."
+    body: "Land connected. A Ghana eSIM with 5GB free, activated before you step off the plane. No SIM-swap queues."
   }, {
     icon: "bus",
     tag: "Fixed price",
@@ -15225,7 +15225,7 @@ function HomeWeb({
     icon: "message-circle",
     tag: "Always on",
     title: "Your koach in your pocket",
-    body: "A real person who knows the ground answers your questions — before you book and every evening while you travel."
+    body: "A real person who knows the ground answers your questions, before you book and every evening while you travel."
   }].map(s => /*#__PURE__*/React.createElement("div", {
     key: s.title,
     className: "tk-card",
@@ -15306,7 +15306,7 @@ function HomeWeb({
       marginTop: "var(--space-4)",
       maxWidth: "46ch"
     }
-  }, "Tell Koach how long you have, what you're into, and your budget. You get a real itinerary you can book in one tap \u2014 flights, pickup and connectivity sorted."), /*#__PURE__*/React.createElement("div", {
+  }, "Tell Koach how long you have, what you're into, and your budget. You get a real itinerary you can book in one tap: flights, pickup and connectivity sorted."), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: 12,
@@ -15400,7 +15400,7 @@ function HomeWeb({
       fontSize: 14.5,
       lineHeight: 1.45
     }
-  }, "Then start in Bonwire for kente, finish in Accra for night food. I'll draft something \u2014 give me a sec."), /*#__PURE__*/React.createElement("div", {
+  }, "Then start in Bonwire for kente, finish in Accra for night food. I'll draft something, give me a sec."), /*#__PURE__*/React.createElement("div", {
     style: {
       alignSelf: "flex-start",
       display: "flex",
@@ -15753,7 +15753,7 @@ const CTA = ({
 const REGION_NOTES = {
   "Greater Accra": {
     slug: "accra-city-tour",
-    note: "The capital, its coast and its markets — Independence Square to Makola."
+    note: "The capital, its coast and its markets: Independence Square to Makola."
   },
   "Central": {
     slug: "coastal-history-trail",
@@ -15794,14 +15794,14 @@ function RegionsPage({
       name,
       count: tours.length,
       slug: meta.slug || tours[0] && tours[0].id || "accra-city-tour",
-      note: meta.note || "New tours in " + name + " are being added — check back soon."
+      note: meta.note || "New tours in " + name + " are being added. Check back soon."
     };
   });
   const n = regions.length;
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(PageHero, {
     overline: "Where to go",
     title: n + " regions of Ghana, more to come.",
-    sub: "Ghana has sixteen administrative regions. TripKoach runs tours in " + n + " of them today — pick one to see who hosts there and which trips are running this season."
+    sub: "Ghana has sixteen administrative regions. TripKoach runs tours in " + n + " of them today. Pick one to see who hosts there and which trips are running this season."
   }), /*#__PURE__*/React.createElement(Wrap, null, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
@@ -15913,7 +15913,7 @@ function EsimPage({
       flexDirection: "column",
       gap: "var(--space-3)"
     }
-  }, ["Bundled with every confirmed TripKoach booking — one per traveler.", "Works on the local Ghana network. Keep your home SIM for calls.", "Connects on landing. No queue at the airport, no scratch cards."].map(x => /*#__PURE__*/React.createElement("li", {
+  }, ["Bundled with every confirmed TripKoach booking, one per traveler.", "Works on the local Ghana network. Keep your home SIM for calls.", "Connects on landing. No queue at the airport, no scratch cards."].map(x => /*#__PURE__*/React.createElement("li", {
     key: x,
     style: {
       display: "flex",
@@ -15974,7 +15974,7 @@ function EsimPage({
   }, /*#__PURE__*/React.createElement(Alert, {
     tone: "info",
     title: "More coming soon"
-  }, "A standalone eSIM product \u2014 available without a tour booking, with regional plans and top-ups in-app \u2014 is on the roadmap for our next phase.")), /*#__PURE__*/React.createElement(CTA, {
+  }, "A standalone eSIM product (available without a tour booking, with regional plans and top-ups in-app) is on the roadmap for our next phase.")), /*#__PURE__*/React.createElement(CTA, {
     go: go
   }));
 }
@@ -15983,8 +15983,8 @@ function EsimPage({
 function PickupPage({
   go
 }) {
-  const steps = [["Tell us your flight", "Share your arrival date, flight number, party size, and where you're staying in Accra."], ["We confirm within 24 hours", "You'll get a fixed quote and a named driver — no card on file, no surprise charges."], ["Driver meets you in arrivals", "Look for your name on a TripKoach placard at the Kotoka exit. We track your flight, so delays are on us."]];
-  const included = ["Meet and greet inside the arrivals hall, name placard in hand", "Direct private transfer to your Accra accommodation — no shared shuttle, no stops", "English-speaking driver who knows the city and its routes", "Bottled water on board and help with luggage", "24/7 trip support by phone or WhatsApp from booking to arrival"];
+  const steps = [["Tell us your flight", "Share your arrival date, flight number, party size, and where you're staying in Accra."], ["We confirm within 24 hours", "You'll get a fixed quote and a named driver, no card on file, no surprise charges."], ["Driver meets you in arrivals", "Look for your name on a TripKoach placard at the Kotoka exit. We track your flight, so delays are on us."]];
+  const included = ["Meet and greet inside the arrivals hall, name placard in hand", "Direct private transfer to your Accra accommodation, no shared shuttle, no stops", "English-speaking driver who knows the city and its routes", "Bottled water on board and help with luggage", "24/7 trip support by phone or WhatsApp from booking to arrival"];
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(PageHero, {
     overline: "Arrival \xB7 Kotoka International",
     title: "Land in Accra, already taken care of.",
@@ -16120,7 +16120,7 @@ function PickupPage({
       color: "var(--text-muted)",
       marginTop: 6
     }
-  }, "Kotoka (KIA) to anywhere in Greater Accra \u2014 Cantonments, Airport Residential, East Legon, Osu, Labadi. Airport-to-region transfers to Cape Coast, Kumasi, Ho and Tamale on request."))), /*#__PURE__*/React.createElement("div", {
+  }, "Kotoka (KIA) to anywhere in Greater Accra: Cantonments, Airport Residential, East Legon, Osu, Labadi. Airport-to-region transfers to Cape Coast, Kumasi, Ho and Tamale on request."))), /*#__PURE__*/React.createElement("div", {
     className: "tk-card"
   }, /*#__PURE__*/React.createElement("div", {
     className: "tk-card__body",
@@ -16138,7 +16138,7 @@ function PickupPage({
       color: "var(--text-muted)",
       marginTop: 6
     }
-  }, "No live tariff. Every pickup gets a fixed written quote within 24 hours based on party size, luggage, drop-off area and arrival window. No deposit, no card on file \u2014 settle with the driver in cash (USD, EUR or GHS) or ask for an invoice.")))))), /*#__PURE__*/React.createElement(Wrap, {
+  }, "No live tariff. Every pickup gets a fixed written quote within 24 hours based on party size, luggage, drop-off area and arrival window. No deposit, no card on file. Settle with the driver in cash (USD, EUR or GHS) or ask for an invoice.")))))), /*#__PURE__*/React.createElement(Wrap, {
     id: "pickup-form"
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -16228,13 +16228,13 @@ function PickupPage({
   }), /*#__PURE__*/React.createElement(Button, {
     block: true,
     size: "lg",
-    onClick: () => window.tkToast("Inquiry sent — we'll reply within a day")
+    onClick: () => window.tkToast("Inquiry sent. We'll reply within a day")
   }, "Send inquiry"), /*#__PURE__*/React.createElement("p", {
     className: "tk-caption",
     style: {
       textAlign: "center"
     }
-  }, "We'll only use your details to reply about this trip \u2014 no marketing, no third parties."))))), /*#__PURE__*/React.createElement(Wrap, {
+  }, "We'll only use your details to reply about this trip. No marketing, no third parties."))))), /*#__PURE__*/React.createElement(Wrap, {
     style: {
       paddingTop: 0
     }
@@ -16248,7 +16248,7 @@ function PickupPage({
     items: [{
       id: "q1",
       title: "What happens if my flight is delayed?",
-      content: /*#__PURE__*/React.createElement("p", null, "We track your flight from departure. If it's delayed, the driver waits \u2014 no extra fee for the first two hours past scheduled arrival. For longer delays or diversions, we reconfirm on WhatsApp.")
+      content: /*#__PURE__*/React.createElement("p", null, "We track your flight from departure. If it's delayed, the driver waits. No extra fee for the first two hours past scheduled arrival. For longer delays or diversions, we reconfirm on WhatsApp.")
     }, {
       id: "q2",
       title: "I'm landing late at night. Is anyone there?",
@@ -16260,7 +16260,7 @@ function PickupPage({
     }, {
       id: "q4",
       title: "Can you provide a child seat?",
-      content: /*#__PURE__*/React.createElement("p", null, "Yes \u2014 child and booster seats are available on request at no extra charge. Note the child's age and weight so we fit the right one.")
+      content: /*#__PURE__*/React.createElement("p", null, "Yes, child and booster seats are available on request at no extra charge. Note the child's age and weight so we fit the right one.")
     }, {
       id: "q5",
       title: "How do I pay?",
@@ -16275,12 +16275,12 @@ function PickupPage({
 function AboutPage({
   go
 }) {
-  const promises = [["users", "Locals first", "Tours led by certified, experienced local guides who know Ghana inside out and make every trip safe, informative and enjoyable."], ["sparkles", "Cultural immersion", "Go beyond sightseeing — cooking classes, traditional festivals, and hands-on tie-and-dye fabric workshops for a deeper connection."], ["shield-check", "Trusted partners", "Drivers, hotels and hosts we know personally. Vetted, comfortable, and held to a standard we can stand behind."], ["heart", "End-to-end care", "From visa questions to your last evening, a koach is on call. Nothing left to chance, nothing to figure out alone."]];
+  const promises = [["users", "Locals first", "Tours led by certified, experienced local guides who know Ghana inside out and make every trip safe, informative and enjoyable."], ["sparkles", "Cultural immersion", "Go beyond sightseeing: cooking classes, traditional festivals, and hands-on tie-and-dye fabric workshops for a deeper connection."], ["shield-check", "Trusted partners", "Drivers, hotels and hosts we know personally. Vetted, comfortable, and held to a standard we can stand behind."], ["heart", "End-to-end care", "From visa questions to your last evening, a koach is on call. Nothing left to chance, nothing to figure out alone."]];
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(PageHero, {
     overline: "Who we are",
     title: "Ghana, guided by people who live it.",
     image: "https://cdn.tripkoach.com/img/hero/about-hero.jpg",
-    sub: "TripKoach designs travel in Ghana the way it should be \u2014 personal, well-organised, and rooted in the people who call this country home."
+    sub: "TripKoach designs travel in Ghana the way it should be: personal, well-organised, and rooted in the people who call this country home."
   }), /*#__PURE__*/React.createElement(Wrap, null, /*#__PURE__*/React.createElement("span", {
     className: "tk-overline",
     style: {
@@ -16341,7 +16341,7 @@ function AboutPage({
       gridTemplateColumns: "1fr 1fr",
       gap: "var(--space-5)"
     }
-  }, [["https://cdn.tripkoach.com/img/about/storytellers.jpg", "Bonwire, Ashanti — a kente weaver at the loom."], ["https://cdn.tripkoach.com/img/about/market-life.jpg", "Makola Market, Accra — daily market life."]].map(([src, cap]) => /*#__PURE__*/React.createElement("figure", {
+  }, [["https://cdn.tripkoach.com/img/about/storytellers.jpg", "Bonwire, Ashanti: a kente weaver at the loom."], ["https://cdn.tripkoach.com/img/about/market-life.jpg", "Makola Market, Accra: daily market life."]].map(([src, cap]) => /*#__PURE__*/React.createElement("figure", {
     key: src,
     style: {
       margin: 0
@@ -16382,7 +16382,7 @@ function AboutPage({
       marginTop: 8,
       marginBottom: "var(--space-4)"
     }
-  }, "Built around the people who call Ghana home."), ["TripKoach is a Ghana-based tour operator dedicated to delivering exceptional travel experiences for international visitors and Ghanaian travelers. Our mission is to showcase the beauty, history, culture and diversity of Ghana through personalised, expertly guided tours.", "Founded by passionate travel enthusiasts, TripKoach began with one goal: to help travelers experience Ghana beyond the typical tourist landmarks. We believe travel should educate, inspire, and build genuine connections.", "Our guides live and breathe the destinations they lead you through. We work closely with carefully selected local partners so every trip is comfortable, authentic and well organised — from the moment you begin planning to the memories you take home."].map((p, i) => /*#__PURE__*/React.createElement("p", {
+  }, "Built around the people who call Ghana home."), ["TripKoach is a Ghana-based tour operator dedicated to delivering exceptional travel experiences for international visitors and Ghanaian travelers. Our mission is to showcase the beauty, history, culture and diversity of Ghana through personalised, expertly guided tours.", "Founded by passionate travel enthusiasts, TripKoach began with one goal: to help travelers experience Ghana beyond the typical tourist landmarks. We believe travel should educate, inspire, and build genuine connections.", "Our guides live and breathe the destinations they lead you through. We work closely with carefully selected local partners so every trip is comfortable, authentic and well organised, from the moment you begin planning to the memories you take home."].map((p, i) => /*#__PURE__*/React.createElement("p", {
     key: i,
     className: "tk-body-lg",
     style: {
@@ -16425,7 +16425,7 @@ function ContactPage({
     dark: false,
     overline: "Akwaaba, get in touch",
     title: "We're real people in Accra.",
-    sub: "No ticketing system, no offshore call centre. Message us on WhatsApp and a koach in Osu replies \u2014 usually within minutes."
+    sub: "No ticketing system, no offshore call centre. Message us on WhatsApp and a koach in Osu replies, usually within minutes."
   }), /*#__PURE__*/React.createElement(Wrap, {
     style: {
       display: "grid",
@@ -16514,19 +16514,19 @@ function ContactPage({
   }), /*#__PURE__*/React.createElement(Button, {
     block: true,
     size: "lg",
-    onClick: () => window.tkToast("Inquiry sent — we'll reply within a day")
+    onClick: () => window.tkToast("Inquiry sent. We'll reply within a day")
   }, "Send inquiry"), /*#__PURE__*/React.createElement("p", {
     className: "tk-caption",
     style: {
       textAlign: "center"
     }
-  }, "We'll only use your details to reply \u2014 no marketing, no third parties."))), /*#__PURE__*/React.createElement("div", {
+  }, "We'll only use your details to reply. No marketing, no third parties."))), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       flexDirection: "column",
       gap: "var(--space-4)"
     }
-  }, [["message-circle", "WhatsApp a koach", "Fastest reply — usually under 5 minutes in office hours.", "+233 53 324 4042", "var(--success-fg)"], ["mail", "Email", "Receipts, longer questions, partnerships. We reply within one business day.", "services@tripkoach.com", "var(--gold-700)"], ["phone", "Call the Accra office", "Mon–Fri, 09:00–17:00 GMT. For complex or group bookings.", "+233 53 324 4042", "var(--info-fg)"]].map(([ic, t, d, v, col]) => /*#__PURE__*/React.createElement("div", {
+  }, [["message-circle", "WhatsApp a koach", "Fastest reply, usually under 5 minutes in office hours.", "+233 53 324 4042", "var(--success-fg)"], ["mail", "Email", "Receipts, longer questions, partnerships. We reply within one business day.", "services@tripkoach.com", "var(--gold-700)"], ["phone", "Call the Accra office", "Mon to Fri, 09:00 to 17:00 GMT. For complex or group bookings.", "+233 53 324 4042", "var(--info-fg)"]].map(([ic, t, d, v, col]) => /*#__PURE__*/React.createElement("div", {
     key: t,
     className: "tk-card"
   }, /*#__PURE__*/React.createElement("div", {
@@ -16579,7 +16579,7 @@ function ContactPage({
       color: "var(--text-muted)",
       margin: "6px 0 0"
     }
-  }, "P.O. Box CT 11125 \xB7 Cantonments, Accra", /*#__PURE__*/React.createElement("br", null), "Mon\u2013Sat, 08:00\u201318:00 GMT"))))));
+  }, "P.O. Box CT 11125 \xB7 Cantonments, Accra", /*#__PURE__*/React.createElement("br", null), "Mon to Sat, 08:00 to 18:00 GMT"))))));
 }
 
 /* ── MARKETPLACE (roadmap) ───────────────────────────── */
@@ -16589,7 +16589,7 @@ function MarketplacePage({
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(PageHero, {
     overline: "Marketplace",
     title: "Ghanaian craft, coming to the shop.",
-    sub: "A curated marketplace of Ghanaian craft, cloth and provisions \u2014 kente, adinkra, shea and more, shipped or waiting for you on arrival. It launches in an upcoming phase."
+    sub: "A curated marketplace of Ghanaian craft, cloth and provisions: kente, adinkra, shea and more, shipped or waiting for you on arrival. It launches in an upcoming phase."
   }), /*#__PURE__*/React.createElement(Wrap, null, /*#__PURE__*/React.createElement(EmptyState, {
     icon: "ticket",
     title: "The shop isn't open yet",
@@ -16912,7 +16912,7 @@ function ReviewModal({
   return /*#__PURE__*/React.createElement(Modal, {
     open: true,
     title: "Review " + tour.title,
-    description: "Share your experience. Reviews are checked by our team before they appear publicly \u2014 usually within a day.",
+    description: "Share your experience. Reviews are checked by our team before they appear publicly, usually within a day.",
     onClose: onClose,
     actions: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Button, {
       variant: "secondary",
@@ -17053,7 +17053,7 @@ function ReviewsSection({
     style: {
       margin: 0
     }
-  }, "Reviews open to travellers after their departure \u2014 we email each guest a private link."))));
+  }, "Reviews open to travellers after their departure. We email each guest a private link."))));
 }
 function ReviewInvitePage({
   go
@@ -17112,7 +17112,7 @@ function ReviewInvitePage({
       color: "var(--text-muted)",
       maxWidth: "40ch"
     }
-  }, "Your review is with our team. Once it's approved it'll appear on the ", tour.title, " page \u2014 usually within a day."), /*#__PURE__*/React.createElement(Button, {
+  }, "Your review is with our team. Once it's approved it'll appear on the ", tour.title, " page, usually within a day."), /*#__PURE__*/React.createElement(Button, {
     style: {
       marginTop: 8
     },
@@ -17175,7 +17175,7 @@ function ReviewInvitePage({
     }
   }), /*#__PURE__*/React.createElement("span", {
     className: "tk-body-sm"
-  }, "Verified \u2014 you travelled on ", /*#__PURE__*/React.createElement("strong", null, inv.date), " (booking ", inv.ref, ").")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+  }, "Verified: you travelled on ", /*#__PURE__*/React.createElement("strong", null, inv.date), " (booking ", inv.ref, ").")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
     className: "tk-label",
     style: {
       display: "block",
@@ -17972,10 +17972,10 @@ const PRICE_BANDS = [{
   label: "Under $200",
   test: p => p < 200
 }, {
-  label: "$200–600",
+  label: "$200 to $600",
   test: p => p >= 200 && p <= 600
 }, {
-  label: "$600–1,200",
+  label: "$600 to $1,200",
   test: p => p > 600 && p <= 1200
 }, {
   label: "$1,200+",
@@ -18413,7 +18413,7 @@ function TourWeb({
       color: "var(--text-muted)",
       marginTop: -6
     }
-  }, "Per person, in " + currency + ". The bigger your group, the less each traveller pays — the price updates automatically at checkout."), /*#__PURE__*/React.createElement("div", {
+  }, "Per person, in " + currency + ". The bigger your group, the less each traveller pays. The price updates automatically at checkout."), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
       gridTemplateColumns: "repeat(" + (t.tiers ? t.tiers.length : 1) + ", 1fr)",
@@ -18520,7 +18520,7 @@ function TourWeb({
         }
       }, (t.itinerary || []).map(([time, what]) => /*#__PURE__*/React.createElement("li", {
         key: time + what
-      }, /*#__PURE__*/React.createElement("strong", null, time), " \u2014 ", what)))
+      }, /*#__PURE__*/React.createElement("strong", null, time), ": ", what)))
     }, {
       id: "inc",
       title: "What's included",
@@ -18555,7 +18555,7 @@ function TourWeb({
     }, {
       id: "meet",
       title: "Meeting point & getting there",
-      content: /*#__PURE__*/React.createElement("p", null, "Your koach confirms the pickup point when you book \u2014 hotel pickup within Accra for day tours, airport pickup at KIA for multi-day trips.")
+      content: /*#__PURE__*/React.createElement("p", null, "Your koach confirms the pickup point when you book: hotel pickup within Accra for day tours, airport pickup at KIA for multi-day trips.")
     }, {
       id: "pol",
       title: "Cancellation policy",
@@ -18738,7 +18738,7 @@ function CheckoutWeb({
     }
   }, /*#__PURE__*/React.createElement("span", {
     className: "tk-overline"
-  }, "Travellers 2\u20134"), /*#__PURE__*/React.createElement("div", {
+  }, "Travellers 2 to 4"), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
       gridTemplateColumns: "1fr 1fr",
@@ -18892,7 +18892,7 @@ function BookingsWeb({
     action: /*#__PURE__*/React.createElement(Button, {
       variant: "link",
       size: "sm",
-      onClick: () => window.tkToast("Pay by card or mobile money — instructions are in your confirmation email")
+      onClick: () => window.tkToast("Pay by card or mobile money. Instructions are in your confirmation email")
     }, "See how to pay")
   }, "TK-4821 is held until 7 Sep."), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -18984,7 +18984,7 @@ function ConfirmWeb({
   }, totalStr)))), paid ? /*#__PURE__*/React.createElement(Alert, {
     tone: "success",
     title: "Payment received"
-  }, "We charged your card ", /*#__PURE__*/React.createElement("strong", null, totalStr), " via Paystack. Your spots are confirmed \u2014 no further action needed.") : /*#__PURE__*/React.createElement(Alert, {
+  }, "We charged your card ", /*#__PURE__*/React.createElement("strong", null, totalStr), " via Paystack. Your spots are confirmed. No further action needed.") : /*#__PURE__*/React.createElement(Alert, {
     tone: "warning",
     title: "How to pay"
   }, "Your koach will email payment options (bank transfer, mobile money or card), quoting ", /*#__PURE__*/React.createElement("strong", null, "TK-4821"), ". Pay at least 5 days before departure to lock in your spots.")));

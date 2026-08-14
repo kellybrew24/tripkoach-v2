@@ -49,8 +49,8 @@ export interface TourListDTO {
 // Price bands mirror the SPA FilterPanel exactly (screens-web.jsx PRICE_BANDS), on the "from" price.
 const PRICE_BAND_SQL: Record<string, string> = {
   'Under $200': 't.base_price_minor < 20000',
-  '$200–600': 't.base_price_minor BETWEEN 20000 AND 60000',
-  '$600–1,200': 't.base_price_minor > 60000 AND t.base_price_minor <= 120000',
+  '$200 to $600': 't.base_price_minor BETWEEN 20000 AND 60000',
+  '$600 to $1,200': 't.base_price_minor > 60000 AND t.base_price_minor <= 120000',
   '$1,200+': 't.base_price_minor > 120000',
 };
 // Duration bands mirror the SPA DURATIONS regex tests, applied to the authored duration string.

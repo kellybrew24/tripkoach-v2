@@ -1,7 +1,7 @@
 const NS = window.TripKoachDesignSystem_c9e4af;
 const { Button, Icon, Badge, Chip } = NS;
 
-// WhatsApp brand glyph — the DS icon set has no "whatsapp" mark, so we inline it
+// WhatsApp brand glyph, the DS icon set has no "whatsapp" mark, so we inline it
 // here (DS bundle is vendored verbatim and must not be edited). Filled, 24 viewBox.
 function WhatsAppGlyph({ size = 18 }) {
   return (
@@ -11,7 +11,7 @@ function WhatsAppGlyph({ size = 18 }) {
   );
 }
 
-// X (formerly Twitter) brand glyph — the DS icon set still ships the legacy
+// X (formerly Twitter) brand glyph, the DS icon set still ships the legacy
 // "twitter" bird, so we inline the current X mark here (DS bundle is vendored
 // verbatim and must not be edited). Filled, 24 viewBox.
 function XGlyph({ size = 16 }) {
@@ -22,12 +22,12 @@ function XGlyph({ size = 16 }) {
   );
 }
 
-// Data-driven share targets — every current and future post gets these with no
+// Data-driven share targets, every current and future post gets these with no
 // per-post editing. Deep links open the native app on mobile / web on desktop.
 function shareTargets(title, url) {
   const t = encodeURIComponent(title);
   const u = encodeURIComponent(url);
-  const tu = encodeURIComponent(title + " — " + url);
+  const tu = encodeURIComponent(title + ". " + url);
   return [
     { key: "whatsapp", label: "Share on WhatsApp", color: "#25D366", glyph: <WhatsAppGlyph size={17} />, href: "https://wa.me/?text=" + tu },
     { key: "x", label: "Share on X", color: "var(--text-strong)", glyph: <XGlyph size={15} />, href: "https://twitter.com/intent/tweet?text=" + t + "&url=" + u },
@@ -82,7 +82,7 @@ function BlogIndex({ go }) {
   const [featured, ...rest] = shown;
   return (
     <div>
-      {/* TRI-1148: AboutPage hero-background treatment — dark base + image at
+      {/* TRI-1148: AboutPage hero-background treatment: dark base + image at
           opacity .32 + gradient keep the Stories heading/intro AA-legible. */}
       <section style={{ position: "relative", overflow: "hidden", background: "var(--n-900)", color: "var(--n-0)" }}>
         <img src={window.TK_HERO_IMG("smiles", 1440)} srcSet={window.TK_HERO_SRCSET("smiles")} sizes={window.TK_SIZES.hero} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", objectPosition: "center 30%", opacity: 0.32 }} />
@@ -93,7 +93,7 @@ function BlogIndex({ go }) {
             Ghana, written from the ground.
           </h1>
           <p style={{ fontSize: 18, lineHeight: 1.55, color: "rgba(255,255,255,.82)", marginTop: "var(--space-4)", maxWidth: "56ch" }}>
-            Practical guides and field notes from the koaches who lead the trips — how to time a canopy walk, catch a festival, or spend your first 24 hours in Accra.
+            Practical guides and field notes from the koaches who lead the trips. How to time a canopy walk, catch a festival, or spend your first 24 hours in Accra.
           </p>
         </div>
       </section>

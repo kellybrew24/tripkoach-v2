@@ -5,8 +5,8 @@ window.TK_IMG = function (slug, name) {
   return "https://cdn.tripkoach.com/img/tours/" + slug + "/" + (name || "hero-480") + ".jpg";
 };
 // Responsive images (TRI-1117). The CDN bakes named width variants into the
-// path (…/<slug>/<base>-<w>.jpg). These are the ONLY widths it serves — verified
-// live on cdn.tripkoach.com (480 / 960 / 1440; 768/1024/1920 return 404) — so
+// path (…/<slug>/<base>-<w>.jpg). These are the ONLY widths it serves, verified
+// live on cdn.tripkoach.com (480 / 960 / 1440; 768/1024/1920 return 404), so
 // this list is the single source of truth for every srcset the web app emits.
 // Keep it in lock-step with what the media pipeline actually produces.
 window.TK_IMG_WIDTHS = [480, 960, 1440];
@@ -17,14 +17,14 @@ window.TK_SRCSET = function (slug, base) {
     .join(", ");
 };
 // `sizes` presets keyed to the layouts that render tour imagery, so browsers on
-// small screens / low-DPR displays fetch 480–960 instead of the 1440 hero.
+// small screens / low-DPR displays fetch 480 to 960 instead of the 1440 hero.
 window.TK_SIZES = {
   card: "(max-width: 640px) 92vw, (max-width: 1024px) 46vw, 380px",
   hero: "100vw",
   gallery: "(max-width: 720px) 92vw, 560px",
 };
 // Homepage hero slider (TRI-1132). Mirrors the exact image set + order the LIVE
-// apex tripkoach.com hero carousel serves — dedicated slider frames under
+// apex tripkoach.com hero carousel serves, dedicated slider frames under
 // cdn.tripkoach.com/img/hero/slider/<base>-<w>.{jpg} (NOT the per-tour heroes).
 // Verified live: every base exists at each TK_IMG_WIDTHS width. `pos` matches
 // the apex background-position so faces/subjects stay framed on crop.
@@ -47,21 +47,21 @@ window.TK_DATA = {
     { id:"accra-city-tour", title:"Accra City Tour", region:"Greater Accra", duration:"3 to 4 hrs · Half day",
       category:"City Tour", price:65, currency:"USD", rating:4.8, reviews:215, spotsLeft:11,
       image:TK_IMG("accra-city-tour"),
-      blurb:"Feel the pulse of the capital — history, culture, flavor. Iconic sites, vibrant markets, and street food in just a few hours.",
+      blurb:"Feel the pulse of the capital. History, culture, flavor. Iconic sites, vibrant markets, and street food in just a few hours.",
       highlights:["Black Star Gate at Independence Square","Kwame Nkrumah Memorial Park","Jamestown harbor and lighthouse","Makola Market with a guided street-food tasting"],
       included:["Private transportation","Bottled water + 1 non-alcoholic drink","Professional guided tour","Local street-food experience","Hotel pickup within Accra"],
       excluded:["Travel to Accra","Tips and personal expenses"],
-      pricing:[["Solo traveler","$100 USD"],["2–5 travelers (per person)","$75 USD"],["Group of 6+ (per person)","$65 USD"]],
+      pricing:[["Solo traveler","$100 USD"],["2 to 5 travelers (per person)","$75 USD"],["Group of 6+ (per person)","$65 USD"]],
       itinerary:[["09:00","Hotel pickup within Accra"],["09:30","Black Star Gate & Independence Square"],["10:30","Kwame Nkrumah Memorial Park"],["11:30","Jamestown harbor and lighthouse"],["12:15","Makola Market + street-food tasting"],["13:00","Drop-off at your hotel"]],
       packages:[
-        { id:"route1", name:"Route 1 — Classic Capital Loop", tag:"Heritage & Food · half day", blurb:"The iconic first-timer's loop — landmarks, Jamestown and a guided street-food tasting.", duration:"Half day · 3–4 hrs", tiers:[{minPax:1,price:100},{minPax:2,price:75},{minPax:6,price:65}],
-          stops:["Hotel pickup in Accra","Black Star Gate at Independence Square","Kwame Nkrumah Memorial Park and mausoleum","Jamestown lighthouse and harbor walk","Makola Market — guided orientation","Guided street-food tasting: kelewele, koose, sugar bread","Hotel drop-off"],
+        { id:"route1", name:"Route 1: Classic Capital Loop", tag:"Heritage & Food · half day", blurb:"The iconic first-timer's loop. Landmarks, Jamestown and a guided street-food tasting.", duration:"Half day · 3 to 4 hrs", tiers:[{minPax:1,price:100},{minPax:2,price:75},{minPax:6,price:65}],
+          stops:["Hotel pickup in Accra","Black Star Gate at Independence Square","Kwame Nkrumah Memorial Park and mausoleum","Jamestown lighthouse and harbor walk","Makola Market: guided orientation","Guided street-food tasting: kelewele, koose, sugar bread","Hotel drop-off"],
           includes:["Private transportation","Bottled water + 1 non-alcoholic drink","Professional guided tour","Makola street-food tasting","Hotel pickup within Accra"] },
-        { id:"route2", name:"Route 2 — Culture & Arts Focus", tag:"Art, History & Osu · half day", blurb:"For art and culture lovers — the National Museum, Du Bois Centre and Osu's galleries.", duration:"Half day · 3–4 hrs", tiers:[{minPax:1,price:100},{minPax:2,price:75},{minPax:6,price:65}],
-          stops:["Hotel pickup in Accra","National Museum of Ghana — kente, gold weights, pre-colonial history","W.E.B. Du Bois Centre — Pan-African history","Artists Alliance Gallery, Osu — contemporary art and crafts","Labadi Beach promenade","Oxford Street, Osu — street food and people-watching","Optional extension: +233 Jazz Bar (live Afrobeats and highlife)"],
+        { id:"route2", name:"Route 2: Culture & Arts Focus", tag:"Art, History & Osu · half day", blurb:"For art and culture lovers. The National Museum, Du Bois Centre and Osu's galleries.", duration:"Half day · 3 to 4 hrs", tiers:[{minPax:1,price:100},{minPax:2,price:75},{minPax:6,price:65}],
+          stops:["Hotel pickup in Accra","National Museum of Ghana: kente, gold weights, pre-colonial history","W.E.B. Du Bois Centre: Pan-African history","Artists Alliance Gallery, Osu: contemporary art and crafts","Labadi Beach promenade","Oxford Street, Osu: street food and people-watching","Optional extension: +233 Jazz Bar (live Afrobeats and highlife)"],
           includes:["Private transportation","Bottled water + 1 non-alcoholic drink","Professional guided tour","National Museum & Du Bois Centre entry","Hotel pickup within Accra"] },
-        { id:"route3", name:"Route 3 — Heritage Deep Dive", tag:"Forts, History & Sea · half day", blurb:"A deeper heritage day — forts, the Chorkor smokehouse and Accra's old town.", duration:"Half day · 3–4 hrs", tiers:[{minPax:1,price:100},{minPax:2,price:75},{minPax:6,price:65}],
-          stops:["Hotel pickup in Accra","W.E.B. Du Bois Centre — Pan-African context briefing","Kwame Nkrumah Memorial Park — extended guided session","Usher Fort (Ussher Town) — 17th-century Dutch fort in Jamestown","Chorkor smokehouse — open-air fish smoking along the seafront","Accra old-town walk — colonial architecture and the Ga community quarter","Street-food close: chichinga, fried yam, fresh sugar-cane juice","Hotel drop-off"],
+        { id:"route3", name:"Route 3: Heritage Deep Dive", tag:"Forts, History & Sea · half day", blurb:"A deeper heritage day. Forts, the Chorkor smokehouse and Accra's old town.", duration:"Half day · 3 to 4 hrs", tiers:[{minPax:1,price:100},{minPax:2,price:75},{minPax:6,price:65}],
+          stops:["Hotel pickup in Accra","W.E.B. Du Bois Centre: Pan-African context briefing","Kwame Nkrumah Memorial Park: extended guided session","Usher Fort (Ussher Town): 17th-century Dutch fort in Jamestown","Chorkor smokehouse: open-air fish smoking along the seafront","Accra old-town walk: colonial architecture and the Ga community quarter","Street-food close: chichinga, fried yam, fresh sugar-cane juice","Hotel drop-off"],
           includes:["Private transportation","Bottled water + 1 non-alcoholic drink","Professional guided tour","Usher Fort entry","Hotel pickup within Accra"] } ],
       defaultPackage:"route1",
       departures:[
@@ -72,24 +72,24 @@ window.TK_DATA = {
     { id:"discover-ghana-in-10-days", title:"Discover Ghana in 10 days", region:"Greater Accra", duration:"10 days",
       category:"Cultural Discovery", price:2175, currency:"USD", rating:4.9, reviews:86, spotsLeft:6,
       image:TK_IMG("discover-ghana-in-10-days"),
-      blurb:"Ten days across the breadth of Ghana — Accra's arts and nightlife, Cape Coast and Elmina's heritage castles, a Safari Valley game drive, Aburi's botanical gardens, and Boti Falls' twin cataracts. Built for first-time visitors who want depth without forced marches.",
+      blurb:"Ten days across the breadth of Ghana. Accra's arts and nightlife, Cape Coast and Elmina's heritage castles, a Safari Valley game drive, Aburi's botanical gardens, and Boti Falls' twin cataracts. Built for first-time visitors who want depth without forced marches.",
       highlights:["Cape Coast & Elmina heritage castles","Kakum National Park canopy walkway","Safari Valley Resort game drive","Aburi Botanical Gardens and Boti Falls"],
       included:["All ground transport in private 4WD","9 nights mid-range accommodation","Daily breakfast, 4 lunches, 3 dinners","Licensed TripKoach guide","All entrance fees per itinerary","Safari Valley Resort game drive"],
       excluded:["International flights","Ghana entry visa (visa-on-arrival available)","Travel insurance (mandatory)","Tips and personal expenses"],
-      pricing:[["Solo traveler","$2,900 USD"],["2 adults","$2,610 USD"],["Couple (sharing 1 room)","$2,465 USD"],["Family of 3–5 (per person)","$2,320 USD"],["Group of 6+ (per person)","$2,175 USD"]],
-      itinerary:[["Day 1","Arrive Accra — airport pickup, welcome dinner, trip briefing"],["Day 2","Accra city day + nightlife: Black Star Gate, Nkrumah Park, Jamestown, Makola"],["Day 3","Accra arts & culture: Du Bois Centre, National Museum, live jazz"],["Day 4","Drive to Cape Coast via Assin Manso Ancestral Slave River"],["Day 5","Cape Coast Castle, Elmina Castle, Kakum canopy walkway"],["Day 6","Safari Valley Resort game drive, bonfire dinner"],["Day 7","Tetteh Quarshie Cocoa Farm + Aburi Botanical Gardens"],["Day 8","Boti Falls + shea-butter waterfall massage"],["Day 9","Return Accra — shopping and nightlife showcase"],["Day 10","Farewell breakfast, airport drop-off"]],
+      pricing:[["Solo traveler","$2,900 USD"],["2 adults","$2,610 USD"],["Couple (sharing 1 room)","$2,465 USD"],["Family of 3 to 5 (per person)","$2,320 USD"],["Group of 6+ (per person)","$2,175 USD"]],
+      itinerary:[["Day 1","Arrive Accra: airport pickup, welcome dinner, trip briefing"],["Day 2","Accra city day + nightlife: Black Star Gate, Nkrumah Park, Jamestown, Makola"],["Day 3","Accra arts & culture: Du Bois Centre, National Museum, live jazz"],["Day 4","Drive to Cape Coast via Assin Manso Ancestral Slave River"],["Day 5","Cape Coast Castle, Elmina Castle, Kakum canopy walkway"],["Day 6","Safari Valley Resort game drive, bonfire dinner"],["Day 7","Tetteh Quarshie Cocoa Farm + Aburi Botanical Gardens"],["Day 8","Boti Falls + shea-butter waterfall massage"],["Day 9","Return Accra: shopping and nightlife showcase"],["Day 10","Farewell breakfast, airport drop-off"]],
       departures:[
         { id:"d1", date:"Mon 7 Sep 2026", time:"Airport pickup, KIA Accra", price:2175, spotsLeft:6 },
         { id:"d2", date:"Mon 5 Oct 2026", time:"Airport pickup, KIA Accra", price:2175, spotsLeft:8 },
         { id:"d3", date:"Mon 2 Nov 2026", time:"Airport pickup, KIA Accra", price:2320, spotsLeft:4 } ] },
-    { id:"a-christmas-like-no-other", title:"A Christmas Like No Other — The Ankos Festival", region:"Western", duration:"5 days",
+    { id:"a-christmas-like-no-other", title:"A Christmas Like No Other: The Ankos Festival", region:"Western", duration:"5 days",
       category:"Cultural Discovery", price:2175, currency:"USD", rating:4.9, reviews:31, spotsLeft:8,
       image:TK_IMG("a-christmas-like-no-other"),
-      blurb:"The Ankos Festival experience on Ghana's western coast — masquerades, brass bands and a Christmas week like nowhere else." },
+      blurb:"The Ankos Festival experience on Ghana's western coast. Masquerades, brass bands and a Christmas week like nowhere else." },
     { id:"coastal-festival-trio", title:"Coastal festival trio (Aboakyer · Bakatue · Fetu Afahye)", region:"Central", duration:"8 days",
       category:"Cultural Discovery", price:1400, currency:"USD", rating:4.9, reviews:18, spotsLeft:5,
       image:TK_IMG("coastal-festival-trio"),
-      blurb:"Three of the coast's great festivals in one journey — deer hunt at Winneba, canoe regatta at Elmina, Fetu Afahye in Cape Coast." },
+      blurb:"Three of the coast's great festivals in one journey. Deer hunt at Winneba, canoe regatta at Elmina, Fetu Afahye in Cape Coast." },
     { id:"coastal-history-trail", title:"Coastal History Trail (Cape Coast & Elmina)", region:"Central", duration:"4 days",
       category:"Cultural Discovery", price:563, currency:"USD", spotsLeft:10,
       image:TK_IMG("coastal-history-trail"),
@@ -97,7 +97,7 @@ window.TK_DATA = {
     { id:"edina-bakatue-festival-2026", title:"Edina Bakatue Festival Tour", region:"Central", duration:"8 days",
       category:"Cultural Discovery", price:2175, currency:"USD", spotsLeft:4,
       image:TK_IMG("edina-bakatue-festival-2026"),
-      blurb:"Royal processions, canoe regattas, and coastal celebrations across Ghana's most iconic landmarks. 6–13 July 2026." },
+      blurb:"Royal processions, canoe regattas, and coastal celebrations across Ghana's most iconic landmarks. 6 to 13 July 2026." },
     { id:"northern-savannah-safari", title:"Northern and Savannah region tour", region:"Northern", duration:"5 days",
       category:"Adventure", price:980, currency:"USD", spotsLeft:7,
       image:TK_IMG("northern-savannah-safari"),
@@ -117,7 +117,7 @@ window.TK_DATA = {
     { id:"luxury-wellness-tour", title:"Luxury Wellness Tour", region:"Eastern", duration:"4 days",
       category:"Luxury", price:850, currency:"USD", spotsLeft:4,
       image:TK_IMG("luxury-wellness-tour"),
-      blurb:"Slow days in the Eastern hills — spa, shea-butter waterfall massage, and quiet luxury lodges." }
+      blurb:"Slow days in the Eastern hills. Spa, shea-butter waterfall massage, and quiet luxury lodges." }
   ],
   bookings: [
     { ref:"TK-4821", tour:"Accra City Tour", date:"Sat 22 Aug 2026", travellers:"4 travellers", total:300, currency:"USD", status:"pending", image:TK_IMG("accra-city-tour") },
@@ -127,7 +127,7 @@ window.TK_DATA = {
   regions: ["Greater Accra","Central","Eastern","Western","Volta","Savannah","Northern","Upper East"]
 };
 
-/* Group pricing — per-person rate falls as the party grows. Real tiers for the two
+/* Group pricing: per-person rate falls as the party grows. Real tiers for the two
    tours the live site publishes; a consistent group-discount default for the rest.
    tour.price stays the "from" (largest-group, cheapest) rate shown on cards. */
 (function () {
@@ -158,10 +158,10 @@ window.TK_DATA = {
       for (var i = 0; i < tiers.length; i++) if (tiers[i].minPax > pax) return tiers[i];
       return null;
     },
-    /** "1", "2–5", "6+" band label for a tier at index i. */
+    /** "1", "2 to 5", "6+" band label for a tier at index i. */
     band: function (tiers, i) {
       var lo = tiers[i].minPax, hi = i < tiers.length - 1 ? tiers[i + 1].minPax - 1 : null;
-      return hi == null ? lo + "+" : (lo === hi ? "" + lo : lo + "\u2013" + hi);
+      return hi == null ? lo + "+" : (lo === hi ? "" + lo : lo + " to " + hi);
     }
   };
 
@@ -171,7 +171,7 @@ window.TK_DATA = {
   function tt(i) { return TT[i] || TT[0]; }
   window.TK_REVIEWS = [
     { id:"r1", tourId:tt(0).id, tour:tt(0).title, author:"Ama Mensah", initials:"AM", rating:5, date:"18 Aug 2026", verified:true, status:"approved",
-      title:"Our koach made the city come alive", text:"Kwame knew every street and every story. Jamestown and the market were the highlight \u2014 we never felt rushed and lunch was incredible. Booking and pickup were smooth.", reply:"Thank you Ama! Kwame says hello \u2014 come back for the coast next time." },
+      title:"Our koach made the city come alive", text:"Kwame knew every street and every story. Jamestown and the market were the highlight. We never felt rushed and lunch was incredible. Booking and pickup were smooth.", reply:"Thank you Ama! Kwame says hello. Come back for the coast next time." },
     { id:"r2", tourId:tt(0).id, tour:tt(0).title, author:"Marcus Bell", initials:"MB", rating:4, date:"11 Aug 2026", verified:true, status:"approved",
       title:"Great value, well organised", text:"Good pace and a friendly guide. Only wish we had a little more time at the Du Bois centre, otherwise excellent." },
     { id:"r3", tourId:tt(0).id, tour:tt(0).title, author:"Efua O.", initials:"EO", rating:5, date:"2 Aug 2026", verified:true, status:"approved",
@@ -215,7 +215,7 @@ window.TK_DATA = {
   window.TK_INVITE = { token: "rv_ac_8821", name: "Ama Mensah", tourId: tt(0).id, tour: tt(0).title, date: "Sat 22 Aug 2026", ref: "TK-4821" };
 
   // Currency conversion for the header toggle. USD is the currency of record.
-  // GHS is the settings-driven DISPLAY rate (TRI-939) — tk-boot overrides
+  // GHS is the settings-driven DISPLAY rate (TRI-939), tk-boot overrides
   // window.TK_FX.GHS from /config (settings.usd_to_ghs_display_rate) in live
   // mode; this 12 is the board-set fallback for the fixtures/flag-off path.
   window.TK_FX = { USD: 1, GHS: 12 };

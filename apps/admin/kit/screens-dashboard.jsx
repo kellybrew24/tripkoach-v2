@@ -32,7 +32,7 @@ function fmtYMD(ymd) {
   return d.getDate() + " " + MON[d.getMonth()] + " " + d.getFullYear();
 }
 function customPeriod(range) {
-  const label = (range.from && range.to) ? (fmtYMD(range.from) + " – " + fmtYMD(range.to)) : "custom range";
+  const label = (range.from && range.to) ? (fmtYMD(range.from) + " to " + fmtYMD(range.to)) : "custom range";
   return { label: label, short: "in range", bookings: "0", confirmed: 0, revenue: "$0", bDelta: null, series: [], trend: "No bookings in the selected range" };
 }
 
@@ -82,10 +82,10 @@ function Dashboard({ go, state, role = "admin" }) {
   const statPending = live ? String(n(bs.pending)) : "5";
   const statDepartures = live ? String(n(live.departures.upcoming)) : "6";
   const statTravellers = live ? String(n(live.occupancy.seatsReserved)) : "34";
-  // Live status breakdown — drives the right-hand donut, and the main chart when
+  // Live status breakdown: drives the right-hand donut, and the main chart when
   // the backend returns no time series.
   const statusBars = live ? Object.keys(bs).map((k) => ({ label: cap(k), value: n(bs[k]) })) : null;
-  // Main activity chart: prefer the real booking time series (TRI-984 — hourly
+  // Main activity chart: prefer the real booking time series (TRI-984, hourly
   // for 12h/24h, daily/weekly/monthly for longer ranges); fall back to the status
   // breakdown if the backend omits it, and to the mock trend when the flag is off.
   const timeSeries = (live && Array.isArray(live.series) && live.series.length) ? live.series : null;
@@ -139,7 +139,7 @@ function Dashboard({ go, state, role = "admin" }) {
               {customActive && (
                 <div className="tk-row" style={{ gap: 6 }}>
                   <input type="date" aria-label="From date" value={range.from} max={range.to || undefined} onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))} style={dateInput} />
-                  <span style={{ color: "var(--text-muted)" }}>–</span>
+                  <span style={{ color: "var(--text-muted)" }}>to</span>
                   <input type="date" aria-label="To date" value={range.to} min={range.from || undefined} onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))} style={dateInput} />
                 </div>
               )}

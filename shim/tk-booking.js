@@ -1,15 +1,15 @@
 /* ==========================================================================
- * TripKoach v2 web — booking + Paystack checkout client (TRI-867 Phase 2 shim).
+ * TripKoach v2 web: booking + Paystack checkout client (TRI-867 Phase 2 shim).
  *
- * `window.TK_BOOKING` — a dependency-free wrapper over the Phase-2 WRITE
+ * `window.TK_BOOKING`, a dependency-free wrapper over the Phase-2 WRITE
  * contract (Backend sibling TRI-866), built on the same-origin transport from
  * tk-api.js (TRI-861). Loaded FIRST alongside the other shims but wired only
  * from the checkout/confirm screens, and every call site is gated behind
- * window.TK_CONFIG.USE_LIVE_API — so with the flag OFF this module is inert:
+ * window.TK_CONFIG.USE_LIVE_API, so with the flag OFF this module is inert:
  * the built app makes no booking calls and no third-party (Paystack) requests
  * whatsoever, staying byte-for-byte the fixture prototype.
  *
- * Checkout strategy — REDIRECT to Paystack's hosted page (not inline). It is
+ * Checkout strategy: REDIRECT to Paystack's hosted page (not inline). It is
  * the simpler of the two options the ticket allows, fits the DS confirm screen,
  * and needs ZERO third-party JavaScript: we never load js.paystack.co, so there
  * is nothing to self-host and nothing to leak when the flag is off. The flow:
@@ -21,13 +21,13 @@
  *
  * Currency (board decision): prices are DISPLAYED and quoted in USD (source of
  * truth); the SERVER converts USD→GHS and charges GHS via Paystack. This client
- * never computes or hardcodes FX — it only ever reads the USD amounts the API
+ * never computes or hardcodes FX, it only ever reads the USD amounts the API
  * returns. (The DS header toggle's GHS figure is a pre-existing display-only
  * conversion, unrelated to what is charged.)
  *
  * Mapping is deliberately tolerant (snake_case or camelCase, minor-unit or
  * major-unit money, envelope or bare object) so integration with Backend stays
- * mechanical while the exact JSON firms up — same posture as tk-boot.js.
+ * mechanical while the exact JSON firms up, same posture as tk-boot.js.
  * ======================================================================== */
 (function () {
   var api = window.TK_API;
@@ -235,7 +235,7 @@
               });
             },
             function () {
-              // Transient fetch error — keep whatever we last saw / verify result.
+              // Transient fetch error, keep whatever we last saw / verify result.
               return lastSeen || afterVerify;
             }
           );

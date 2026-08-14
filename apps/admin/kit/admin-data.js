@@ -3,14 +3,14 @@
 (function () {
   var T = (window.TK_DATA && window.TK_DATA.tours) || [];
   var byId = {}; T.forEach(function (t) { byId[t.id] = t; });
-  function tour(id) { return byId[id] || { title: id, region: "—", price: 0 }; }
+  function tour(id) { return byId[id] || { title: id, region: "-", price: 0 }; }
 
   var customers = [
     { id:"c1", name:"Ama Mensah", email:"ama@example.com", phone:"+233 24 555 0142", country:"Ghana", joined:"12 Feb 2026", bookings:3, initials:"AM", emergencyName:"Kofi Mensah", emergencyPhone:"+233 24 555 0199", diet:"No shellfish" },
     { id:"c2", name:"Marcus Bell", email:"marcus@example.co.uk", phone:"+44 7700 900142", country:"United Kingdom", joined:"3 Mar 2026", bookings:1, initials:"MB", emergencyName:"Lia Bell", emergencyPhone:"+44 7700 900143", diet:"Vegetarian" },
-    { id:"c3", name:"Kojo Asante", email:"kojo.asante@example.com", phone:"+1 416 555 0199", country:"Canada", joined:"20 Mar 2026", bookings:2, initials:"KA", emergencyName:"Abena Asante", emergencyPhone:"+1 416 555 0200", diet:"—" },
+    { id:"c3", name:"Kojo Asante", email:"kojo.asante@example.com", phone:"+1 416 555 0199", country:"Canada", joined:"20 Mar 2026", bookings:2, initials:"KA", emergencyName:"Abena Asante", emergencyPhone:"+1 416 555 0200", diet:"-" },
     { id:"c4", name:"Lena Fischer", email:"lena.f@example.de", phone:"+49 151 5550 142", country:"Germany", joined:"1 Apr 2026", bookings:1, initials:"LF", emergencyName:"Jonas Fischer", emergencyPhone:"+49 151 5550 143", diet:"Gluten-free" },
-    { id:"c5", name:"Nana Yaa Owusu", email:"nanayaa@example.com", phone:"+233 20 555 0177", country:"Ghana", joined:"9 Apr 2026", bookings:1, initials:"NO", emergencyName:"Kwabena Owusu", emergencyPhone:"+233 20 555 0178", diet:"—" },
+    { id:"c5", name:"Nana Yaa Owusu", email:"nanayaa@example.com", phone:"+233 20 555 0177", country:"Ghana", joined:"9 Apr 2026", bookings:1, initials:"NO", emergencyName:"Kwabena Owusu", emergencyPhone:"+233 20 555 0178", diet:"-" },
     { id:"c6", name:"David Okonkwo", email:"d.okonkwo@example.ng", phone:"+234 803 555 0142", country:"Nigeria", joined:"22 Apr 2026", bookings:2, initials:"DO", emergencyName:"Chidi Okonkwo", emergencyPhone:"+234 803 555 0143", diet:"Halal" },
   ];
 
@@ -54,7 +54,7 @@
     { id:"u1", name:"Kwame Boateng", email:"kwame@tripkoach.com", role:"admin", status:"active", initials:"KB", last:"2 min ago", mfaEnabled:true },
     { id:"u2", name:"Ama Owusu", email:"ama.o@tripkoach.com", role:"operator", status:"active", initials:"AO", last:"1 hr ago", mfaEnabled:true },
     { id:"u3", name:"Kofi Adjei", email:"kofi@tripkoach.com", role:"operator", status:"active", initials:"KA", last:"Today, 08:12", mfaEnabled:false, locked:true, lockedUntil:"2026-08-12T23:59:00Z" },
-    { id:"u4", name:"Efua Sarpong", email:"efua@tripkoach.com", role:"viewer", status:"invited", initials:"ES", last:"—" },
+    { id:"u4", name:"Efua Sarpong", email:"efua@tripkoach.com", role:"viewer", status:"invited", initials:"ES", last:"-" },
     { id:"u5", name:"Yaw Darko", email:"yaw@tripkoach.com", role:"operator", status:"disabled", initials:"YD", last:"14 Mar 2026", mfaEnabled:true },
   ];
 
@@ -74,13 +74,13 @@
   // Field guides who lead departures
   var guides = [
     { id:"kwame", name:"Kwame Boateng", initials:"KB", email:"kwame.g@tripkoach.com", phone:"+233 24 555 0110", base:"Accra", regions:["Greater Accra","Eastern"], languages:["English","Twi","Ga"], status:"active", rating:4.9, trips:212, bio:"Ten years leading city and heritage tours across the capital." },
-    { id:"ama", name:"Ama Serwaa", initials:"AS", email:"ama.g@tripkoach.com", phone:"+233 20 555 0134", base:"Cape Coast", regions:["Central","Western"], languages:["English","Fante"], status:"active", rating:4.8, trips:168, bio:"Coastal heritage specialist — castles, festivals and the fishing towns." },
+    { id:"ama", name:"Ama Serwaa", initials:"AS", email:"ama.g@tripkoach.com", phone:"+233 20 555 0134", base:"Cape Coast", regions:["Central","Western"], languages:["English","Fante"], status:"active", rating:4.8, trips:168, bio:"Coastal heritage specialist: castles, festivals and the fishing towns." },
     { id:"kojo", name:"Kojo Antwi", initials:"KA", email:"kojo.g@tripkoach.com", phone:"+233 27 555 0188", base:"Kumasi", regions:["Ashanti","Northern","Savannah"], languages:["English","Twi"], status:"active", rating:4.9, trips:143, bio:"Ashanti culture and northern safari guide." },
     { id:"efua", name:"Efua Owusu", initials:"EO", email:"efua.g@tripkoach.com", phone:"+233 24 555 0166", base:"Ho", regions:["Volta"], languages:["English","Ewe"], status:"active", rating:4.7, trips:74, bio:"Volta waterfalls, mountains and the monkey sanctuary." },
     { id:"nii", name:"Nii Armah", initials:"NA", email:"nii.g@tripkoach.com", phone:"+233 26 555 0121", base:"Accra", regions:["Greater Accra"], languages:["English","Ga"], status:"leave", rating:4.6, trips:52, bio:"Jamestown and street-food walks. On leave until September." },
   ];
 
-  // Blog / CMS (TRI-917) — prototype fixture for the authoring screen. In live
+  // Blog / CMS (TRI-917): prototype fixture for the authoring screen. In live
   // mode tk-boot.js replaces this with the real catalogue from GET /api/admin/blog.
   var blog = [
     { id:"kakum-canopy-walk-cape-coast-day-trip", slug:"kakum-canopy-walk-cape-coast-day-trip", tag:"Destinations", status:"published", published:true, readTime:6, date:"5 Aug 2026", updated:"5 Aug 2026", title:"Above the trees at Kakum: Ghana's canopy walk and how to do it right", excerpt:"Forty metres up, on seven swaying bridges strung between the tallest trees in the forest, you walk right through the top of Ghana's rainforest.", hero:"https://cdn.tripkoach.com/img/posts/kakum-canopy-walk-cape-coast-day-trip-hero.jpg", author:"TripKoach", bodyText:"## What Kakum actually is\n\nKakum National Park protects about 375 square kilometres of Upper Guinean rainforest, one of the last big stretches of this forest type left in West Africa." },
@@ -88,7 +88,7 @@
     { id:"green-season-ghana", slug:"green-season-ghana", tag:"Seasons & Weather", status:"draft", published:false, readTime:3, date:"", updated:"11 May 2026", title:"Akwaaba to the green season", excerpt:"Yes, it rains. It is also when Boti Falls runs full and the crowds thin out.", hero:"https://cdn.tripkoach.com/img/posts/green-season-ghana-hero.jpg", author:"TripKoach", bodyText:"Here is what the green season actually looks like, and how TripKoach keeps you covered." },
   ];
 
-  // TRI-1139: custom-date requests inbox (TRI-1136 A+B1). Prototype fixture — in
+  // TRI-1139: custom-date requests inbox (TRI-1136 A+B1). Prototype fixture; in
   // live mode tk-boot.js replaces this with GET /api/admin/requests (interest
   // enquiries whose intent is 'request', i.e. a traveller asked for a date that
   // isn't on the schedule). Status flows New → Contacted → Scheduled → Booked → Closed.
@@ -96,7 +96,7 @@
   function reqTour(i) { return reqTours[i] || tour("accra-city-tour"); }
   // status values match the live BE enum (lowercase): new|contacted|scheduled|booked|closed.
   var requests = [
-    { id:"rq1", tourId:reqTour(0).id, tour:reqTour(0).title, requestedDate:"2026-10-18", partySize:4, customerName:"Ama Mensah", email:"ama@example.com", phone:"+233 24 555 0142", receivedAt:"2026-08-13", status:"new", note:"Anniversary trip — hoping for a private group.", indicativeTotalMinor:(reqTour(0).price||0)*4*100, currency:"USD" },
+    { id:"rq1", tourId:reqTour(0).id, tour:reqTour(0).title, requestedDate:"2026-10-18", partySize:4, customerName:"Ama Mensah", email:"ama@example.com", phone:"+233 24 555 0142", receivedAt:"2026-08-13", status:"new", note:"Anniversary trip, hoping for a private group.", indicativeTotalMinor:(reqTour(0).price||0)*4*100, currency:"USD" },
     { id:"rq2", tourId:reqTour(1).id, tour:reqTour(1).title, requestedDate:"2026-11-02", partySize:2, customerName:"Marcus Bell", email:"marcus@example.co.uk", phone:"+44 7700 900142", receivedAt:"2026-08-12", status:"contacted", note:"Flexible ±3 days.", indicativeTotalMinor:(reqTour(1).price||0)*2*100, currency:"USD" },
     { id:"rq3", tourId:reqTour(2).id, tour:reqTour(2).title, requestedDate:"2026-09-27", partySize:6, customerName:"Kojo Asante", email:"kojo.asante@example.com", phone:"+1 416 555 0199", receivedAt:"2026-08-11", status:"scheduled", note:"", indicativeTotalMinor:(reqTour(2).price||0)*6*100, currency:"USD" },
     { id:"rq4", tourId:reqTour(0).id, tour:reqTour(0).title, requestedDate:"2026-12-20", partySize:3, customerName:"Lena Fischer", email:"lena.f@example.de", phone:"+49 151 5550 142", receivedAt:"2026-08-09", status:"booked", note:"Christmas week.", indicativeTotalMinor:(reqTour(0).price||0)*3*100, currency:"USD" },

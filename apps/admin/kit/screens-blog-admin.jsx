@@ -63,7 +63,7 @@ function BlogHeroField({ post, live, onChange, onError }) {
           <Input id="blog-hero" value={hero} onChange={(e) => onChange(e.target.value)} iconStart="link" aria-label="Hero image URL" />
         </div>
       </div>
-      <p className="tk-help">Upload a JPG, PNG, WebP, or GIF — it’s stored on the CDN. You can also paste an image URL.</p>
+      <p className="tk-help">Upload a JPG, PNG, WebP, or GIF. It’s stored on the CDN. You can also paste an image URL.</p>
       <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" style={{ display: "none" }} onChange={onFile} />
     </div>
   );
@@ -150,10 +150,10 @@ function BlogAdmin({ go }) {
                 </span>
                 <span style={{ fontWeight: 700 }}>{r.title}</span>
               </span>) },
-            { key: "tag", header: "Tag", render: r => r.tag ? <Badge tone="neutral">{r.tag}</Badge> : <span className="tk-caption">—</span> },
+            { key: "tag", header: "Tag", render: r => r.tag ? <Badge tone="neutral">{r.tag}</Badge> : <span className="tk-caption">-</span> },
             { key: "status", header: "Status", render: r => blogStatusBadge(r) },
-            { key: "date", header: "Published", render: r => <span className="tk-caption">{r.date || "—"}</span> },
-            { key: "readTime", header: "Read", render: r => <span className="tk-caption">{r.readTime != null ? r.readTime + " min" : "—"}</span> },
+            { key: "date", header: "Published", render: r => <span className="tk-caption">{r.date || "-"}</span> },
+            { key: "readTime", header: "Read", render: r => <span className="tk-caption">{r.readTime != null ? r.readTime + " min" : "-"}</span> },
           ]}
           rows={rows} getRowId={r => r.id || r.slug} onRowClick={openEdit}
           rowActions={(r) => (

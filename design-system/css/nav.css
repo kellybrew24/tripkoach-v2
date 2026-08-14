@@ -6,7 +6,7 @@
 .tk-navlink{display:inline-flex;align-items:center;min-height:40px;padding:0 var(--space-3);border-radius:var(--radius-sm);
   color:var(--text-body);font-size:var(--text-body-sm-size);font-weight:var(--fw-semibold);text-decoration:none;transition:var(--transition-control)}
 /* Hover (TRI-940): perceptible surface tint + a muted underline that previews
-   the active treatment. Kept distinct from — and lower contrast than — the
+   the active treatment. Kept distinct from, and lower contrast than, the
    aria-current gold underline below, which still wins on the active item. */
 .tk-navlink:hover{background:var(--bg-subtle);color:var(--text-strong);text-decoration:none;box-shadow:inset 0 -2px 0 var(--text-muted)}
 .tk-navlink:focus-visible{outline:2px solid var(--brand-gold);outline-offset:2px}

@@ -76,7 +76,7 @@ function deCamel(k: string): string {
 /** Build the multi-line "label: value" details block for the ops email. '—' when there's nothing. */
 function formatDetails(payload: Record<string, string>): string {
   const lines = Object.entries(payload).map(([k, v]) => `${FIELD_LABEL[k] ?? deCamel(k)}: ${v}`);
-  return lines.length ? lines.join('\n') : '—';
+  return lines.length ? lines.join('\n') : '-';
 }
 
 /** Best-effort ops inbox for lead notifications. settings first, then env override, then the public address. */
@@ -138,10 +138,10 @@ export async function submitEnquiry(
       template: 'enquiry_received',
       vars: {
         enquiryType: TYPE_LABEL[type as EnquiryType],
-        name: name ?? '—',
+        name: name ?? '-',
         email,
-        phone: phone ?? '—',
-        subject: subject ?? '—',
+        phone: phone ?? '-',
+        subject: subject ?? '-',
         details: formatDetails(payload),
       },
       relatedType: 'enquiry',
@@ -281,13 +281,13 @@ export async function submitTourInterest(
 
   let label: string;
   if (intent === 'waitlist') label = 'Waitlist';
-  else if (intent === 'request') label = requestedDate ? `Date request — ${requestedDate}` : 'Date request';
+  else if (intent === 'request') label = requestedDate ? `Date request for ${requestedDate}` : 'Date request';
   else label = 'Notify when dates open';
 
   const ins = await db.query<{ id: string }>(
     `INSERT INTO enquiry (type, subject, name, email, phone, payload, consent)
      VALUES ('interest', $1, NULL, $2, $3, $4, true) RETURNING id`,
-    [`${label} — ${row.title}`, email, phone, JSON.stringify(payload)]);
+    [`${label}: ${row.title}`, email, phone, JSON.stringify(payload)]);
   const id = ins.rows[0].id;
 
   try {
@@ -303,10 +303,10 @@ export async function submitTourInterest(
       template: 'enquiry_received',
       vars: {
         enquiryType: TYPE_LABEL.interest,
-        name: '—',
+        name: '-',
         email,
-        phone: phone ?? '—',
-        subject: `${label} — ${row.title}`,
+        phone: phone ?? '-',
+        subject: `${label}: ${row.title}`,
         details: formatDetails(detailFields),
       },
       relatedType: 'enquiry',

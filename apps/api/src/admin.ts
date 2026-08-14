@@ -346,7 +346,7 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     }
     const name = reqStr(body, 'region', 120);
     const r = await db.query(`SELECT id FROM region WHERE name = $1`, [name]);
-    if (!r.rows.length) throw new ValidationError(`unknown region "${name}" — create it first`, 'region');
+    if (!r.rows.length) throw new ValidationError(`unknown region "${name}". Create it first`, 'region');
     return r.rows[0].id;
   }
 
@@ -1319,7 +1319,7 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     if (type === 'percent') {
       const v = optInt(body, 'value', 0);
       if (v == null) throw new ValidationError('"value" is required', 'value');
-      if (v > 100) throw new ValidationError('percent "value" must be 0–100', 'value');
+      if (v > 100) throw new ValidationError('percent "value" must be 0 to 100', 'value');
       return { value: v, currency: null };
     }
     const amt = optMoney(body, 'value');
@@ -1552,7 +1552,7 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     // Guard the charge rate explicitly: it is cron-driven, never hand-edited through the settings screen.
     if (body.usdToGhsChargeRate !== undefined || body.usd_to_ghs_charge_rate !== undefined || body.chargeRate !== undefined) {
       throw new ValidationError(
-        'the USD→GHS charge rate is managed by the daily FX cron and cannot be edited here — only the display rate is editable',
+        'the USD→GHS charge rate is managed by the daily FX cron and cannot be edited here. Only the display rate is editable',
         'usdToGhsChargeRate');
     }
     const cur = (await db.query(`SELECT * FROM settings WHERE singleton = true`)).rows[0];

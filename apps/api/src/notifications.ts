@@ -233,7 +233,7 @@ export function createNotificationService(
       if (!ctx) return null;
       return await dispatch(ctx, 'booking_rescheduled', 'booking_rescheduled', {
         firstName: firstName(ctx.leadName), ref: ctx.ref, tourTitle: ctx.tourTitle,
-        previousDepartureLabel: opts.previousDepartureLabel || '—',
+        previousDepartureLabel: opts.previousDepartureLabel || '-',
         departureLabel: ctx.departureLabel, travellers: ctx.partySize, manageUrl: manageUrl(ctx),
       }, baseLog);
     } catch (e) {
