@@ -28,6 +28,7 @@ import esbuild from "esbuild";
 import { readFileSync, writeFileSync, mkdirSync, rmSync, cpSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createContext, runInContext } from "node:vm";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const DS = join(ROOT, "design-system");
@@ -85,6 +86,151 @@ function webHead(title) {
   ].join("\n");
 }
 const ADMIN_HEAD = `<meta name="robots" content="noindex,nofollow">`;
+
+// --- Per-tour / per-post social cards for deep links (TRI-1126) ------------
+// The web app is a client-rendered SPA: a scraper that never runs JS (Facebook,
+// WhatsApp, iMessage, Slack, LinkedIn) hitting a shared /tour/<slug> link only
+// ever sees the SITEWIDE index.html head, so every tour preview reads the same
+// generic card. TRI-1114's runtime applyHead fixes this ONLY for JS crawlers.
+//
+// Rather than stand up SSR or an OG endpoint (needs a dynamic origin + bot
+// routing; we have a $0 static Caddy host), we PRERENDER one tiny static page
+// per deep-linkable route at build time. Each page is the exact same SPA shell
+// (same <base href="/">, same script tags → a real browser boots and hydrates
+// normally) but its <head> carries that tour/post's own title, description,
+// canonical, Open Graph / Twitter Card and rich JSON-LD. The catalogue is read
+// from the SAME data fixtures the app ships (no duplicated source of truth), so
+// the static card and the runtime head stay in lock-step.
+//
+// Serving: Caddy's SPA fallback must try `{path}/index.html` before the
+// sitewide index.html — `try_files {path} {path}/index.html /index.html` — so a
+// GET /tour/<slug> is answered by the prerendered card, not the generic shell.
+// (Prod cutover: mirror that try_files change + build with SITE_URL set.)
+const DEFAULT_DESC = WEB_DESC;
+function ogImageAbs(src) {
+  // Mirror app.jsx tkOgImage: only trust absolute (CDN/R2) URLs for the social
+  // card; anything else falls back to the always-present brand badge so a
+  // preview never 404s.
+  return typeof src === "string" && /^https?:\/\//.test(src) ? src : `${SITE_URL}/assets/logo-badge.png`;
+}
+// Evaluate the web data fixtures in a sandbox whose global object IS `window`,
+// exactly the way the browser loads them (data.js/blog.js are window-assigning
+// classic scripts). This gives the prerender the identical tour/post objects
+// the runtime renders — one catalogue, zero drift.
+function loadWebData(kitDir) {
+  const g = {};
+  g.window = g;
+  const ctx = createContext(g);
+  for (const f of ["data.js", "blog.js"]) {
+    runInContext(readFileSync(join(kitDir, f), "utf8"), ctx, { filename: f });
+  }
+  return { tours: (g.TK_DATA && g.TK_DATA.tours) || [], posts: g.TK_BLOG || [] };
+}
+// Full per-route social head. Mirrors apps/web/kit/app.jsx → applyHead so the
+// static card a scraper reads matches the head a JS client would compute.
+function routeHead({ title, desc, path, image, ogType, jsonLd }) {
+  const url = `${SITE_URL}${path}`;
+  const img = ogImageAbs(image);
+  const tags = [
+    `<meta name="description" content="${htmlEsc(desc)}">`,
+    `<meta name="robots" content="index,follow">`,
+    `<link rel="canonical" href="${url}">`,
+    `<meta property="og:site_name" content="TripKoach">`,
+    `<meta property="og:type" content="${ogType}">`,
+    `<meta property="og:title" content="${htmlEsc(title)}">`,
+    `<meta property="og:description" content="${htmlEsc(desc)}">`,
+    `<meta property="og:url" content="${url}">`,
+    `<meta property="og:image" content="${img}">`,
+    `<meta name="twitter:card" content="summary_large_image">`,
+    `<meta name="twitter:title" content="${htmlEsc(title)}">`,
+    `<meta name="twitter:description" content="${htmlEsc(desc)}">`,
+    `<meta name="twitter:image" content="${img}">`,
+  ];
+  if (jsonLd) tags.push(`<script type="application/ld+json">${JSON.stringify(jsonLd)}</script>`);
+  return tags.join("\n");
+}
+function tourJsonLd(t, url, img) {
+  const product = {
+    "@type": "Product",
+    name: t.title,
+    description: String(t.blurb || DEFAULT_DESC),
+    image: img,
+    url,
+    brand: { "@type": "Brand", name: "TripKoach" },
+    ...(t.category ? { category: t.category } : {}),
+    offers: {
+      "@type": "Offer",
+      price: String(t.price),
+      priceCurrency: t.currency || "USD",
+      availability: "https://schema.org/InStock",
+      url,
+    },
+  };
+  if (t.rating && t.reviews) {
+    product.aggregateRating = {
+      "@type": "AggregateRating",
+      ratingValue: String(t.rating),
+      reviewCount: String(t.reviews),
+    };
+  }
+  return {
+    "@context": "https://schema.org",
+    "@graph": [
+      product,
+      {
+        "@type": "BreadcrumbList",
+        itemListElement: [
+          { "@type": "ListItem", position: 1, name: "Home", item: `${SITE_URL}/` },
+          { "@type": "ListItem", position: 2, name: "Browse tours", item: `${SITE_URL}/browse` },
+          { "@type": "ListItem", position: 3, name: t.title, item: url },
+        ],
+      },
+    ],
+  };
+}
+function postJsonLd(p, url, img) {
+  return {
+    "@context": "https://schema.org",
+    "@type": "Article",
+    headline: p.title,
+    description: String(p.excerpt || DEFAULT_DESC),
+    image: img,
+    url,
+    ...(p.date ? { datePublished: p.date } : {}),
+    author: { "@type": "Organization", name: "TripKoach" },
+    publisher: { "@type": "Organization", name: "TripKoach", logo: `${SITE_URL}/assets/logo-badge.png` },
+  };
+}
+function writePrerender(dist, segments, html) {
+  const dir = join(dist, ...segments);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "index.html"), html);
+}
+function prerenderDeepLinks(cfg, dist, scripts) {
+  const { tours, posts } = loadWebData(cfg.kit);
+  for (const t of tours) {
+    const slug = t.slug || t.id;
+    if (!slug) continue;
+    const path = `/tour/${encodeURIComponent(slug)}`;
+    const url = `${SITE_URL}${path}`;
+    const img = ogImageAbs(t.image);
+    const title = `${t.title} — TripKoach`;
+    const desc = String(t.blurb || DEFAULT_DESC).slice(0, 180);
+    const head = routeHead({ title, desc, path, image: t.image, ogType: "product", jsonLd: tourJsonLd(t, url, img) });
+    writePrerender(dist, ["tour", slug], renderPage(cfg, title, head, scripts));
+  }
+  for (const p of posts) {
+    if (!p.slug) continue;
+    const path = `/blog/${encodeURIComponent(p.slug)}`;
+    const url = `${SITE_URL}${path}`;
+    const img = ogImageAbs(p.image || p.cover);
+    const title = `${p.title} — TripKoach Stories`;
+    const desc = String(p.excerpt || DEFAULT_DESC).slice(0, 180);
+    const head = routeHead({ title, desc, path, image: p.image || p.cover, ogType: "article", jsonLd: postJsonLd(p, url, img) });
+    writePrerender(dist, ["blog", p.slug], renderPage(cfg, title, head, scripts));
+  }
+  console.log(`[build] web: prerendered ${tours.length} tour + ${posts.length} post social cards`);
+}
 
 const APPS = {
   web: {
@@ -282,17 +428,44 @@ function buildApp(name) {
   // 5. Production index.html.
   const dataTags = cfg.data.map((d) => `<script src="data/${d}"></script>`).join("\n");
   const extraShimTags = (cfg.extraShim || []).map((f) => `<script src="${f}"></script>`).join("\n");
+  // The exact <body> script load order (shared by index.html and every
+  // prerendered deep-link card so all pages boot the identical SPA).
+  const scripts = [
+    `<script src="vendor/react.production.min.js"></script>`,
+    `<script src="vendor/react-dom.production.min.js"></script>`,
+    `<script src="_ds_bundle.js"></script>`,
+    `<script src="config.js"></script>`,
+    dataTags,
+    `<script src="tk-api.js"></script>`,
+    extraShimTags,
+    `<script src="tk-boot.js"></script>`,
+    `<script src="app.js"></script>`,
+  ].filter(Boolean).join("\n");
   // Sitewide SEO/social head (TRI-1114): web gets meta description, canonical,
   // Open Graph / Twitter defaults and Organization+WebSite JSON-LD for non-JS
   // scrapers; admin gets noindex. The SPA refines these per route at runtime.
   const metaHead = name === "web" ? webHead(cfg.title) : ADMIN_HEAD;
-  const html = `<!doctype html>
+  writeFileSync(join(dist, "index.html"), renderPage(cfg, cfg.title, metaHead, scripts));
+
+  // 5a. Per-tour / per-post social cards (TRI-1126): additional static pages
+  //     under /tour/<slug>/ and /blog/<slug>/ carrying that route's own OG/head
+  //     so non-JS deep-link scrapers get a real card (see block above §1126).
+  if (name === "web") prerenderDeepLinks(cfg, dist, scripts);
+
+  console.log(`[build] ${name}: dist ready (${cfg.screens.length + 1} kit files → app.js)`);
+}
+
+/** The production HTML shell — one `<base href="/">` document reused by the
+ * root index.html and every prerendered deep-link card; only `title`/`metaHead`
+ * differ per page. */
+function renderPage(cfg, title, metaHead, scripts) {
+  return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <base href="/">
-<title>${cfg.title}</title>
+<title>${htmlEsc(title)}</title>
 ${metaHead}
 <link rel="preload" href="fonts/manrope-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="styles.css">
@@ -301,19 +474,10 @@ ${cfg.headCss}</style>
 </head>
 <body>
 <div id="root"></div>
-<script src="vendor/react.production.min.js"></script>
-<script src="vendor/react-dom.production.min.js"></script>
-<script src="_ds_bundle.js"></script>
-<script src="config.js"></script>
-${dataTags}
-<script src="tk-api.js"></script>
-${extraShimTags ? extraShimTags + "\n" : ""}<script src="tk-boot.js"></script>
-<script src="app.js"></script>
+${scripts}
 </body>
 </html>
 `;
-  writeFileSync(join(dist, "index.html"), html);
-  console.log(`[build] ${name}: dist ready (${cfg.screens.length + 1} kit files → app.js)`);
 }
 
 const arg = process.argv[2];
