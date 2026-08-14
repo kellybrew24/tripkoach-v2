@@ -106,6 +106,92 @@ function webpDims(buf: Buffer): { width: number | null; height: number | null } 
   return { width: null, height: null };
 }
 
+// ── TRI-1124 (#9) · Metadata stripping (EXIF / GPS / XMP / IPTC / comments) ───────────────────────────
+// Dependency-free rebuilders that copy only the pixel + essential structural bytes, dropping every metadata
+// carrier. Best-effort: on any structural surprise we return the ORIGINAL buffer (never corrupt an image
+// that already passed magic-byte + size + dimension validation). The dominant GPS-leak vector is JPEG EXIF
+// from phone cameras; PNG text chunks and WebP EXIF/XMP are covered too. GIF carries no GPS metadata.
+
+/** JPEG: walk marker segments from SOI, drop APP1..APP15 (EXIF/XMP/IPTC/ICC) + COM, copy the rest verbatim.
+ *  Everything from the first SOS marker onward is entropy-coded scan data and is copied unchanged. */
+function stripJpeg(buf: Buffer): Buffer {
+  if (buf.length < 2 || buf[0] !== 0xff || buf[1] !== 0xd8) return buf;
+  const out: Buffer[] = [Buffer.from([0xff, 0xd8])];
+  let i = 2;
+  while (i + 1 < buf.length) {
+    if (buf[i] !== 0xff) return buf;                 // desync → bail, keep original
+    let marker = buf[i + 1];
+    while (marker === 0xff && i + 1 < buf.length) { i++; marker = buf[i + 1]; } // skip fill bytes
+    if (marker === 0xd9) { out.push(buf.subarray(i)); break; }      // EOI
+    if (marker === 0xda) { out.push(buf.subarray(i)); break; }      // SOS → rest is scan data, copy all
+    if (i + 3 >= buf.length) return buf;
+    const len = buf.readUInt16BE(i + 2);             // segment length includes the 2 length bytes
+    const segEnd = i + 2 + len;
+    if (len < 2 || segEnd > buf.length) return buf;  // malformed length → bail
+    const drop = (marker >= 0xe1 && marker <= 0xef) || marker === 0xfe; // APP1..APP15 + COM(0xFE)
+    if (!drop) out.push(buf.subarray(i, segEnd));
+    i = segEnd;
+  }
+  return Buffer.concat(out);
+}
+
+/** PNG: keep critical + colour-safe ancillary chunks; drop metadata chunks (eXIf, tEXt, zTXt, iTXt). */
+function stripPng(buf: Buffer): Buffer {
+  const SIG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  if (buf.length < 8 || !buf.subarray(0, 8).equals(SIG)) return buf;
+  const DROP = new Set(['eXIf', 'tEXt', 'zTXt', 'iTXt']);
+  const out: Buffer[] = [buf.subarray(0, 8)];
+  let i = 8;
+  while (i + 8 <= buf.length) {
+    const len = buf.readUInt32BE(i);
+    const type = buf.toString('latin1', i + 4, i + 8);
+    const chunkEnd = i + 12 + len;                   // 4 len + 4 type + data + 4 crc
+    if (len > buf.length || chunkEnd > buf.length) return buf; // malformed → bail
+    if (!DROP.has(type)) out.push(buf.subarray(i, chunkEnd));
+    i = chunkEnd;
+    if (type === 'IEND') break;
+  }
+  return Buffer.concat(out);
+}
+
+/** WebP (RIFF): drop 'EXIF' and 'XMP ' chunks, clear their VP8X presence flags, fix the RIFF size. */
+function stripWebp(buf: Buffer): Buffer {
+  if (buf.length < 12 || buf.toString('latin1', 0, 4) !== 'RIFF' || buf.toString('latin1', 8, 12) !== 'WEBP') return buf;
+  const head = Buffer.from(buf.subarray(0, 12));     // RIFF + size + WEBP
+  const chunks: Buffer[] = [];
+  let i = 12;
+  let dropped = false;
+  while (i + 8 <= buf.length) {
+    const fourcc = buf.toString('latin1', i, i + 4);
+    const size = buf.readUInt32LE(i + 4);            // RIFF chunk sizes are little-endian
+    const padded = size + (size & 1);                // chunks are 2-byte aligned
+    const end = i + 8 + padded;
+    if (end > buf.length) return buf;                // malformed → bail
+    if (fourcc === 'EXIF' || fourcc === 'XMP ') {
+      dropped = true;
+    } else {
+      const chunk = Buffer.from(buf.subarray(i, end));
+      if (fourcc === 'VP8X') { chunk[8] = chunk[8] & ~0x0c; } // clear EXIF(bit3)+XMP(bit2) flags in the feature byte
+      chunks.push(chunk);
+    }
+    i = end;
+  }
+  if (!dropped) return buf;                          // nothing to strip → keep original bytes as-is
+  const body = Buffer.concat(chunks);
+  head.writeUInt32LE(body.length + 4, 4);            // RIFF payload size = 'WEBP' + chunks
+  return Buffer.concat([head, body]);
+}
+
+/** Route to the format-specific stripper; unknown/GIF pass through unchanged. */
+function stripMetadata(buf: Buffer, contentType: string): Buffer {
+  try {
+    if (contentType === 'image/jpeg') return stripJpeg(buf);
+    if (contentType === 'image/png') return stripPng(buf);
+    if (contentType === 'image/webp') return stripWebp(buf);
+  } catch { /* any surprise → fall back to the validated original */ }
+  return buf;
+}
+
 function rowToAsset(r: any) {
   return {
     id: r.id,
@@ -182,15 +268,24 @@ export function createMediaService(db: Db, cfg: Config, storage: Storage) {
     if (!allowedTypes.includes(sniff.contentType)) {
       throw new MediaError('unsupported_type', `Images of type ${sniff.contentType} are not allowed.`, 415, 'file');
     }
-    // Dimension cap (avatar path): reject oversize images before we spend an R2 PUT. Only enforced when a
-    // cap is supplied AND the sniffer could read the dimensions (a valid image with unreadable dims passes).
-    if (limits.maxDimension != null && sniff.width != null && sniff.height != null &&
-        (sniff.width > limits.maxDimension || sniff.height > limits.maxDimension)) {
+    // Dimension cap (decompression-bomb guard): the avatar path passes a tight cap; every other upload
+    // falls back to the general media ceiling (cfg.media.maxDimension, TRI-1124 #9) so NO path is uncapped.
+    // Enforced from the header-sniffed dims BEFORE any decode, so a tiny file claiming huge dims is rejected
+    // without allocating the pixel buffer. A valid image whose dims the sniffer couldn't read still passes.
+    const maxDimension = limits.maxDimension ?? m.maxDimension;
+    if (maxDimension != null && sniff.width != null && sniff.height != null &&
+        (sniff.width > maxDimension || sniff.height > maxDimension)) {
       throw new MediaError('dimensions_too_large',
-        `Image dimensions (${sniff.width}×${sniff.height}) exceed the ${limits.maxDimension}×${limits.maxDimension} limit.`, 400, 'file');
+        `Image dimensions (${sniff.width}×${sniff.height}) exceed the ${maxDimension}×${maxDimension} limit.`, 400, 'file');
     }
 
-    const sha = createHash('sha256').update(buf).digest('hex');
+    // TRI-1124 (#9): strip EXIF/GPS/XMP/IPTC metadata BEFORE the image is content-addressed and published.
+    // Phone photos (avatars especially) carry GPS coordinates + device serials in EXIF; publishing them to a
+    // public CDN would leak PII. We rebuild the file keeping only pixel data + essential structural chunks.
+    // Done pre-hash so the stored object AND its content-addressed key reflect the sanitised bytes.
+    const clean = stripMetadata(buf, sniff.contentType);
+
+    const sha = createHash('sha256').update(clean).digest('hex');
     const storageKey = `${m.keyPrefix}/${sha.slice(0, 2)}/${sha}.${sniff.ext}`;
     const url = `${m.publicBase}/${storageKey}`;
 
@@ -209,11 +304,11 @@ export function createMediaService(db: Db, cfg: Config, storage: Storage) {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'validating',$11)
        ON CONFLICT (storage_key) DO UPDATE SET updated_at = now()
        RETURNING *`,
-      [storageKey, url, sha, sniff.contentType, sniff.ext, buf.length, sniff.width, sniff.height, filename, altText, actor.id]);
+      [storageKey, url, sha, sniff.contentType, sniff.ext, clean.length, sniff.width, sniff.height, filename, altText, actor.id]);
     const id = rows[0].id;
 
     try {
-      await storage.put(storageKey, buf, { contentType: sniff.contentType, cacheControl: m.cacheControl });
+      await storage.put(storageKey, clean, { contentType: sniff.contentType, cacheControl: m.cacheControl });
     } catch (e) {
       await db.query(`UPDATE media_asset SET status='failed', error=$2, updated_at=now() WHERE id=$1`,
         [id, String((e as Error).message).slice(0, 500)]);
@@ -225,7 +320,7 @@ export function createMediaService(db: Db, cfg: Config, storage: Storage) {
       `UPDATE media_asset SET status='ready', error=NULL, updated_at=now() WHERE id=$1 RETURNING *`, [id])).rows[0];
     await audit(db, {
       actorId: actor.id, action: 'media.upload', targetType: 'media_asset', targetId: id,
-      after: { url, contentType: sniff.contentType, byteSize: buf.length, width: sniff.width, height: sniff.height }, ip: actor.ip,
+      after: { url, contentType: sniff.contentType, byteSize: clean.length, width: sniff.width, height: sniff.height }, ip: actor.ip,
     });
     return { asset: rowToAsset(finalRow), deduped: false };
   }
@@ -234,5 +329,5 @@ export function createMediaService(db: Db, cfg: Config, storage: Storage) {
 }
 
 export type MediaService = ReturnType<typeof createMediaService>;
-// Exposed for unit testing the sniffer without a DB/storage.
-export const __test = { sniffImage };
+// Exposed for unit testing the sniffer + metadata strippers without a DB/storage.
+export const __test = { sniffImage, stripMetadata };

@@ -10,6 +10,9 @@ import { fromMinor, toMinor, slugify, formatReviewDate, initials } from './util.
 import { blocksToText, textToBlocks } from './content.ts';
 import { audit, ALL_PERMISSIONS } from './auth.ts';
 import type { NotificationService } from './notifications.ts';
+// TRI-1141: private/custom-date reserved bookings reuse the consumer booking service so they get the
+// same atomic guarded seat-reserve, 128-bit public_token, and guest→customer roll-up.
+import { createBookingService, type CreateBookingInput } from './booking.ts';
 
 export interface Actor { id: string; ip: string | null }
 
@@ -180,6 +183,22 @@ function hasRefundColumns(db: Db): Promise<boolean> {
 
 // ─────────────────────────────────────────────────────────────────────────────
 export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient, notifier?: NotificationService) {
+  // TRI-1141: the private-booking fulfillment path reuses the consumer booking service (same seat-reserve,
+  // token mint, and customer roll-up), driven with adminCreated/holdMinutes opts.
+  const bookings = createBookingService(db, cfg, paystack, notifier);
+
+  // 72h reserve hold for admin-created private bookings (CEO #8), overridable via
+  // settings.flags.customDateRequests.reserveHoldHours. Returns minutes for booking.create's holdMinutes.
+  async function reserveHoldMinutes(): Promise<number> {
+    let hours = 72;
+    try {
+      const { rows } = await db.query<{ flags: any }>(`SELECT flags FROM settings WHERE singleton = true`);
+      const h = Number(rows[0]?.flags?.customDateRequests?.reserveHoldHours);
+      if (Number.isFinite(h) && h > 0) hours = h;
+    } catch { /* keep 72h default */ }
+    return hours * 60;
+  }
+
   // ── Regions ────────────────────────────────────────────────────────────────
   async function listRegions() {
     const { rows } = await db.query(
@@ -346,7 +365,7 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     }
     const name = reqStr(body, 'region', 120);
     const r = await db.query(`SELECT id FROM region WHERE name = $1`, [name]);
-    if (!r.rows.length) throw new ValidationError(`unknown region "${name}" — create it first`, 'region');
+    if (!r.rows.length) throw new ValidationError(`unknown region "${name}". Create it first`, 'region');
     return r.rows[0].id;
   }
 
@@ -476,6 +495,7 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
       packageId: r.package_slug ?? null, date: r.date_label, departOn: r.depart_on, time: r.time_label ?? '',
       price: fromMinor(r.price_minor), currency: r.currency, capacity: seatsTotal, seatsTotal,
       booked: seatsReserved, spotsLeft: Math.max(0, seatsTotal - seatsReserved), status: r.status,
+      visibility: r.visibility ?? 'public',
       guideId: r.guide_id ?? null, guide: r.guide_name ?? null, notes: r.notes_internal ?? null,
     };
   }
@@ -535,15 +555,16 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     const price = optMoney(body, 'price');
     const currency = (optStr(body, 'currency', 3) ?? tour.currency ?? 'USD').toUpperCase();
     const status = optEnum(body, 'status', ['scheduled', 'sold_out', 'completed', 'cancelled'] as const) ?? 'scheduled';
+    const visibility = optEnum(body, 'visibility', ['public', 'unlisted'] as const) ?? 'public';
     const guideId = (await resolveGuideId(body)) ?? null;
     const notes = optStr(body, 'notes', 4000) ?? null;
 
     const { rows } = await db.query(
       `INSERT INTO departure (tour_id, package_id, guide_id, depart_on, date_label, time_label, price_minor,
-          currency, seats_total, seats_reserved, status, notes_internal)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,0,$10,$11) RETURNING id`,
-      [tour.id, packageId, guideId, dateIso, dateLabel, time, price != null ? toMinor(price) : null, currency, capacity, status, notes]);
-    await audit(db, { actorId: actor.id, action: 'departure.create', targetType: 'departure', targetId: rows[0].id, after: { tour: tour.slug, date: dateLabel, capacity, status }, ip: actor.ip });
+          currency, seats_total, seats_reserved, status, notes_internal, visibility)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,0,$10,$11,$12) RETURNING id`,
+      [tour.id, packageId, guideId, dateIso, dateLabel, time, price != null ? toMinor(price) : null, currency, capacity, status, notes, visibility]);
+    await audit(db, { actorId: actor.id, action: 'departure.create', targetType: 'departure', targetId: rows[0].id, after: { tour: tour.slug, date: dateLabel, capacity, status, visibility }, ip: actor.ip });
     return (await getDeparture(rows[0].id))!;
   }
 
@@ -564,6 +585,7 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     if (body.time !== undefined) set('time_label', optStr(body, 'time', 120) ?? null);
     if (body.dateLabel !== undefined) set('date_label', reqStr(body, 'dateLabel', 120));
     if (body.status !== undefined) set('status', optEnum(body, 'status', ['scheduled', 'sold_out', 'completed', 'cancelled'] as const));
+    if (body.visibility !== undefined) set('visibility', optEnum(body, 'visibility', ['public', 'unlisted'] as const) ?? 'public');
     if (body.guideId !== undefined) set('guide_id', (await resolveGuideId(body)) ?? null);
     if (body.notes !== undefined) set('notes_internal', optStr(body, 'notes', 4000) ?? null);
     if (!sets.length) throw new ValidationError('no updatable fields provided');
@@ -1316,7 +1338,7 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     if (type === 'percent') {
       const v = optInt(body, 'value', 0);
       if (v == null) throw new ValidationError('"value" is required', 'value');
-      if (v > 100) throw new ValidationError('percent "value" must be 0–100', 'value');
+      if (v > 100) throw new ValidationError('percent "value" must be 0 to 100', 'value');
       return { value: v, currency: null };
     }
     const amt = optMoney(body, 'value');
@@ -1545,7 +1567,7 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     // Guard the charge rate explicitly: it is cron-driven, never hand-edited through the settings screen.
     if (body.usdToGhsChargeRate !== undefined || body.usd_to_ghs_charge_rate !== undefined || body.chargeRate !== undefined) {
       throw new ValidationError(
-        'the USD→GHS charge rate is managed by the daily FX cron and cannot be edited here — only the display rate is editable',
+        'the USD→GHS charge rate is managed by the daily FX cron and cannot be edited here. Only the display rate is editable',
         'usdToGhsChargeRate');
     }
     const cur = (await db.query(`SELECT * FROM settings WHERE singleton = true`)).rows[0];
@@ -1876,9 +1898,38 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     all:   { since: `true`, trunc: 'month',
              start: `date_trunc('month', now()) - interval '11 months'`, stop: `date_trunc('month', now())`, step: '1 month', fmt: 'Mon' },
   };
-  async function getDashboard(opts: { range?: string } = {}) {
-    const range = opts.range && opts.range in RANGE_SPEC ? opts.range : '30d';
-    const spec = RANGE_SPEC[range];
+  // TRI-1130: build a spec for an arbitrary from/to window (both YYYY-MM-DD). The
+  // dates are validated to digits+dashes only, so interpolating them as ::date
+  // literals is injection-safe. Bucket granularity adapts to the span so the
+  // activity chart stays readable: hourly for ≤2d, daily ≤62d, weekly ≤366d, else monthly.
+  const CUSTOM_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+  function customSpec(fromIn: string, toIn: string) {
+    let from = fromIn, to = toIn;
+    if (Date.parse(from) > Date.parse(to)) { const t = from; from = to; to = t; } // tolerate reversed inputs
+    const spanDays = Math.round((Date.parse(to) - Date.parse(from)) / 86400000);
+    let trunc: string, step: string, fmt: string;
+    if (spanDays <= 2) { trunc = 'hour'; step = '1 hour'; fmt = 'Mon DD HH24:00'; }
+    else if (spanDays <= 62) { trunc = 'day'; step = '1 day'; fmt = 'Mon DD'; }
+    else if (spanDays <= 366) { trunc = 'week'; step = '1 week'; fmt = 'Mon DD'; }
+    else { trunc = 'month'; step = '1 month'; fmt = 'Mon YYYY'; }
+    // `stop` is the last bucket that can hold data in the inclusive [from, to] window.
+    // For hourly buckets that is 23:00 of the `to` day (so a single-day range yields
+    // 24 buckets, not just midnight); coarser grains stop at the truncated `to`.
+    const stop = trunc === 'hour'
+      ? `date_trunc('hour', ('${to}'::date + interval '1 day' - interval '1 hour'))`
+      : `date_trunc('${trunc}', '${to}'::date)`;
+    return {
+      trunc, step, fmt,
+      // `to` is inclusive to the end of that day.
+      since: `b.created_at >= '${from}'::date AND b.created_at < ('${to}'::date + interval '1 day')`,
+      start: `date_trunc('${trunc}', '${from}'::date)`,
+      stop,
+    };
+  }
+  async function getDashboard(opts: { range?: string; from?: string; to?: string } = {}) {
+    const custom = opts.from && opts.to && CUSTOM_DATE_RE.test(opts.from) && CUSTOM_DATE_RE.test(opts.to);
+    const range = custom ? 'custom' : (opts.range && opts.range in RANGE_SPEC ? opts.range : '30d');
+    const spec = custom ? customSpec(opts.from as string, opts.to as string) : RANGE_SPEC[range];
     // created_at window for booking/revenue metrics (ytd = since Jan 1; all = no bound).
     const sinceSql = spec.since;
 
@@ -2092,6 +2143,124 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     return { ok: true };
   }
 
+  // ── TRI-1136/1137: Requests inbox — interest enquiries with intent 'request' or 'notify'/'waitlist' ──
+  // Lists enquiry rows of type 'interest', newest first. Supports filtering by status chip and tour.
+  // Status is stored in enquiry.payload->>'status'; default = 'new' for rows without it.
+  const REQUEST_STATUSES = ['new', 'contacted', 'scheduled', 'booked', 'closed'] as const;
+  type RequestStatus = typeof REQUEST_STATUSES[number];
+
+  async function listRequests(opts: { status?: string; tourId?: string; limit?: number; offset?: number }) {
+    const params: unknown[] = [];
+    const where: string[] = [`e.type = 'interest'`];
+    if (opts.status && REQUEST_STATUSES.includes(opts.status as RequestStatus)) {
+      params.push(opts.status);
+      where.push(`COALESCE(e.payload->>'status','new') = $${params.length}`);
+    }
+    if (opts.tourId) {
+      params.push(opts.tourId);
+      where.push(`e.payload->>'tourId' = $${params.length}`);
+    }
+    const limit = Math.min(opts.limit ?? 50, 200);
+    const offset = opts.offset ?? 0;
+    params.push(limit, offset);
+    const { rows } = await db.query(
+      `SELECT e.id, e.email, e.phone, e.created_at,
+              e.payload->>'tourId'       AS "tourId",
+              e.payload->>'tourName'     AS "tourName",
+              e.payload->>'tourSlug'     AS "tourSlug",
+              e.payload->>'intent'       AS intent,
+              e.payload->>'requestedDate' AS "requestedDate",
+              (e.payload->>'partySize')::int AS "partySize",
+              e.payload->>'note'         AS note,
+              COALESCE(e.payload->>'status','new') AS status
+       FROM enquiry e
+       WHERE ${where.join(' AND ')}
+       ORDER BY e.created_at DESC
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params);
+    const { rows: [{ total }] } = await db.query<{ total: string }>(
+      `SELECT COUNT(*)::text AS total FROM enquiry e WHERE ${where.join(' AND ')}`,
+      params.slice(0, params.length - 2));
+    return { requests: rows, total: Number(total), limit, offset };
+  }
+
+  async function updateRequestStatus(id: string, body: unknown, actor: Actor) {
+    if (!isPlainObject(body)) throw new ValidationError('body must be an object');
+    const status = optEnum(body, 'status', REQUEST_STATUSES);
+    if (!status) throw new ValidationError('status is required and must be one of: ' + REQUEST_STATUSES.join(', '), 'status');
+    const cur = (await db.query<{ id: string; payload: Record<string, unknown> }>(
+      `SELECT id, payload FROM enquiry WHERE id = $1 AND type = 'interest'`, [id])).rows[0];
+    if (!cur) throw notFound('request');
+    const newPayload = { ...cur.payload, status };
+    await db.query(`UPDATE enquiry SET payload = $1, updated_at = now() WHERE id = $2`, [JSON.stringify(newPayload), id]);
+    await audit(db, { actorId: actor.id, action: 'request.status_update', targetType: 'enquiry', targetId: id, before: { status: cur.payload.status ?? 'new' }, after: { status }, ip: actor.ip });
+    return { id, status };
+  }
+
+  // createPrivateBookingLink: for an unlisted departure, mint a 72h-hold reserved-seat booking
+  // and return the ?t= secure link. The admin calls this after creating the departure; the link
+  // is sent to the requesting customer. CEO decision: 72h hold for human-closed loop (TRI-1133).
+  async function createPrivateBookingLink(departureId: string, body: unknown, actor: Actor) {
+    if (!isPlainObject(body)) throw new ValidationError('body must be an object');
+    const partySize = optInt(body, 'partySize', 1) ?? 1;
+    const { rows: [dep] } = await db.query(
+      `SELECT d.id, d.tour_id, d.price_minor, d.currency, d.seats_total, d.seats_reserved, d.status, d.visibility,
+              t.slug AS tour_slug
+       FROM departure d JOIN tour t ON t.id = d.tour_id WHERE d.id = $1`, [departureId]);
+    if (!dep) throw notFound('departure');
+    if (dep.visibility !== 'unlisted') throw new ValidationError('departure must be unlisted to generate a private booking link', 'departureId');
+    if (dep.status !== 'scheduled') throw new ValidationError('departure must be in scheduled status', 'departureId');
+    const available = Number(dep.seats_total) - Number(dep.seats_reserved);
+    if (available < partySize) throw conflict(`only ${available} seat(s) available`);
+
+    // TRI-1141 (Gap 2): resolve the lead traveller so the reserved booking rolls up under Admin → Customers.
+    // Prefer the originating request's contact (the /requests/:id/secure-link route passes requestId); fall
+    // back to explicit body {name,email,phone}. Every request carries a validated email (submitTourInterest),
+    // so the FE path always yields a real customer.
+    let lead: { name: string | null; email: string | null; phone: string | null } = {
+      name: optStr(body, 'name', 200) ?? null,
+      email: optStr(body, 'email', 320) ?? null,
+      phone: optStr(body, 'phone', 60) ?? null,
+    };
+    const requestId = optStr(body, 'requestId', 64);
+    if (requestId && !lead.email && !lead.phone) {
+      const { rows: [rq] } = await db.query(
+        `SELECT name, email, phone, payload FROM enquiry WHERE id = $1 AND type = 'interest'`, [requestId]);
+      if (rq) {
+        const pp = (rq.payload && typeof rq.payload === 'object') ? rq.payload : {};
+        lead = {
+          name: lead.name ?? rq.name ?? pp.name ?? null,
+          email: lead.email ?? rq.email ?? null,
+          phone: lead.phone ?? rq.phone ?? null,
+        };
+      }
+    }
+    if (!lead.name) lead.name = lead.email ? String(lead.email).split('@')[0] : 'Guest';
+    if (!lead.email && !lead.phone) {
+      throw new ValidationError('a customer email or phone is required to create a private booking (supply requestId, or name + email/phone)', 'email');
+    }
+
+    // TRI-1141 (Gap 2): route through the shared booking service instead of a hand-rolled INSERT + unguarded
+    // seat increment. This gives the atomic guarded seat-reserve (single tx, the DB CHECK seatbelt), the
+    // 128-bit newPublicToken(), and the guest→customer roll-up — with adminCreated bypassing the terms gate
+    // and holdMinutes (72h, CEO #8) replacing the 30m consumer hold.
+    const holdMinutes = await reserveHoldMinutes();
+    const bookingInput: CreateBookingInput = {
+      tourSlug: dep.tour_slug,
+      departureId: dep.id,
+      partySize,
+      agreedTerms: false,
+      travellers: [{ name: lead.name, email: lead.email, phone: lead.phone, isLead: true }],
+    };
+    const bk = await bookings.create(bookingInput, { adminCreated: true, holdMinutes });
+
+    await audit(db, {
+      actorId: actor.id, action: 'booking.private_link_created', targetType: 'booking', targetId: bk.ref,
+      after: { departureId: dep.id, partySize, expiresAt: bk.reservationExpiresAt, requestId: requestId ?? null }, ip: actor.ip,
+    });
+    return { ref: bk.ref, token: bk.publicToken, expiresAt: bk.reservationExpiresAt };
+  }
+
   return {
     listRegions, createRegion, updateRegion, deleteRegion,
     listTours, getTour, createTour, updateTour, setTourPublished, deleteTour,
@@ -2108,6 +2277,7 @@ export function createAdminService(db: Db, cfg: Config, paystack: PaystackClient
     listAuditLog,
     getDashboard,
     listBlog, getBlog, createBlog, updateBlog, setBlogPublished, deleteBlog,
+    listRequests, updateRequestStatus, createPrivateBookingLink,
   };
 }
 

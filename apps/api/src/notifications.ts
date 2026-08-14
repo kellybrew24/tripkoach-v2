@@ -72,6 +72,8 @@ interface BookingCtx {
   accountEmail: string | null;   // user_account.email when linked
   leadName: string | null;
   leadEmail: string | null;      // booking contact (lead traveller) — guest fallback recipient
+  publicToken: string | null;    // TRI-1095: 128-bit lookup token for the ?t= guest link
+  tokenRequired: boolean;        // TRI-1095: true ⇒ the manage link MUST carry ?t=
 }
 
 /** First name for the greeting (first whitespace token), or a neutral fallback. */
@@ -91,19 +93,24 @@ export function createNotificationService(
 ): NotificationService {
   const baseLog = defaultSendOpts.log ?? (() => {});
 
-  function manageUrl(ref: string): string {
+  function manageUrl(ctx: { ref: string; publicToken?: string | null; tokenRequired?: boolean }): string {
     // Ref-addressable booking view is the SPA's SINGULAR /booking/:ref route
     // (TRI-938, guest-public receipt). The plural /bookings/:ref does NOT match
     // any client route and falls through to the home page — stranding guest-
     // checkout customers, whose only path back to their receipt is this email
     // link (TRI-1035). Plural /bookings is the auth-gated My-bookings LIST.
-    return `${cfg.notify.webBaseUrl}/booking/${ref}`;
+    //
+    // TRI-1095: for token_required bookings the guest can only load the view WITH
+    // the 128-bit capability token, so it MUST ride the emailed link as ?t=.
+    const base = `${cfg.notify.webBaseUrl}/booking/${ctx.ref}`;
+    return ctx.tokenRequired && ctx.publicToken ? `${base}?t=${ctx.publicToken}` : base;
   }
 
   // Load everything the templates + recipient resolution need in one round-trip-ish shot.
   async function loadCtx(ref: string): Promise<BookingCtx | null> {
     const { rows } = await db.query(
       `SELECT b.id, b.ref, b.currency, b.total_minor, b.party_size, b.user_id, b.status, b.cancel_reason,
+              b.public_token, b.token_required,
               t.title AS tour_title,
               d.date_label, d.time_label,
               ua.email AS account_email
@@ -125,6 +132,7 @@ export function createNotificationService(
       cancelReason: b.cancel_reason ?? null,
       userId: b.user_id ?? null, accountEmail: b.account_email ?? null,
       leadName: lead?.name ?? null, leadEmail: lead?.email ?? null,
+      publicToken: b.public_token ?? null, tokenRequired: !!b.token_required,
     };
   }
 
@@ -174,7 +182,7 @@ export function createNotificationService(
       return await dispatch(ctx, 'booking_confirmed', 'booking_confirmed', {
         firstName: firstName(ctx.leadName), ref: ctx.ref, tourTitle: ctx.tourTitle,
         departureLabel: ctx.departureLabel, travellers: ctx.partySize,
-        totalDisplay: money(ctx.totalMinor, ctx.currency), manageUrl: manageUrl(ctx.ref),
+        totalDisplay: money(ctx.totalMinor, ctx.currency), manageUrl: manageUrl(ctx),
       }, baseLog);
     } catch (e) {
       baseLog(`[notify] bookingConfirmed ${ref} failed (swallowed): ${(e as Error).message}`);
@@ -193,7 +201,7 @@ export function createNotificationService(
       return await dispatch(ctx, 'booking_confirmed', template, {
         firstName: firstName(ctx.leadName), ref: ctx.ref, tourTitle: ctx.tourTitle,
         departureLabel: ctx.departureLabel, travellers: ctx.partySize,
-        totalDisplay: money(ctx.totalMinor, ctx.currency), manageUrl: manageUrl(ctx.ref),
+        totalDisplay: money(ctx.totalMinor, ctx.currency), manageUrl: manageUrl(ctx),
       }, baseLog);
     } catch (e) {
       baseLog(`[notify] resendConfirmation ${ref} failed (swallowed): ${(e as Error).message}`);
@@ -209,7 +217,7 @@ export function createNotificationService(
       const reason = CANCEL_REASON_PHRASE[reasonKey] ?? '';
       return await dispatch(ctx, 'booking_cancelled', 'booking_cancelled', {
         firstName: firstName(ctx.leadName), ref: ctx.ref, tourTitle: ctx.tourTitle,
-        departureLabel: ctx.departureLabel, reason, manageUrl: manageUrl(ctx.ref),
+        departureLabel: ctx.departureLabel, reason, manageUrl: manageUrl(ctx),
       }, baseLog);
     } catch (e) {
       baseLog(`[notify] bookingCancelled ${ref} failed (swallowed): ${(e as Error).message}`);
@@ -225,8 +233,8 @@ export function createNotificationService(
       if (!ctx) return null;
       return await dispatch(ctx, 'booking_rescheduled', 'booking_rescheduled', {
         firstName: firstName(ctx.leadName), ref: ctx.ref, tourTitle: ctx.tourTitle,
-        previousDepartureLabel: opts.previousDepartureLabel || '—',
-        departureLabel: ctx.departureLabel, travellers: ctx.partySize, manageUrl: manageUrl(ctx.ref),
+        previousDepartureLabel: opts.previousDepartureLabel || '-',
+        departureLabel: ctx.departureLabel, travellers: ctx.partySize, manageUrl: manageUrl(ctx),
       }, baseLog);
     } catch (e) {
       baseLog(`[notify] bookingRescheduled ${ref} failed (swallowed): ${(e as Error).message}`);
@@ -241,7 +249,7 @@ export function createNotificationService(
       return await dispatch(ctx, 'payment_failed', 'payment_failed', {
         firstName: firstName(ctx.leadName), ref: ctx.ref, tourTitle: ctx.tourTitle,
         departureLabel: ctx.departureLabel, totalDisplay: money(ctx.totalMinor, ctx.currency),
-        manageUrl: manageUrl(ctx.ref),
+        manageUrl: manageUrl(ctx),
       }, baseLog);
     } catch (e) {
       baseLog(`[notify] paymentFailed ${ref} failed (swallowed): ${(e as Error).message}`);
@@ -285,7 +293,7 @@ export function createNotificationService(
         const res = await dispatch(ctx, 'departure_reminder', 'departure_reminder', {
           firstName: firstName(ctx.leadName), ref: ctx.ref, tourTitle: ctx.tourTitle,
           departureLabel: ctx.departureLabel, travellers: ctx.partySize,
-          daysLabel, manageUrl: manageUrl(ctx.ref),
+          daysLabel, manageUrl: manageUrl(ctx),
         }, log);
         out.refs.push(ref);
         if (!res) { out.skipped++; continue; }

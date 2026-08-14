@@ -12,6 +12,7 @@
 import { loadConfig } from './config.ts';
 import { createDb } from './db.ts';
 import { sendEmail, isEmailEnabled } from './email.ts';
+import { maskEmail } from './util.ts';
 
 const to = process.argv[2] || process.env.EMAIL_SMOKE_TO;
 if (!to) {
@@ -24,7 +25,7 @@ const db = await createDb(cfg);
 try {
   const stamp = new Date().toISOString();
   const ref = `SMOKE-${stamp.replace(/[^0-9]/g, '').slice(0, 14)}`;
-  console.log(`[send-email] ${stamp} provider=${cfg.email.providerName} enabled=${isEmailEnabled(cfg.email)} from=${cfg.email.from ?? '(unset)'} to=${to}`);
+  console.log(`[send-email] ${stamp} provider=${cfg.email.providerName} enabled=${isEmailEnabled(cfg.email)} from=${cfg.email.from ?? '(unset)'} to=${maskEmail(to)}`);
   const result = await sendEmail(db, cfg, {
     to,
     template: 'smoke_test',

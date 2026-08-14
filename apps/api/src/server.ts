@@ -143,17 +143,24 @@ export function buildServer(db: Db, cfg: Config, paystack?: PaystackClient, stor
       let displayRate = 12;
       let currencyOfRecord = 'USD';
       let secondaryDisplayCurrency = 'GHS';
+      let dateRequestsEnabled = false;
+      let termsConditions: string | null = null;
       try {
-        const { rows } = await db.query<{ display: string | null; cor: string | null; sdc: string | null }>(
+        const { rows } = await db.query<{ display: string | null; cor: string | null; sdc: string | null; flags: Record<string, unknown> | null }>(
           `SELECT usd_to_ghs_display_rate AS display, currency_of_record AS cor,
-                  secondary_display_currency AS sdc FROM settings WHERE singleton = true`);
+                  secondary_display_currency AS sdc, flags FROM settings WHERE singleton = true`);
         const r = rows[0];
         const d = r?.display != null ? Number(r.display) : NaN;
         if (Number.isFinite(d) && d > 0) displayRate = d;
         if (r?.cor) currencyOfRecord = r.cor;
         if (r?.sdc) secondaryDisplayCurrency = r.sdc;
+        if (r?.flags?.date_requests_enabled === true) dateRequestsEnabled = true;
+        // TRI-1150: canonical Terms & Conditions (admin-set, flags.terms_conditions_text).
+        const tc = r?.flags?.terms_conditions_text;
+        if (typeof tc === 'string' && tc.trim() !== '') termsConditions = tc;
       } catch { /* settings unreadable → keep safe defaults */ }
-      return { usdToGhsDisplayRate: displayRate, currencyOfRecord, secondaryDisplayCurrency };
+      // minRequestLeadDays: 72h minimum lead time before a requested date (CEO decision, TRI-1133).
+      return { usdToGhsDisplayRate: displayRate, currencyOfRecord, secondaryDisplayCurrency, dateRequestsEnabled, minRequestLeadDays: 3, termsConditions };
     });
 
     api.get('/regions', async () => ({ regions: await listRegions(db) }));
@@ -258,25 +265,37 @@ export function buildServer(db: Db, cfg: Config, paystack?: PaystackClient, stor
       } catch (e) { return sendBookingError(reply, e); }
     });
 
+    // TRI-1095: resolve the optional consumer session so a signed-in OWNER can read
+    // their own booking on the shared /booking/:ref view without a ?t= token.
+    const viewerId = async (req: any): Promise<string | null> => {
+      const sid = req.cookies?.[cfg.consumer.cookieName];
+      const account = sid ? await resolveUserSession(db, cfg, sid).catch(() => null) : null;
+      return account?.id ?? null;
+    };
+
+    // TRI-1063 [A01/F2] keeps its per-IP throttle here; TRI-1095 layers the capability-token gate on top.
     api.get('/bookings/:ref', bookingLookupRateLimit, async (req, reply) => {
       const { ref } = req.params as { ref: string };
-      const out = await bookings.getByRef(ref);
+      // TRI-1095: the guest link carries the 128-bit capability token as ?t=; without
+      // it (and without an owning session) a token_required booking reads as not-found.
+      const token = (req.query as { t?: string } | undefined)?.t ?? null;
+      const out = await bookings.getByRef(ref, { token, viewerUserId: await viewerId(req) });
       return out ?? notFound(reply, `booking "${ref}" not found`);
     });
 
     api.post('/bookings/:ref/payment/init', async (req, reply) => {
       try {
         const { ref } = req.params as { ref: string };
-        const body = (req.body ?? {}) as { channel?: string };
-        return await bookings.initPayment(ref, { channel: body.channel });
+        const body = (req.body ?? {}) as { channel?: string; token?: string };
+        return await bookings.initPayment(ref, { channel: body.channel, token: body.token ?? null, viewerUserId: await viewerId(req) });
       } catch (e) { return sendBookingError(reply, e); }
     });
 
     api.post('/bookings/:ref/payment/verify', async (req, reply) => {
       try {
         const { ref } = req.params as { ref: string };
-        const body = (req.body ?? {}) as { reference?: string };
-        return await bookings.verifyPayment(ref, body.reference);
+        const body = (req.body ?? {}) as { reference?: string; token?: string };
+        return await bookings.verifyPayment(ref, body.reference, { token: body.token ?? null, viewerUserId: await viewerId(req) });
       } catch (e) { return sendBookingError(reply, e); }
     });
 

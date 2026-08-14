@@ -47,6 +47,16 @@ function optName(b: Body): string | null {
   if (v.length > 200) throw new ValidationError('"name" is too long', 'name');
   return v.trim();
 }
+// TRI-1079: optional contact phone. Free-text (dial-code + national digits) to match the DS
+// PhoneInput, which stores the phone as a single string; empty -> null (clears the field).
+function optPhone(b: Body): string | null {
+  const v = b.phone;
+  if (v == null || v === '') return null;
+  if (typeof v !== 'string') throw new ValidationError('"phone" must be a string', 'phone');
+  const t = v.trim();
+  if (t.length > 40) throw new ValidationError('"phone" is too long', 'phone');
+  return t || null;
+}
 function reqRole(b: Body, field = 'role'): Role {
   const v = b[field];
   if (typeof v !== 'string' || !(ROLES as readonly string[]).includes(v)) {
@@ -73,13 +83,18 @@ export function createStaffService(db: Db, cfg: Config) {
       id: r.id,
       name,
       email: r.email,
+      phone: r.phone ?? null,
       role: r.role,
       status: r.status,
       jobTitle: r.job_title ?? null,
       mfaEnabled: !!r.mfa_enabled,
+      // TRI-1080 follow-up: surface lockout state (mig 029/030 cols) so the console
+      // can badge locked admins and only enable "Clear lockout" when actually locked.
+      locked: !!r.locked_until && new Date(r.locked_until).getTime() > Date.now(),
+      lockedUntil: r.locked_until ?? null,
       initials: initials(name || r.email),
       lastActiveAt: r.last_active_at ?? null,
-      last: r.last_active_at ? formatReviewDate(r.last_active_at) : '—',
+      last: r.last_active_at ? formatReviewDate(r.last_active_at) : '-',
       createdAt: r.created_at,
     };
   }
@@ -156,7 +171,7 @@ export function createStaffService(db: Db, cfg: Config) {
     const existing = (await db.query(`SELECT * FROM staff_user WHERE lower(email) = $1`, [email])).rows[0];
     if (existing) {
       if (existing.status === 'active') throw conflict(`${email} is already an active staff member`);
-      if (existing.status === 'disabled') throw conflict(`${email} is disabled — re-enable the account instead of re-inviting`);
+      if (existing.status === 'disabled') throw conflict(`${email} is disabled. Re-enable the account instead of re-inviting`);
       // status 'invited': refresh role/name and re-issue a fresh invite (older tokens simply expire).
       await db.query(
         `UPDATE staff_user SET role=$2, name=COALESCE($3, name), job_title=COALESCE($4, job_title), updated_at=now() WHERE id=$1`,
@@ -196,7 +211,7 @@ export function createStaffService(db: Db, cfg: Config) {
   async function revokeInvite(id: string, actor: Actor) {
     const cur = await getStaffRow(id);
     if (!cur) throw notFound('staff member');
-    if (cur.status !== 'invited') throw conflict(`can only revoke a pending (invited) invite; ${cur.email} is ${cur.status} — disable the account instead`);
+    if (cur.status !== 'invited') throw conflict(`can only revoke a pending (invited) invite; ${cur.email} is ${cur.status}. Disable the account instead`);
     await db.query(`DELETE FROM staff_user WHERE id=$1`, [id]);
     await audit(db, { actorId: actor.id, action: 'staff.invite_revoked', targetType: 'staff_user', targetId: id, before: { email: cur.email, role: cur.role, status: cur.status }, ip: actor.ip });
     return { ok: true, id, email: cur.email };
@@ -272,7 +287,7 @@ export function createStaffService(db: Db, cfg: Config) {
         throw new ValidationError('"status" can only be set to "active" or "disabled" here (use the invite flow for pending accounts)', 'status');
       }
       if (status === 'active' && cur.status === 'invited') {
-        throw conflict('this account has not accepted its invite yet — resend the invite instead of activating it');
+        throw conflict('this account has not accepted its invite yet. Resend the invite instead of activating it');
       }
       nextStatus = status;
       set('status', status);
@@ -281,7 +296,7 @@ export function createStaffService(db: Db, cfg: Config) {
     // Last-admin guard: block demoting/disabling the only remaining active admin.
     const losingAdmin = cur.role === 'admin' && cur.status === 'active' && (nextRole !== 'admin' || nextStatus !== 'active');
     if (losingAdmin && (await countOtherActiveAdmins(cur.id)) === 0) {
-      throw conflict('this is the last active admin — promote another admin before changing this account');
+      throw conflict('this is the last active admin. Promote another admin before changing this account');
     }
 
     if (!sets.length) throw new ValidationError('no updatable fields provided (role, name, jobTitle, status)');
@@ -295,10 +310,10 @@ export function createStaffService(db: Db, cfg: Config) {
     const cur = await getStaffRow(id);
     if (!cur) throw notFound('staff member');
     if (status === 'active' && cur.status === 'invited') {
-      throw conflict('this account has not accepted its invite yet — resend the invite instead');
+      throw conflict('this account has not accepted its invite yet. Resend the invite instead');
     }
     if (status === 'disabled' && cur.role === 'admin' && cur.status === 'active' && (await countOtherActiveAdmins(cur.id)) === 0) {
-      throw conflict('this is the last active admin — promote another admin before disabling this account');
+      throw conflict('this is the last active admin. Promote another admin before disabling this account');
     }
     if (cur.status === status) return staffDTO(cur);
     await db.query(`UPDATE staff_user SET status=$2, updated_at=now() WHERE id=$1`, [id, status]);
@@ -334,7 +349,7 @@ export function createStaffService(db: Db, cfg: Config) {
   async function enrollMfa(staffId: string, actor: Actor) {
     const staff = await getStaffRow(staffId);
     if (!staff) throw notFound('staff member');
-    if (staff.mfa_enabled) throw conflict('MFA is already enabled — disable it first to re-enroll');
+    if (staff.mfa_enabled) throw conflict('MFA is already enabled. Disable it first to re-enroll');
     const secret = generateSecret();
     // Replace any prior unconfirmed factor; a fresh enroll supersedes an abandoned one.
     await db.query(`DELETE FROM mfa_factor WHERE staff_user_id=$1 AND confirmed_at IS NULL`, [staffId]);
@@ -347,9 +362,9 @@ export function createStaffService(db: Db, cfg: Config) {
   async function verifyMfaEnrollment(staffId: string, code: string, actor: Actor) {
     const factor = (await db.query(
       `SELECT * FROM mfa_factor WHERE staff_user_id=$1 AND confirmed_at IS NULL ORDER BY added_at DESC LIMIT 1`, [staffId])).rows[0];
-    if (!factor) throw conflict('no pending MFA enrollment — start enroll first');
+    if (!factor) throw conflict('no pending MFA enrollment. Start enroll first');
     if (!verifyTotp(factor.secret, String(code ?? ''))) {
-      throw new ValidationError('that code did not match — check your authenticator app and try again', 'code');
+      throw new ValidationError('that code did not match. Check your authenticator app and try again', 'code');
     }
     const codes = genRecoveryCodes();
     await db.tx(async (q) => {
@@ -387,6 +402,103 @@ export function createStaffService(db: Db, cfg: Config) {
     await db.tx(async (q) => { await storeRecoveryCodes(q, staffId, codes); });
     await audit(db, { actorId: actor.id, action: 'staff.mfa_recovery_regenerated', targetType: 'staff_user', targetId: staffId, ip: actor.ip });
     return { recoveryCodes: codes };
+  }
+
+  // ── TRI-1082 · Admin self-service recovery for a LOCKED-OUT admin ────────────────────────────────
+  // Design approved by the board on TRI-1080 (plan revision 321b82c0, §2 + §4). Three admin-acts-on-`:id`
+  // actions, all gated by the route's perm('users.manage'). Anti-privesc invariants (plan §4): these NEVER
+  // mint a session for the target, reveal a password, or lower the target's role — they only clear locks,
+  // rotate the target's own recovery codes, or force a fresh MFA re-enroll. Each requires a STEP-UP: the
+  // acting admin must prove live possession of their OWN second factor (current TOTP) before it runs, and
+  // each notifies the target admin out-of-band. Codes are audited as an event, never by value.
+
+  /**
+   * Step-up gate. The acting admin must present a CURRENT authenticator (TOTP) code from their own
+   * confirmed factor. Recovery codes are deliberately NOT accepted here (they are single-use and would be
+   * burned, and step-up must prove live possession of the device). An acting admin with no confirmed
+   * factor cannot step up — they finish their own MFA enrollment first. Throws (never returns false).
+   */
+  async function requireStepUp(actingStaffId: string, code: string) {
+    const cleaned = (code ?? '').trim();
+    if (!cleaned) throw new AdminError('step_up_required', 'Enter a current code from your authenticator app to confirm this recovery action.', 401);
+    const factor = (await db.query(
+      `SELECT secret FROM mfa_factor WHERE staff_user_id=$1 AND confirmed_at IS NOT NULL ORDER BY confirmed_at DESC LIMIT 1`, [actingStaffId])).rows[0];
+    if (!factor) throw new AdminError('step_up_unavailable', 'Turn on two-factor authentication on your own account before using admin recovery tools.', 403);
+    if (!verifyTotp(factor.secret, cleaned)) throw new AdminError('step_up_failed', 'That authenticator code was not valid. Try again.', 401);
+  }
+
+  /** Out-of-band notice to the recovered admin: "<what> by <admin> at <time>". Best-effort — sendEmail
+   *  swallows dispatch failures (logs a send-log row), so a mail hiccup never fails the recovery action.
+   *  The action text is descriptive only; no secret (codes/passwords) ever enters the email or its vars. */
+  async function notifyTargetRecovery(target: any, actingStaffId: string, action: string) {
+    const actor = await getStaffRow(actingStaffId);
+    const actorName = (actor?.name || actor?.email || 'an administrator') as string;
+    const when = `${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC`;
+    await sendEmail(db, cfg, {
+      to: target.email,
+      template: 'staff_recovery',
+      vars: { name: target.name || target.email, actorName, action, when },
+      relatedType: 'staff_user',
+      relatedId: target.id,
+    });
+  }
+
+  /** clear-lockout — reset the target's login-lockout (TRI-1054 mig 029: staff_user.failed_login_count /
+   *  locked_until, which the admin MFA-lockout also feeds) AND the per-session MFA-failure counter
+   *  (TRI-1061 mig 030: session.mfa_failed_count) on the target's live sessions. Nothing else changes. */
+  async function adminClearLockout(targetId: string, code: string, actor: Actor) {
+    await requireStepUp(actor.id, code);
+    const cur = await getStaffRow(targetId);
+    if (!cur) throw notFound('staff member');
+    const before = { failedLoginCount: cur.failed_login_count ?? 0, lockedUntil: cur.locked_until ?? null };
+    const sessionCounters = Number((await db.query(
+      `SELECT COUNT(*)::int AS n FROM session WHERE subject_type='staff' AND subject_id=$1 AND revoked_at IS NULL AND mfa_failed_count > 0`, [targetId])).rows[0].n);
+    await db.tx(async (q) => {
+      await q.query(`UPDATE staff_user SET failed_login_count=0, locked_until=NULL, updated_at=now() WHERE id=$1`, [targetId]);
+      await q.query(`UPDATE session SET mfa_failed_count=0 WHERE subject_type='staff' AND subject_id=$1 AND revoked_at IS NULL AND mfa_failed_count > 0`, [targetId]);
+    });
+    await audit(db, { actorId: actor.id, action: 'staff.recovery.clear_lockout', targetType: 'staff_user', targetId,
+      before, after: { failedLoginCount: 0, lockedUntil: null, mfaSessionCountersCleared: sessionCounters }, ip: actor.ip });
+    await notifyTargetRecovery(cur, actor.id, 'a sign-in lock on your account was cleared');
+    return { ok: true, id: targetId, email: cur.email };
+  }
+
+  /** recovery-codes (admin-target) — rotate the target admin's OWN recovery codes. Backed by the exact
+   *  same primitives as the self-service path (genRecoveryCodes + storeRecoveryCodes); the old set is
+   *  invalidated atomically in the same tx. Returns the plaintext codes ONCE to the acting admin (to hand
+   *  to the target); the codes are never audited or logged — only the event is. */
+  async function adminRegenerateRecoveryCodes(targetId: string, code: string, actor: Actor) {
+    await requireStepUp(actor.id, code);
+    const cur = await getStaffRow(targetId);
+    if (!cur) throw notFound('staff member');
+    if (!cur.mfa_enabled) throw conflict('this admin does not have two-factor enabled. Use reset-MFA so they re-enroll, rather than generating recovery codes');
+    const codes = genRecoveryCodes();
+    await db.tx(async (q) => { await storeRecoveryCodes(q, targetId, codes); });
+    await audit(db, { actorId: actor.id, action: 'staff.recovery.codes_regenerated', targetType: 'staff_user', targetId,
+      before: null, after: { count: codes.length }, ip: actor.ip }); // never log the codes themselves
+    await notifyTargetRecovery(cur, actor.id, 'new two-factor recovery codes were generated for your account');
+    return { recoveryCodes: codes };
+  }
+
+  /** reset-MFA — clear the target's MFA factor(s) + recovery codes, set mfa_enabled=false, and revoke the
+   *  target's live sessions. Admin MFA is enforced (TRI-912), so the next sign-in forces a fresh TOTP
+   *  re-enrollment. Does NOT require the target's code (they are locked out); the acting admin's step-up
+   *  is the gate. Never touches role/password/session-for-target. */
+  async function adminResetMfa(targetId: string, code: string, actor: Actor) {
+    await requireStepUp(actor.id, code);
+    const cur = await getStaffRow(targetId);
+    if (!cur) throw notFound('staff member');
+    const before = { mfaEnabled: !!cur.mfa_enabled };
+    await db.tx(async (q) => {
+      await q.query(`DELETE FROM mfa_factor WHERE staff_user_id=$1`, [targetId]);
+      await q.query(`DELETE FROM recovery_code WHERE staff_user_id=$1`, [targetId]);
+      await q.query(`UPDATE staff_user SET mfa_enabled=false, updated_at=now() WHERE id=$1`, [targetId]);
+      await q.query(`UPDATE session SET revoked_at=now() WHERE subject_type='staff' AND subject_id=$1 AND revoked_at IS NULL`, [targetId]);
+    });
+    await audit(db, { actorId: actor.id, action: 'staff.recovery.mfa_reset', targetType: 'staff_user', targetId,
+      before, after: { mfaEnabled: false, mustReEnroll: true }, ip: actor.ip });
+    await notifyTargetRecovery(cur, actor.id, 'two-factor authentication was reset. You will set it up again at your next sign-in');
+    return { ok: true, id: targetId, email: cur.email, enabled: false };
   }
 
   /**
@@ -437,15 +549,16 @@ export function createStaffService(db: Db, cfg: Config) {
     const set = (col: string, val: unknown) => { params.push(val); sets.push(`${col} = $${params.length}`); };
 
     if (body.name !== undefined) set('name', optName(body));
+    if (body.phone !== undefined) set('phone', optPhone(body)); // TRI-1079: self-editable contact phone
     if (body.jobTitle !== undefined) {
       if (actorRole !== 'admin') throw new AdminError('forbidden', 'only admins may set their own job title', 403);
       set('job_title', typeof body.jobTitle === 'string' ? body.jobTitle.trim().slice(0, 200) || null : null);
     }
 
-    if (!sets.length) throw new ValidationError('no updatable fields provided (name, jobTitle)');
+    if (!sets.length) throw new ValidationError('no updatable fields provided (name, phone, jobTitle)');
     params.push(id);
     await db.query(`UPDATE staff_user SET ${sets.join(', ')}, updated_at=now() WHERE id=$${params.length}`, params);
-    await audit(db, { actorId: id, action: 'staff.update_self', targetType: 'staff_user', targetId: id, before: { name: cur.name, job_title: cur.job_title }, after: { name: body.name ?? cur.name, job_title: body.jobTitle ?? cur.job_title }, ip: null });
+    await audit(db, { actorId: id, action: 'staff.update_self', targetType: 'staff_user', targetId: id, before: { name: cur.name, phone: cur.phone, job_title: cur.job_title }, after: { name: body.name ?? cur.name, phone: body.phone ?? cur.phone, job_title: body.jobTitle ?? cur.job_title }, ip: null });
     return staffDTO(await getStaffRow(id));
   }
 
@@ -636,6 +749,8 @@ export function createStaffService(db: Db, cfg: Config) {
   return {
     listStaff, inviteStaff, resendInvite, revokeInvite, previewInvite, acceptInvite, updateStaff, updateSelf, setStatus,
     enrollMfa, verifyMfaEnrollment, disableMfa, regenerateRecoveryCodes, verifyChallenge, mfaStatus,
+    adminClearLockout, adminRegenerateRecoveryCodes, adminResetMfa, // TRI-1082 admin recovery
+
     changeOwnPassword, requestPasswordReset, consumePasswordReset,
     getPreferences, savePreferences,
   };

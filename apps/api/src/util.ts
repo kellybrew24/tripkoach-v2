@@ -54,6 +54,21 @@ export function formatReviewDate(d: Date | string | null | undefined): string {
   return `${dt.getUTCDate()} ${MONTH_NAMES[dt.getUTCMonth()]} ${dt.getUTCFullYear()}`;
 }
 
+/** TRI-1124 (#4) · Mask an email for LOG output so PII never lands in stdout/pino/journald while an
+ *  operator can still correlate a flow: "ama.mensah@gmail.com" → "a***@gmail.com", "x@y.com" → "*@y.com".
+ *  The full recipient is still persisted in the email send-log row (auditable, access-controlled) — this
+ *  only sanitises the log STREAM. Non-email or empty input collapses to a constant so nothing leaks. */
+export function maskEmail(value: string | null | undefined): string {
+  const s = (value ?? '').trim();
+  if (!s) return '(none)';
+  const at = s.lastIndexOf('@');
+  if (at <= 0) return '***';               // not an email shape → never echo it back
+  const local = s.slice(0, at);
+  const domain = s.slice(at + 1);
+  const head = local.length > 1 ? local[0] : '';
+  return `${head}***@${domain}`;
+}
+
 /** Two-letter initials from an author name (e.g. "Ama Mensah" → "AM", "anon" → "AN"). */
 export function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);

@@ -9,6 +9,7 @@
 import { loadConfig } from './config.ts';
 import { createDb, type Db } from './db.ts';
 import { hashPassword } from './auth.ts';
+import { maskEmail } from './util.ts';
 
 export async function upsertStaff(
   db: Db,
@@ -43,7 +44,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const r = await upsertStaff(db, {
       email, password, name: process.env.STAFF_NAME, role: process.env.STAFF_ROLE, jobTitle: process.env.STAFF_JOB_TITLE,
     });
-    console.log(`[admin-seed] ${r.created ? 'created' : 'updated'} staff ${email} (${process.env.STAFF_ROLE ?? 'admin'})`);
+    console.log(`[admin-seed] ${r.created ? 'created' : 'updated'} staff ${maskEmail(email)} (${process.env.STAFF_ROLE ?? 'admin'})`);
   } finally {
     await db.close();
   }

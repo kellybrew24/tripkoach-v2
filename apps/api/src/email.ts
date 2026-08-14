@@ -22,6 +22,7 @@
 import type { Db } from './db.ts';
 import type { Config, EmailConfig } from './config.ts';
 import { renderTemplate, type RenderedEmail, type TemplateVars } from './email-templates.ts';
+import { maskEmail } from './util.ts';
 
 export type EmailStatus = 'sent' | 'failed' | 'skipped';
 
@@ -183,7 +184,10 @@ export async function sendEmail(
 ): Promise<SendEmailResult> {
   const email = cfg.email;
   const log = opts.log ?? (() => {});
-  const vars: TemplateVars = input.vars ?? {};
+  // TRI-1102: brand every transactional email with the TripKoach badge in the dark header bar.
+  // Templates reference {{logoUrl}}; default it here to the web app's own static asset (an absolute
+  // https URL is required for email clients). Callers may override via input.vars.logoUrl.
+  const vars: TemplateVars = { logoUrl: `${cfg.notify.webBaseUrl}/assets/logo-badge.png`, ...(input.vars ?? {}) };
 
   // ── Validate + render up front (throws on programmer error, before touching the DB). ──
   const to = (input.to ?? '').trim();
@@ -211,7 +215,7 @@ export async function sendEmail(
   if (!enabled) {
     const reason = email.dryRun ? 'EMAIL_DRY_RUN set' : 'no RESEND_API_KEY / From configured';
     await finalize(db, id, 'skipped', { error: `transport disabled (${reason})` });
-    log(`[email] SKIPPED template=${input.template} to=${to} — ${reason}`);
+    log(`[email] SKIPPED template=${input.template} to=${maskEmail(to)} — ${reason}`);
     return { ...base, status: 'skipped', providerMessageId: null, error: null };
   }
 
@@ -223,12 +227,12 @@ export async function sendEmail(
       to, from: from!, replyTo, subject: rendered.subject, html: rendered.html, text: rendered.text,
     });
     await finalize(db, id, 'sent', { providerMessageId });
-    log(`[email] SENT template=${input.template} to=${to} via ${transport.name} id=${providerMessageId}`);
+    log(`[email] SENT template=${input.template} to=${maskEmail(to)} via ${transport.name} id=${providerMessageId}`);
     return { ...base, status: 'sent', providerMessageId, error: null };
   } catch (e) {
     const error = (e as Error).message;
     await finalize(db, id, 'failed', { error });
-    log(`[email] FAILED template=${input.template} to=${to} via ${transport.name} — ${error}. ALERT.`);
+    log(`[email] FAILED template=${input.template} to=${maskEmail(to)} via ${transport.name} — ${error}. ALERT.`);
     return { ...base, status: 'failed', providerMessageId: null, error };
   }
 }

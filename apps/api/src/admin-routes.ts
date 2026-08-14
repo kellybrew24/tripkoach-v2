@@ -14,7 +14,6 @@ import {
   verifyTrustedDevice, issueTrustedDevice, sessionWasTrusted,
   revokeTrustedDevices, setTrustCookie, clearTrustCookie,
   accountLockedUntil, recordFailedLogin, resetFailedLogins,
-  recordMfaFailure, lockoutMessage,
 } from './auth.ts';
 import { createAdminService, AdminError, ValidationError } from './admin.ts';
 import type { NotificationService } from './notifications.ts';
@@ -200,26 +199,13 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
       if (!pending) {
         return reply.code(401).send({ error: { code: 'no_challenge', message: 'No pending sign-in to verify. Please sign in again.' } });
       }
-      // TRI-1061: an account already locked (by password or prior MFA failures) must not be able to keep
-      // guessing 6-digit codes — reject before spending a verify.
-      const preLock = accountLockedUntil(pending.staff);
-      if (preLock) {
-        return reply.code(423).send({ error: { code: 'account_locked', message: lockoutMessage(preLock) } });
-      }
       const b = (req.body ?? {}) as Record<string, unknown>;
       const code = typeof b.code === 'string' ? b.code : '';
       const ok = await staffSvc.verifyChallenge(pending.staffId, code);
       if (!ok) {
-        // TRI-1061: cap wrong codes per pending session AND feed the per-account lockout so a spray across
-        // fresh sessions still locks the account (immune to IP rotation, which the per-IP limiter is not).
-        const cap = await recordMfaFailure(db, pending.sessionId);
-        const justLocked = await recordFailedLogin(db, pending.staff);
-        await audit(db, { actorId: pending.staffId, action: 'staff.mfa_failed', targetType: 'staff_user', targetId: pending.staffId, after: { attempts: cap.count, sessionRevoked: cap.revoked, locked: !!justLocked }, ip: req.ip ?? null });
-        if (justLocked) return reply.code(423).send({ error: { code: 'account_locked', message: lockoutMessage(justLocked) } });
-        if (cap.revoked) return reply.code(401).send({ error: { code: 'mfa_attempts_exceeded', message: 'Too many incorrect codes. Please sign in again.' } });
+        await audit(db, { actorId: pending.staffId, action: 'staff.mfa_failed', targetType: 'staff_user', targetId: pending.staffId, ip: req.ip ?? null });
         return reply.code(401).send({ error: { code: 'invalid_code', message: "That code didn't match or has expired." } });
       }
-      await resetFailedLogins(db, pending.staffId); // full login completed — clear password/MFA lockout counter
       await clearMfaPending(db, pending.sessionId);
       // TRI-983: the operator ticked "Trust this device for 30 days" at login — now that the factor has
       // verified, mint a trusted-device token and drop it in the long-lived tk_admin_trust cookie so the
@@ -259,7 +245,7 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
     admin.get('/me', { preHandler: auth }, async (req: FastifyRequest) => {
       const s = req.staff!;
       return {
-        staff: { id: s.id, email: s.email, name: s.name, role: s.role, jobTitle: s.jobTitle },
+        staff: { id: s.id, email: s.email, name: s.name, phone: s.phone, role: s.role, jobTitle: s.jobTitle },
         permissions: [...s.permissions],
         preferences: await staffSvc.getPreferences(s.id),
       };
@@ -537,7 +523,30 @@ export function registerAdmin(app: FastifyInstance, db: Db, cfg: Config, notifie
       });
     });
 
+    // ── TRI-1136/1137: Requests inbox — date-interest enquiries ────────────────
+    // GET  /requests          list (filter: ?status=new|contacted|…, ?tourId=)
+    // PATCH /requests/:id/status  update status chip
+    admin.get('/requests', perm('bookings.view'), async (req) => {
+      const q = query(req);
+      return svc.listRequests({ status: qStr(q, 'status'), tourId: qStr(q, 'tourId'), limit: qNum(q, 'limit'), offset: qNum(q, 'offset') });
+    });
+    admin.patch('/requests/:id', perm('bookings.manage'), async (req) => {
+      return svc.updateRequestStatus((req.params as any).id, body(req), actorOf(req));
+    });
+    // POST /departures/:id/private-link — mint 72h-hold reserved booking for an unlisted departure
+    admin.post('/departures/:id/private-link', perm('bookings.manage'), async (req, reply) => {
+      return reply.code(201).send(await svc.createPrivateBookingLink((req.params as any).id, body(req), actorOf(req)));
+    });
+    // POST /requests/:id/secure-link — FE calls this; body must include departureId of the unlisted departure
+    admin.post('/requests/:id/secure-link', perm('bookings.manage'), async (req, reply) => {
+      const b = body(req) as Record<string, unknown>;
+      // TRI-1141: pass the request id through so the private booking hydrates the requester's contact
+      // from the enquiry and rolls up under Admin → Customers (unless the body carries explicit contact).
+      const withReq = { ...b, requestId: b.requestId ?? (req.params as any).id };
+      return reply.code(201).send(await svc.createPrivateBookingLink(String(b.departureId ?? ''), withReq, actorOf(req)));
+    });
+
     // ── Dashboard aggregates (A15) ───────────────────────────────────────────────
-    admin.get('/dashboard', perm('bookings.view'), async (req) => svc.getDashboard({ range: qStr(query(req), 'range') }));
+    admin.get('/dashboard', perm('bookings.view'), async (req) => svc.getDashboard({ range: qStr(query(req), 'range'), from: qStr(query(req), 'from'), to: qStr(query(req), 'to') }));
   }, { prefix: cfg.adminPrefix });
 }

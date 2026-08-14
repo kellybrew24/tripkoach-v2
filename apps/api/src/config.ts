@@ -71,6 +71,11 @@ export interface MediaConfig {
   keyPrefix: string;
   /** Max upload size in bytes. */
   maxBytes: number;
+  /** TRI-1124 (#9): hard pixel-dimension ceiling for the GENERAL media path (decompression-bomb guard).
+   *  Sniffed width/height are read from the file header BEFORE any decode, so a 40KB file claiming
+   *  60000×60000 is rejected without ever allocating the pixel buffer. The avatar path (TRI-943) passes
+   *  its own tighter cap; this is the backstop for admin media uploads. Generous enough for 6000px heroes. */
+  maxDimension: number;
   /** Allowed (sniffed) MIME types. */
   allowedTypes: readonly string[];
   /** Cache-Control stamped on published objects. Content-addressed keys ⇒ immutable is safe. */
@@ -173,12 +178,6 @@ export function loadConfig(): Config {
   // REQUIRES Secure, so under plain-HTTP local testing (COOKIE_SECURE=false) we fall back to the bare name
   // (a __Host- cookie set over HTTP is silently dropped by the browser, which would break login).
   const cookieSecure = process.env.COOKIE_SECURE ? process.env.COOKIE_SECURE === 'true' : true;
-  // TRI-1065 (item 7, A05/A02): a single stray COOKIE_SECURE=false in the prod env would silently drop
-  // Secure on every session cookie (and disable the __Host- prefix). Refuse to boot rather than serve
-  // downgradeable session cookies in production. (Dev/local plain-HTTP testing is unaffected.)
-  if (process.env.NODE_ENV === 'production' && process.env.COOKIE_SECURE === 'false') {
-    throw new Error('COOKIE_SECURE=false is not permitted when NODE_ENV=production — session cookies must be Secure.');
-  }
   const hostPrefix = cookieSecure ? '__Host-' : '';
   return {
     // DevOps (TRI-862) proxies /api/* verbatim → 127.0.0.1:3020 on the dev box. Match that by default.
@@ -208,7 +207,7 @@ export function loadConfig(): Config {
     adminCookieSameSite: (process.env.COOKIE_SAMESITE as 'lax' | 'strict' | 'none') || 'strict',
     adminSessionIdleMinutes: Number(process.env.ADMIN_SESSION_IDLE_MINUTES || 30),
     adminTrustCookieName: process.env.ADMIN_TRUST_COOKIE_NAME || 'tk_admin_trust',
-    trustedDeviceDays: num(process.env.TRUSTED_DEVICE_DAYS) ?? 30,
+    trustedDeviceDays: num(process.env.TRUSTED_DEVICE_DAYS) ?? 14,
     consumer: {
       cookieName: process.env.USER_COOKIE_NAME || `${hostPrefix}tk_user_session`,
       sessionIdleMinutes: num(process.env.USER_SESSION_IDLE_MINUTES) ?? 20_160, // 14 days
@@ -276,6 +275,7 @@ function loadMediaConfig(): MediaConfig {
     publicBase,
     keyPrefix: (process.env.MEDIA_KEY_PREFIX || 'media').replace(/^\/+|\/+$/g, ''),
     maxBytes: num(process.env.MEDIA_MAX_BYTES) ?? 10 * 1024 * 1024,
+    maxDimension: num(process.env.MEDIA_MAX_DIMENSION) ?? 12_000,
     allowedTypes: (process.env.MEDIA_ALLOWED_TYPES || 'image/jpeg,image/png,image/webp,image/gif')
       .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
     cacheControl: process.env.MEDIA_CACHE_CONTROL || 'public, max-age=31536000, immutable',

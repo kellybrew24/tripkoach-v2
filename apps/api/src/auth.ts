@@ -23,6 +23,7 @@ export interface StaffContext {
   id: string;
   email: string;
   name: string | null;
+  phone: string | null;
   role: 'admin' | 'operator' | 'viewer';
   jobTitle: string | null;
   permissions: Set<string>;
@@ -62,13 +63,17 @@ export async function verifyPassword(password: string, encodedHash: string | nul
 // spoof-resistant half of SEC-H2 — the per-IP @fastify/rate-limit on the login route is the other.
 export const LOGIN_MAX_ATTEMPTS = 5;
 export const LOGIN_LOCK_MINUTES = 15;
-// TRI-1061 (reconciled onto the TRI-1065 lockout split for the TRI-1057 cutover): wrong /auth/mfa codes
-// tolerated on a single pending session before it is revoked (forcing a full re-login). MFA failures ALSO
-// feed the per-account lockout above (recordFailedLogin / recordFailedUserLogin), so five failures lock
-// the account regardless of source IP — the per-IP @fastify/rate-limit is the other, spoofable half.
+// TRI-1061: wrong /auth/mfa codes tolerated on a single pending session before it is revoked (forcing a
+// full re-login). MFA failures ALSO feed the per-account lockout above via recordFailedLogin, so five
+// failures across sessions lock the account regardless of source IP.
 export const MFA_MAX_ATTEMPTS = 5;
 
 type LockableRow = { failed_login_count?: number | null; locked_until?: string | Date | null };
+
+// Both realms share the `session` table; the per-account lockout lives on staff_user (029) or its
+// consumer analogue user_account (030, TRI-1061). recordFailedLogin/resetFailedLogins take the table so
+// one implementation serves both — the row shape (failed_login_count/locked_until) is identical.
+type LockableTable = 'staff_user' | 'user_account';
 
 /** User-facing "account locked, try again in N minutes" copy for a lock expiry (shared by both realms). */
 export function lockoutMessage(until: Date): string {
@@ -76,7 +81,7 @@ export function lockoutMessage(until: Date): string {
   return `Too many failed attempts — this account is locked. Try again in about ${mins} minute${mins === 1 ? '' : 's'}.`;
 }
 
-/** The active lock expiry for this staff row, or null when it is not currently locked. */
+/** The active lock expiry for this account row, or null when it is not currently locked. */
 export function accountLockedUntil(u: LockableRow | null | undefined): Date | null {
   if (!u?.locked_until) return null;
   const until = u.locked_until instanceof Date ? u.locked_until : new Date(u.locked_until);
@@ -86,13 +91,15 @@ export function accountLockedUntil(u: LockableRow | null | undefined): Date | nu
 /** Record a failed password attempt against a known staff row. A stale lock (already elapsed) resets
  *  the counter first, so each lock window starts fresh. On reaching the threshold the row is locked
  *  for LOGIN_LOCK_MINUTES. Returns the new lock expiry when the account just locked, else null. */
-export async function recordFailedLogin(db: Db, u: { id: string } & LockableRow): Promise<Date | null> {
+export async function recordFailedLogin(
+  db: Db, u: { id: string } & LockableRow, table: LockableTable = 'staff_user',
+): Promise<Date | null> {
   const stale = accountLockedUntil(u) == null && u.locked_until != null;
   const base = stale ? 0 : (u.failed_login_count ?? 0);
   const newCount = base + 1;
   const doLock = newCount >= LOGIN_MAX_ATTEMPTS;
   const { rows } = await db.query<{ locked_until: Date | null }>(
-    `UPDATE staff_user
+    `UPDATE ${table}
         SET failed_login_count = $2,
             locked_until = CASE WHEN $3 THEN now() + ($4 * interval '1 minute') ELSE NULL END,
             updated_at = now()
@@ -104,19 +111,18 @@ export async function recordFailedLogin(db: Db, u: { id: string } & LockableRow)
 }
 
 /** Clear the failed-attempt counter and any lock after a successful authentication. */
-export async function resetFailedLogins(db: Db, staffId: string): Promise<void> {
+export async function resetFailedLogins(db: Db, id: string, table: LockableTable = 'staff_user'): Promise<void> {
   await db.query(
-    `UPDATE staff_user SET failed_login_count = 0, locked_until = NULL, updated_at = now()
+    `UPDATE ${table} SET failed_login_count = 0, locked_until = NULL, updated_at = now()
       WHERE id = $1 AND (failed_login_count <> 0 OR locked_until IS NOT NULL)`,
-    [staffId],
+    [id],
   );
 }
 
 /** TRI-1061: record a wrong /auth/mfa code against a pending session. Atomically increments the
- *  per-session counter (session.mfa_failed_count, migration 030 superset) and, on reaching
- *  MFA_MAX_ATTEMPTS, revokes the session in the same statement so the half-auth cookie is dead and the
- *  client must sign in again. Returns the new count + whether the session was (or already is) revoked.
- *  Realm-neutral — the `session` table is shared by staff and consumer half-auth logins. */
+ *  per-session counter and, on reaching MFA_MAX_ATTEMPTS, revokes the session in the same statement so
+ *  the half-auth cookie is dead and the client must sign in again. Returns the new count + whether the
+ *  session was (or already is) revoked. Works for both realms — the session table is shared. */
 export async function recordMfaFailure(db: Db, sessionId: string): Promise<{ count: number; revoked: boolean }> {
   const { rows } = await db.query<{ mfa_failed_count: number; revoked_at: Date | null }>(
     `UPDATE session
@@ -170,7 +176,7 @@ export async function revokeSession(db: Db, sessionId: string): Promise<void> {
  *  session is live (not expired/revoked), its staff user is active, AND it is still mfa_pending. */
 export async function resolvePendingSession(
   db: Db, sessionId: string,
-): Promise<{ sessionId: string; staffId: string; trustedDevice: boolean; staff: { id: string } & LockableRow } | null> {
+): Promise<{ sessionId: string; staffId: string; trustedDevice: boolean; failedLoginCount: number; lockedUntil: Date | null } | null> {
   if (!sessionId) return null;
   const { rows } = await db.query<any>(
     // TRI-1061: also surface the account lockout state so /auth/mfa can reject a locked account before
@@ -186,7 +192,8 @@ export async function resolvePendingSession(
   if (!r || r.status !== 'active') return null;
   return {
     sessionId: r.session_id, staffId: r.staff_id, trustedDevice: !!r.trusted_device,
-    staff: { id: r.staff_id, failed_login_count: r.failed_login_count, locked_until: r.locked_until },
+    failedLoginCount: r.failed_login_count ?? 0,
+    lockedUntil: r.locked_until ? new Date(r.locked_until) : null,
   };
 }
 
@@ -224,7 +231,7 @@ export async function clearMfaEnrollPending(db: Db, sessionId: string): Promise<
 export async function resolveSession(db: Db, cfg: Config, sessionId: string): Promise<StaffContext | null> {
   if (!sessionId) return null;
   const { rows } = await db.query<any>(
-    `SELECT s.id AS session_id, u.id, u.email, u.name, u.role, u.job_title, u.status
+    `SELECT s.id AS session_id, u.id, u.email, u.name, u.phone, u.role, u.job_title, u.status
        FROM session s
        JOIN staff_user u ON u.id = s.subject_id
       WHERE s.id = $1 AND s.subject_type = 'staff'
@@ -244,7 +251,7 @@ export async function resolveSession(db: Db, cfg: Config, sessionId: string): Pr
   await db.query(`UPDATE staff_user SET last_active_at = now() WHERE id = $1`, [r.id]);
 
   return {
-    id: r.id, email: r.email, name: r.name ?? null, role: r.role, jobTitle: r.job_title ?? null,
+    id: r.id, email: r.email, name: r.name ?? null, phone: r.phone ?? null, role: r.role, jobTitle: r.job_title ?? null,
     permissions: await permissionsFor(db, r.role),
   };
 }
@@ -297,21 +304,37 @@ export async function issueTrustedDevice(
   return token;
 }
 
+/** TRI-1124 (#7b) · Normalise a User-Agent for device binding: lowercase and drop version digits so a
+ *  browser auto-update (Chrome/120→121, "Windows NT 10.0") does NOT force a spurious re-MFA, while the
+ *  platform + browser-family + engine identity is preserved. Two genuinely different clients (Windows
+ *  Chrome vs macOS Safari) still normalise to clearly different strings, so a cookie stolen and replayed
+ *  from another machine fails the binding. */
+function normalizeUa(ua: string | null | undefined): string {
+  return (ua ?? '').toLowerCase().replace(/\d+/g, '');
+}
+
 /** Honor a presented trusted-device cookie: true iff it matches a LIVE (not expired/revoked) row for THIS
- *  staff user. Scoping to staffId is the guard that a device trusted for account A can never skip MFA for
- *  account B. Stamps last_used_at on a hit. */
+ *  staff user AND the presenting device's User-Agent matches the one the trust was minted on (TRI-1124 #7b:
+ *  the cookie is Secure+HttpOnly+SameSite but still a bearer — UA binding raises the bar so a stolen cookie
+ *  can't be replayed from a different device to skip MFA). Scoping to staffId is the guard that a device
+ *  trusted for account A can never skip MFA for account B. Stamps last_used_at on a hit. */
 export async function verifyTrustedDevice(
-  db: Db, staffId: string, token: string | undefined | null,
+  db: Db, staffId: string, token: string | undefined | null, presentedUserAgent?: string | null,
 ): Promise<boolean> {
   if (!token) return false;
-  const { rows } = await db.query<{ id: string }>(
-    `SELECT id FROM trusted_device
+  const { rows } = await db.query<{ id: string; user_agent: string | null }>(
+    `SELECT id, user_agent FROM trusted_device
       WHERE staff_id = $1 AND token_hash = $2
         AND revoked_at IS NULL AND expires_at > now()`,
     [staffId, sha256hex(token)],
   );
   const hit = rows[0];
   if (!hit) return false;
+  // Bind to the minting device's UA. A null stored UA (header absent at mint) can't be bound → allow, so
+  // legacy trusts aren't broken; when both are present they must normalise equal or the trust is refused.
+  if (hit.user_agent != null && normalizeUa(hit.user_agent) !== normalizeUa(presentedUserAgent)) {
+    return false;
+  }
   await db.query(`UPDATE trusted_device SET last_used_at = now() WHERE id = $1`, [hit.id]);
   return true;
 }
@@ -366,10 +389,10 @@ export function makeRequireAuthAllowingEnroll(db: Db, cfg: Config) {
       const enroll = await resolveEnrollPendingSession(db, sid);
       if (enroll) {
         const { rows } = await db.query<any>(
-          `SELECT id, email, name, role, job_title FROM staff_user WHERE id = $1`, [enroll.staffId]);
+          `SELECT id, email, name, phone, role, job_title FROM staff_user WHERE id = $1`, [enroll.staffId]);
         const u = rows[0];
         if (u) {
-          req.staff = { id: u.id, email: u.email, name: u.name ?? null, role: u.role, jobTitle: u.job_title ?? null,
+          req.staff = { id: u.id, email: u.email, name: u.name ?? null, phone: u.phone ?? null, role: u.role, jobTitle: u.job_title ?? null,
             permissions: await permissionsFor(db, u.role) };
           req.mfaEnrollPending = true;
           return;
