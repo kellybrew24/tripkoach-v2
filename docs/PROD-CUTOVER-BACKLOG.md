@@ -93,6 +93,7 @@ DNS/infra as noted. All items DONE on dev unless flagged.
 - [ ] TRI-1099 booking-receipt logo — email C `167cb9e` (1102) — **awaits CEO sign-off**
 - [ ] TRI-1097 — fix broken table sort (`tkSortRows` across Bookings/Tours/Customers/Guides) — FE, C `48fdb75`
 - [ ] TRI-1114 — SEO & shareability: per-route meta/OG/JSON-LD + real anchor links — FE, C `12cfe2b`. **At cutover set `SITE_URL` (see env checklist above) before `build:prod`.** Admin dist now ships `noindex,nofollow`.
+- [ ] TRI-1119 — a11y (skip-to-content link + `<main>` landmark, keyboard-operable blog cards) + DS logo lockup spec + logo asset consolidation (removed duplicate `uploads/logo-badge.png`) — FE + DS docs, NO mig, C `f55209b`.
 
 ### D. UX / content cleanups
 
