@@ -12,20 +12,22 @@ const { DataTable, Badge, Button, IconButton, Icon, Price, Modal, Alert, SearchF
    GET /requests and every write funnels through TK_ADMIN_ACT (which re-renders the
    whole console on success); in fixture mode it runs the optimistic update inline. */
 
-// Status model. Each status maps to an existing DS badge tone (no new CSS) and,
-// where the flow continues, the next status the "Advance" action moves it to.
+// Status model — keyed by the LIVE BE enum (lowercase: new|contacted|scheduled|
+// booked|closed, TRI-1137). Each maps to an existing DS badge tone (no new CSS), a
+// display label, and (where the flow continues) the next status "Advance" moves to.
 const REQ_STATUS = {
-  New:       { tone: "pending",   next: "Contacted", nextLabel: "Mark as contacted" },
-  Contacted: { tone: "neutral",   next: "Scheduled", nextLabel: "Mark as scheduled" },
-  Scheduled: { tone: "confirmed", next: "Booked",    nextLabel: "Mark as booked" },
-  Booked:    { tone: "paid",      next: null },
-  Closed:    { tone: "cancelled", next: null },
+  new:       { label: "New",       tone: "pending",   next: "contacted", nextLabel: "Mark as contacted" },
+  contacted: { label: "Contacted", tone: "neutral",   next: "scheduled", nextLabel: "Mark as scheduled" },
+  scheduled: { label: "Scheduled", tone: "confirmed", next: "booked",    nextLabel: "Mark as booked" },
+  booked:    { label: "Booked",    tone: "paid",      next: null },
+  closed:    { label: "Closed",    tone: "cancelled", next: null },
 };
-const REQ_ORDER = ["New", "Contacted", "Scheduled", "Booked", "Closed"];
-function reqStatus(r) { return (r && r.status) || "New"; }
+const REQ_ORDER = ["new", "contacted", "scheduled", "booked", "closed"];
+function reqStatus(r) { return (((r && r.status) || "new") + "").toLowerCase(); }
+function reqLabel(s) { return (REQ_STATUS[s] || {}).label || (s ? s[0].toUpperCase() + s.slice(1) : "New"); }
 function ReqStatusChip({ status }) {
-  const cfg = REQ_STATUS[status] || REQ_STATUS.New;
-  return <Badge tone={cfg.tone} dot>{status}</Badge>;
+  const cfg = REQ_STATUS[status] || REQ_STATUS.new;
+  return <Badge tone={cfg.tone} dot>{cfg.label}</Badge>;
 }
 
 // The admin console lives at admin.<host>; the consumer booking link the customer
@@ -68,26 +70,37 @@ function RequestsAdmin({ go }) {
     if (!ql) return true;
     return [r.tour, r.customerName, r.email, r.phone].some((v) => String(v || "").toLowerCase().includes(ql));
   });
-  const newCount = all.filter((r) => reqStatus(r) === "New").length;
+  const newCount = all.filter((r) => reqStatus(r) === "new").length;
 
-  // Fulfil a request: BE creates a private (unlisted) departure + a 72h-hold
-  // reserved booking and returns { ref, publicToken } (TRI-1137 §6 / TRI-1095 shape).
-  // We build /bookings/:ref?t=<token>, copy it, and surface it in a modal to share.
+  // Fulfil a request in one click. The landed BE splits fulfillment into two calls
+  // (TRI-1137): first create an UNLISTED departure for the requested tour/date/size,
+  // then mint a 72h-hold reserved booking against THAT departure id. We compose them:
+  //   POST /departures {visibility:'unlisted', …}        → { id, … }
+  //   POST /requests/:id/secure-link { departureId, partySize } → { ref, token }
+  // then build /bookings/:ref?t=<token> (TRI-1095), copy it, and show it to share.
+  const buildLink = (res) => {
+    if (res && (res.url || res.bookingUrl)) return res.url || res.bookingUrl;
+    const ref = (res && res.ref) || ("TKP" + Math.random().toString(36).slice(2, 8).toUpperCase());
+    const tok = (res && (res.token || res.publicToken)) || (Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2));
+    return consumerBase() + "/bookings/" + encodeURIComponent(ref) + "?t=" + encodeURIComponent(tok);
+  };
   const secureLink = (r) => {
+    const raw = r.requestedDateRaw || (/^\d{4}-\d{2}-\d{2}/.test(r.requestedDate || "") ? String(r.requestedDate).slice(0, 10) : "");
+    const size = Math.max(1, +r.partySize || 1);
     window.TK_ADMIN_ACT(
-      () => window.TK_ADMIN_API.createRequestSecureLink(r.id, { partySize: r.partySize }),
-      (res) => {
-        let url;
-        if (res && (res.url || res.bookingUrl)) url = res.url || res.bookingUrl;
-        else {
-          const ref = (res && res.ref) || ("TK-" + Math.random().toString(36).slice(2, 8).toUpperCase());
-          const tok = (res && (res.publicToken || res.token)) || (Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2));
-          url = consumerBase() + "/bookings/" + encodeURIComponent(ref) + "?t=" + encodeURIComponent(tok);
-        }
-        copyText(url);
-        // A minted hold means the request is at least Scheduled.
-        if (reqStatus(r) === "New" || reqStatus(r) === "Contacted") r.status = "Scheduled";
-        setLinkModal({ url: url, name: r.customerName });
+      () => window.TK_ADMIN_API.createDeparture({ tourId: r.tourId, date: raw, capacity: size, currency: r.currency || "USD", visibility: "unlisted" }),
+      (dep) => {
+        const depId = dep && dep.id;
+        window.TK_ADMIN_ACT(
+          () => window.TK_ADMIN_API.createRequestSecureLink(r.id, { departureId: depId, partySize: size }),
+          (res) => {
+            const url = buildLink(res);
+            copyText(url);
+            // A minted hold means the request is at least scheduled.
+            if (reqStatus(r) === "new" || reqStatus(r) === "contacted") r.status = "scheduled";
+            setLinkModal({ url: url, name: r.customerName });
+          }
+        );
       }
     );
   };
@@ -110,15 +123,17 @@ function RequestsAdmin({ go }) {
     const next = cfg.next;
     window.TK_ADMIN_ACT(
       () => window.TK_ADMIN_API.updateRequest(r.id, { status: next }),
-      () => { r.status = next; setToast(r.customerName + " → " + next); }
+      () => { r.status = next; setToast(r.customerName + " → " + reqLabel(next)); }
     );
   };
 
   const doDismiss = () => {
     const r = dismiss, why = reason.trim();
+    // BE updateRequestStatus persists `status` (reason is captured locally for the
+    // drawer + sent for future-proofing; the status change is audit-logged server-side).
     window.TK_ADMIN_ACT(
-      () => window.TK_ADMIN_API.updateRequest(r.id, { status: "Closed", reason: why || undefined }),
-      () => { r.status = "Closed"; r.closeReason = why; setDismiss(null); setReason(""); setDetail(null); setToast("Request from " + r.customerName + " closed"); }
+      () => window.TK_ADMIN_API.updateRequest(r.id, { status: "closed", reason: why || undefined }),
+      () => { r.status = "closed"; r.closeReason = why; setDismiss(null); setReason(""); setDetail(null); setToast("Request from " + r.customerName + " closed"); }
     );
   };
 
@@ -141,7 +156,7 @@ function RequestsAdmin({ go }) {
     if (r.email) items.push({ icon: "mail", label: "Email customer", onClick: () => { try { window.open(mailLink(r)); } catch (_) {} } });
     if (r.phone) items.push({ icon: "phone", label: "Call", onClick: () => { try { window.open("tel:" + r.phone); } catch (_) {} } });
     if (r.phone) items.push({ icon: "message-circle", label: "WhatsApp", onClick: () => { try { window.open(waLink(r), "_blank"); } catch (_) {} } });
-    if (reqStatus(r) !== "Closed") { items.push({ divider: true }); items.push({ icon: "x", label: "Dismiss with reason…", danger: true, onClick: () => { setDismiss(r); setReason(""); } }); }
+    if (reqStatus(r) !== "closed") { items.push({ divider: true }); items.push({ icon: "x", label: "Dismiss with reason…", danger: true, onClick: () => { setDismiss(r); setReason(""); } }); }
     return items;
   };
 
@@ -157,7 +172,7 @@ function RequestsAdmin({ go }) {
           {newCount > 0 && <Badge tone="pending" dot>{newCount} new</Badge>}
           <div style={{ marginInlineStart: "auto", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <SearchField id="req-search" value={q} onChange={(e) => setQ(e.target.value)} onClear={() => setQ("")} placeholder="Search tour, name, email…" style={{ minWidth: 220 }} />
-            <Select value={statusF} onChange={(e) => setStatusF(e.target.value)} options={[{ value: "", label: "All statuses" }].concat(REQ_ORDER.map((s) => ({ value: s, label: s })))} />
+            <Select value={statusF} onChange={(e) => setStatusF(e.target.value)} options={[{ value: "", label: "All statuses" }].concat(REQ_ORDER.map((s) => ({ value: s, label: reqLabel(s) })))} />
           </div>
         </div>
         <DataTable density="compact"
@@ -198,7 +213,7 @@ function RequestsAdmin({ go }) {
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
             <Button size="sm" variant="secondary" iconStart="link" onClick={() => secureLink(detail)}>Copy secure link</Button>
             {detail.phone && <Button size="sm" variant="secondary" iconStart="message-circle" onClick={() => { try { window.open(waLink(detail), "_blank"); } catch (_) {} }}>WhatsApp</Button>}
-            {reqStatus(detail) !== "Closed" && <Button size="sm" variant="ghost" iconStart="x" onClick={() => { setDismiss(detail); setReason(""); }} style={{ color: "var(--danger-fg)" }}>Dismiss…</Button>}
+            {reqStatus(detail) !== "closed" && <Button size="sm" variant="ghost" iconStart="x" onClick={() => { setDismiss(detail); setReason(""); }} style={{ color: "var(--danger-fg)" }}>Dismiss…</Button>}
           </div>
         </div>}
       </Drawer>

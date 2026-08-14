@@ -29,7 +29,7 @@ function navGroups(role) {
       { id: "bookings", label: "Bookings", icon: "ticket", badge: ((window.TK_ADMIN && window.TK_ADMIN.bookings) || []).filter(function (b) { return b.status === "pending"; }).length || undefined },
       // TRI-1139: custom-date requests inbox (TRI-1136 B1, CEO #3). Same RBAC as Bookings
       // (NOT admin-only) so operators triage them. "New" count drives the live badge.
-      { id: "requests", label: "Requests", icon: "message-square", badge: ((window.TK_ADMIN && window.TK_ADMIN.requests) || []).filter(function (r) { return (r.status || "New") === "New"; }).length || undefined },
+      { id: "requests", label: "Requests", icon: "message-square", badge: ((window.TK_ADMIN && window.TK_ADMIN.requests) || []).filter(function (r) { return ((r.status || "new") + "").toLowerCase() === "new"; }).length || undefined },
       { id: "departures", label: "Departures", icon: "calendar-days" },
       { id: "customers", label: "Customers", icon: "users" },
       { id: "guides", label: "Guides", icon: "user" },

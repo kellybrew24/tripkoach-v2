@@ -94,12 +94,13 @@
   // isn't on the schedule). Status flows New → Contacted → Scheduled → Booked → Closed.
   var reqTours = T.slice(0, 3);
   function reqTour(i) { return reqTours[i] || tour("accra-city-tour"); }
+  // status values match the live BE enum (lowercase): new|contacted|scheduled|booked|closed.
   var requests = [
-    { id:"rq1", tourId:reqTour(0).id, tour:reqTour(0).title, requestedDate:"2026-10-18", partySize:4, customerName:"Ama Mensah", email:"ama@example.com", phone:"+233 24 555 0142", receivedAt:"2026-08-13", status:"New", note:"Anniversary trip — hoping for a private group.", indicativeTotalMinor:(reqTour(0).price||0)*4*100, currency:"USD" },
-    { id:"rq2", tourId:reqTour(1).id, tour:reqTour(1).title, requestedDate:"2026-11-02", partySize:2, customerName:"Marcus Bell", email:"marcus@example.co.uk", phone:"+44 7700 900142", receivedAt:"2026-08-12", status:"Contacted", note:"Flexible ±3 days.", indicativeTotalMinor:(reqTour(1).price||0)*2*100, currency:"USD" },
-    { id:"rq3", tourId:reqTour(2).id, tour:reqTour(2).title, requestedDate:"2026-09-27", partySize:6, customerName:"Kojo Asante", email:"kojo.asante@example.com", phone:"+1 416 555 0199", receivedAt:"2026-08-11", status:"Scheduled", note:"", indicativeTotalMinor:(reqTour(2).price||0)*6*100, currency:"USD" },
-    { id:"rq4", tourId:reqTour(0).id, tour:reqTour(0).title, requestedDate:"2026-12-20", partySize:3, customerName:"Lena Fischer", email:"lena.f@example.de", phone:"+49 151 5550 142", receivedAt:"2026-08-09", status:"Booked", note:"Christmas week.", indicativeTotalMinor:(reqTour(0).price||0)*3*100, currency:"USD" },
-    { id:"rq5", tourId:reqTour(1).id, tour:reqTour(1).title, requestedDate:"2026-08-30", partySize:2, customerName:"David Okonkwo", email:"d.okonkwo@example.ng", phone:"+234 803 555 0142", receivedAt:"2026-08-08", status:"Closed", note:"Dates no longer work.", indicativeTotalMinor:(reqTour(1).price||0)*2*100, currency:"USD" },
+    { id:"rq1", tourId:reqTour(0).id, tour:reqTour(0).title, requestedDate:"2026-10-18", partySize:4, customerName:"Ama Mensah", email:"ama@example.com", phone:"+233 24 555 0142", receivedAt:"2026-08-13", status:"new", note:"Anniversary trip — hoping for a private group.", indicativeTotalMinor:(reqTour(0).price||0)*4*100, currency:"USD" },
+    { id:"rq2", tourId:reqTour(1).id, tour:reqTour(1).title, requestedDate:"2026-11-02", partySize:2, customerName:"Marcus Bell", email:"marcus@example.co.uk", phone:"+44 7700 900142", receivedAt:"2026-08-12", status:"contacted", note:"Flexible ±3 days.", indicativeTotalMinor:(reqTour(1).price||0)*2*100, currency:"USD" },
+    { id:"rq3", tourId:reqTour(2).id, tour:reqTour(2).title, requestedDate:"2026-09-27", partySize:6, customerName:"Kojo Asante", email:"kojo.asante@example.com", phone:"+1 416 555 0199", receivedAt:"2026-08-11", status:"scheduled", note:"", indicativeTotalMinor:(reqTour(2).price||0)*6*100, currency:"USD" },
+    { id:"rq4", tourId:reqTour(0).id, tour:reqTour(0).title, requestedDate:"2026-12-20", partySize:3, customerName:"Lena Fischer", email:"lena.f@example.de", phone:"+49 151 5550 142", receivedAt:"2026-08-09", status:"booked", note:"Christmas week.", indicativeTotalMinor:(reqTour(0).price||0)*3*100, currency:"USD" },
+    { id:"rq5", tourId:reqTour(1).id, tour:reqTour(1).title, requestedDate:"2026-08-30", partySize:2, customerName:"David Okonkwo", email:"d.okonkwo@example.ng", phone:"+234 803 555 0142", receivedAt:"2026-08-08", status:"closed", note:"Dates no longer work.", indicativeTotalMinor:(reqTour(1).price||0)*2*100, currency:"USD" },
   ];
 
   window.TK_ADMIN = { customers:customers, bookings:B, payments:payments, promos:promos, staff:staff, guides:guides, departures:departures, tours:T, blog:blog, requests:requests };

@@ -209,15 +209,18 @@
     return {
       id: pick(r.id, r.requestId, r.request_id, r.enquiryId, r.enquiry_id),
       tourId: pick(r.tourId, r.tourSlug, r.tour_id, r.tour_slug),
-      tour: pick(r.tour, r.tourTitle, r.tour_title) || pick(r.tourId, r.tourSlug, r.tour_id) || "—",
+      // BE list projection returns the title as `tourName` (TRI-1137 listRequests).
+      tour: pick(r.tour, r.tourName, r.tourTitle, r.tour_title) || pick(r.tourSlug, r.tourId, r.tour_id) || "—",
       requestedDate: fmtDate(rawDate),
       requestedDateRaw: (typeof rawDate === "string" ? rawDate.slice(0, 10) : ""),
       partySize: pick(r.partySize, r.party_size, r.pax, r.travellers, 1),
-      customerName: pick(r.customerName, r.name, r.customer_name) || "—",
+      // Interest enquiries don't capture a name; fall back to the email so the row isn't blank.
+      customerName: pick(r.customerName, r.name, r.customer_name) || pick(r.email, r.customerEmail) || "—",
       email: pick(r.email, r.customerEmail, r.customer_email) || "",
       phone: pick(r.phone, r.customerPhone, r.customer_phone) || "",
       receivedAt: fmtDate(pick(r.receivedAt, r.received_at, r.createdAt, r.created_at)),
-      status: pick(r.status) || "New",
+      // Live enum is lowercase (new|contacted|scheduled|booked|closed); default 'new'.
+      status: (pick(r.status) || "new"),
       note: pick(r.note, r.message, r.notes) || "",
       indicativeTotalMinor: pick(r.indicativeTotalMinor, r.indicative_total_minor),
       indicativeLabel: pick(r.indicativeLabel, r.indicative_label),
