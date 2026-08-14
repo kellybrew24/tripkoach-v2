@@ -1,0 +1,4 @@
+{
+  "_readme": "TRI-1123 supply-chain gate allow-list. Each entry exempts ONE high/critical npm advisory from the PR audit gate (scripts/ci/audit-gate.mjs). Use ONLY when no fix is available. Fields: id (GHSA id, numeric npm advisory source, or package name — required), reason (required in review), package (optional, matches by name), expires (YYYY-MM-DD; a past date lapses the exception so it blocks again and forces re-review). Keep this list EMPTY when possible. Documented in docs/SUPPLY-CHAIN.md.",
+  "allow": []
+}

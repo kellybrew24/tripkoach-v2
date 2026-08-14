@@ -1,0 +1,64 @@
+version: 2
+
+# =============================================================================
+# TripKoach v2 — Dependabot.  TRI-1123 (parent TRI-1121, TRI-1107 memo #3).
+#   Weekly dependency + GitHub Actions updates. Minor/patch grouped into a
+#   single PR per ecosystem to keep noise down; majors open separately so they
+#   get a real review. Every PR is gated by .github/workflows/supply-chain.yml.
+#   Keep the npm `directory` list in sync with that workflow's matrix.
+# =============================================================================
+
+updates:
+  # Root workspace — esbuild/jsdom build toolchain that produces web + admin.
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - security
+      - deps
+    commit-message:
+      prefix: "deps"
+      prefix-development: "deps-dev"
+    groups:
+      npm-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  # API service — Fastify + pg + friends.
+  - package-ecosystem: npm
+    directory: "/apps/api"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - security
+      - deps
+    commit-message:
+      prefix: "deps"
+      prefix-development: "deps-dev"
+    groups:
+      npm-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  # GitHub Actions used by our workflows (uptime.yml, supply-chain.yml).
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - security
+      - deps
+    groups:
+      actions-minor-patch:
+        update-types:
+          - minor
+          - patch

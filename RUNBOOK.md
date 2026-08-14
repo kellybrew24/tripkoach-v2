@@ -134,6 +134,18 @@ SELECT name, applied_at FROM schema_migrations ORDER BY applied_at DESC LIMIT 10
 
 ---
 
+## 7. Supply-chain / dependency gate (CI)
+
+Every PR to `main` runs `.github/workflows/supply-chain.yml`: `npm ci` (lockfile-drift
+check) + an `npm audit --omit=dev` gate on **HIGH/CRITICAL** advisories in production deps,
+for the root and `apps/api` lockfiles. Dependabot (`.github/dependabot.yml`) opens weekly
+update PRs. **A red `supply-chain` check means a dependency has a high/critical advisory or
+the lockfile drifted** — fix with `npm audit fix` / a bump, or (no fix available) add an
+*expiring* entry to `.audit-allowlist.json`. Full policy + allow-list how-to:
+[`docs/SUPPLY-CHAIN.md`](docs/SUPPLY-CHAIN.md).
+
+---
+
 ## <a name="rollback"></a>ROLLBACK — DB migrations (the hard part)
 
 Migrations are **forward-only**: `npm run migrate` applies ordered `.sql` files in
