@@ -101,6 +101,7 @@ DNS/infra as noted. All items DONE on dev unless flagged.
 
 ### D. UX / content cleanups
 
+- [ ] TRI-1136/1137/1138/1139 — custom/private date requests A+B1: `enquiries.ts` intent='request' + new fields (requestedDate/partySize/phone/note); mig **032** `departure.visibility DEFAULT 'public' CHECK IN ('public','unlisted')`; catalog.ts excludes unlisted from all public queries; admin service: `listRequests` + `updateRequestStatus` + `createPrivateBookingLink` (72h-hold reserved booking); admin routes: `GET /requests`, `PATCH /requests/:id`, `POST /requests/:id/secure-link`, `POST /departures/:id/private-link`; `/config` exposes `dateRequestsEnabled` (from `settings.flags.date_requests_enabled`) + `minRequestLeadDays:3`; consumer DateInterestForm upgraded (date picker, group-size stepper, phone, note); admin Requests inbox screen + nav item. BE mig 032 applied dev. FE+BE, mig 032, C `de14c36`+`1dc76d0`. ⚠ At cutover: apply mig 032 on prod before deploying; set `settings.flags.date_requests_enabled=true` to turn on. ⚠ RECONCILE mig 032 numbering at cutover (check what mig number is next on prod; prod is at mig 010 today).
 - [ ] TRI-1092/1088 — remove input placeholders (67 across 10 kit files) — FE
 - [ ] TRI-1132 — homepage hero image slider (child of TRI-1131): replaced the single static hero image with an accessible cross-fade carousel of the exact CDN image set + order the LIVE apex hero uses (`img/hero/slider/{canopy-walk,smiles,north-dance,independence-arch}`), all hotlinking `cdn.tripkoach.com` via a new `TK_HERO_SRCSET` (480/960/1440, per TRI-1117). Auto-advance (6s, pauses on hover/focus, honours prefers-reduced-motion) + prev/next buttons + dot tablist (Arrow/Home/End keys), per-slide alt text, aria-hidden on inactive slides. `apps/web/kit/data.js` + `screens-home.jsx`. FE, NO mig, C `ce5c90f`. Browser-verified on dev.tripkoach.com (4 imgs load from CDN, controls + auto-advance work). Prod counterpart is the v2 SPA (app.tripkoach.com), NOT the apex — the apex already ships this slider.
 - [ ] TRI-1090/1093/1096 — tour-badge removal (cleared tags, home rail copy) — FE + dev DB/seed, C `6e8c294`
@@ -120,6 +121,17 @@ ride the same window.
 > `schema_migrations` table — prod is at mig 010, so anything with mig ≤ 010 is
 > already there and does NOT re-ship; anything > 010 owes prod. The migration
 > ledger, not memory, is authoritative for what's live.
+
+### F. Custom / private date requests (TRI-1136, A + B1)
+
+Custom-date request flow: a traveller asks for a date that isn't scheduled → the
+enquiry lands in a net-new admin **Requests inbox**; ops schedule a private
+(unlisted) departure + reserved-booking secure link, or dismiss. Dev-only build;
+BE (TRI-1137) lands the endpoints in parallel. **At cutover the BE row must land
+before/with the FE** — the inbox degrades gracefully to fixtures if `/requests`
+is absent, but Copy-secure-link / status PATCH need TRI-1137.
+
+- [ ] TRI-1139 — **admin Requests inbox + nav + Unlisted departure toggle** — FE, NO mig, C `<pending>`. Changed: `apps/admin/kit/app.jsx` (nav "Requests" in Operations w/ live New-count badge — NOT admin-only; `/requests` route; META; render branch), `screens-requests.jsx` (**new** inbox screen — list, status chips New→Contacted→Scheduled→Booked→Closed, row actions: advance status / Create-departure-prefilled / Copy-secure-link `?t=` / mailto·tel·WhatsApp / dismiss-with-reason), `screens-tours.jsx` (`DeparturesAdmin` Visibility=Unlisted toggle on Add-departure drawer → POSTs `visibility`; prefill via `tk-add-departure` event detail; Unlisted row badge), `tk-boot.js` (`mapRequest`, `listRequests`/`updateRequest`/`createRequestSecureLink` API, requests hydration, `visibility` on `mapDepartureRow`), `admin-data.js` (requests fixture), `scripts/build.mjs` + `kit/index.html` (register `screens-requests.jsx`). Verified on the built bundle via `scripts/tri1139-render-check.mjs` (21/21) + agent-browser screenshots. **Rebuild admin dist (`build:admin`) at cutover — `apps/admin/dist` is git-ignored.** Consumer secure-link base is derived by stripping the leading `admin.` from the console host (or set `TK_CONFIG.webBaseUrl`); confirm it resolves to the prod consumer origin at cutover.
 
 ---
 
