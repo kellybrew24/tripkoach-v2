@@ -168,10 +168,6 @@ function HomeWeb({ go }) {
         <HeroSlider />
         <div style={{ position: "absolute", inset: 0, zIndex: 1, pointerEvents: "none", background: "linear-gradient(180deg, rgba(20,19,18,.35) 0%, rgba(20,19,18,.15) 40%, rgba(20,19,18,.82) 100%)" }} />
         <div className="tk-container" style={{ position: "relative", zIndex: 2, maxWidth: 1200, paddingBottom: "var(--space-12)", paddingTop: "var(--space-16)", color: "var(--n-0)" }}>
-          <div style={{ display: "inline-flex", alignItems: "center", gap: 10, padding: "6px 14px", borderRadius: 999, background: "rgba(255,255,255,.14)", backdropFilter: "blur(6px)", border: "1px solid rgba(255,255,255,.24)", marginBottom: "var(--space-5)" }}>
-            <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--gold-400)" }} />
-            <span style={{ fontSize: 12.5, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase" }}>A smarter way to travel Africa</span>
-          </div>
           <h1 style={{ fontFamily: "var(--font-display)", fontWeight: 800, letterSpacing: "-0.035em", lineHeight: 0.98, fontSize: "clamp(44px, 6.4vw, 88px)", margin: 0, maxWidth: "16ch", textWrap: "balance" }}>
             Ghana, shown by the people who <em style={{ fontStyle: "normal", color: "var(--gold-400)" }}>live there.</em>
           </h1>
