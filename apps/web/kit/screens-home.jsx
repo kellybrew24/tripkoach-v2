@@ -142,8 +142,8 @@ function HomeWeb({ go }) {
         <Section style={{ paddingBlock: "var(--space-14)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 16, flexWrap: "wrap", marginBottom: "var(--space-8)" }}>
             <div>
-              <span className="tk-overline" style={{ color: "var(--gold-700)" }}>Most booked</span>
-              <h2 className="tk-h1" style={{ marginTop: 8 }}>Popular right now.</h2>
+              <span className="tk-overline" style={{ color: "var(--gold-700)" }}>Handpicked</span>
+              <h2 className="tk-h1" style={{ marginTop: 8 }}>Editor's picks.</h2>
             </div>
             <Button variant="secondary" iconEnd="arrow-right" onClick={() => go("browse")}>View all {tours.length} tours</Button>
           </div>

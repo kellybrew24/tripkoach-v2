@@ -7,7 +7,7 @@ window.TK_IMG = function (slug, name) {
 window.TK_DATA = {
   tours: [
     { id:"accra-city-tour", title:"Accra City Tour", region:"Greater Accra", duration:"3 to 4 hrs · Half day",
-      category:"City Tour", price:65, currency:"USD", rating:4.8, reviews:215, spotsLeft:11, tag:"Most booked",
+      category:"City Tour", price:65, currency:"USD", rating:4.8, reviews:215, spotsLeft:11,
       image:TK_IMG("accra-city-tour"),
       blurb:"Feel the pulse of the capital — history, culture, flavor. Iconic sites, vibrant markets, and street food in just a few hours.",
       highlights:["Black Star Gate at Independence Square","Kwame Nkrumah Memorial Park","Jamestown harbor and lighthouse","Makola Market with a guided street-food tasting"],
@@ -32,7 +32,7 @@ window.TK_DATA = {
         { id:"d3", date:"Sat 29 Aug 2026", time:"09:00 · Hotel pickup, Accra", price:75, spotsLeft:0 },
         { id:"d4", date:"Sat 5 Sep 2026", time:"09:00 · Hotel pickup, Accra", price:75, spotsLeft:12 } ] },
     { id:"discover-ghana-in-10-days", title:"Discover Ghana in 10 days", region:"Greater Accra", duration:"10 days",
-      category:"Cultural Discovery", price:2175, currency:"USD", rating:4.9, reviews:86, spotsLeft:6, tag:"Best seller",
+      category:"Cultural Discovery", price:2175, currency:"USD", rating:4.9, reviews:86, spotsLeft:6,
       image:TK_IMG("discover-ghana-in-10-days"),
       blurb:"Ten days across the breadth of Ghana — Accra's arts and nightlife, Cape Coast and Elmina's heritage castles, a Safari Valley game drive, Aburi's botanical gardens, and Boti Falls' twin cataracts. Built for first-time visitors who want depth without forced marches.",
       highlights:["Cape Coast & Elmina heritage castles","Kakum National Park canopy walkway","Safari Valley Resort game drive","Aburi Botanical Gardens and Boti Falls"],
@@ -57,7 +57,7 @@ window.TK_DATA = {
       image:TK_IMG("coastal-history-trail"),
       blurb:"The heritage castles of Cape Coast and Elmina, Assin Manso's Ancestral Slave River, and the Kakum canopy walkway." },
     { id:"edina-bakatue-festival-2026", title:"Edina Bakatue Festival Tour", region:"Central", duration:"8 days",
-      category:"Cultural Discovery", price:2175, currency:"USD", spotsLeft:4, tag:"Jul 2026",
+      category:"Cultural Discovery", price:2175, currency:"USD", spotsLeft:4,
       image:TK_IMG("edina-bakatue-festival-2026"),
       blurb:"Royal processions, canoe regattas, and coastal celebrations across Ghana's most iconic landmarks. 6–13 July 2026." },
     { id:"northern-savannah-safari", title:"Northern and Savannah region tour", region:"Northern", duration:"5 days",
