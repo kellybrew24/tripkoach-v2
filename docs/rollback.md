@@ -6,8 +6,12 @@ in-place**:
   over the live document root with `--delete`. The old files are gone the instant
   rsync finishes. `config.js` is excluded (never clobbered) — that guardrail
   already exists (TRI-1002).
-- **API:** rsync `apps/api/src` → `/opt/tripkoach-v2/apps/api/src` + `systemctl
-  restart tripkoach-api-prod`. The previous `src` is overwritten in place.
+- **API:** `scripts/deploy-api.sh <dev|prod> <git-ref>` ships **committed content
+  only** (`git archive` of a pinned commit) + `systemctl restart` + a security
+  smoke gate (TRI-1165). It snapshots the current `src` to
+  `/opt/tripkoach-v2/releases/api-src-<ts>.tgz` first, so a bad deploy auto-rolls
+  back. **Do not hand-edit host `src` or rsync from a working tree** — that is how
+  TRI-1160 H-1 silently reverted a landed control.
 
 Neither keeps a previous release, so "undo the last deploy" today means *rebuild
 and redeploy an older commit*. That works but is slow under pressure. This doc
@@ -48,24 +52,56 @@ Properties:
 > concurrency-sensitive file mid-flight (shared-repo lesson) and to keep the
 > change trivially reversible. At cutover, DevOps may inline it if preferred.
 
-### API rollback
+### API deploy — git-pinned, drift-guarded, smoke-gated (TRI-1165)
 
-The API has no build artifact to snapshot — `src` *is* the deploy. Git is the
-source of truth, so the rollback is "redeploy the previous good commit's src":
+`scripts/deploy-api.sh <dev|prod> [git-ref]` is the **only** supported way to push
+the API. It exists because the host `src` was maintained by hand-patching /
+wholesale rsync, which let a TRI-1100 feature deploy ship a stale `server.ts` and
+**silently revert** the TRI-1054/1055 auth rate-limit control (TRI-1160 H-1) — no
+gate caught it. The script closes that gap:
 
 ```bash
-git checkout <good-sha> -- apps/api/src
-rsync -az apps/api/src/ root@168.119.117.136:/opt/tripkoach-v2/apps/api/src/
-ssh root@168.119.117.136 'systemctl restart tripkoach-api-prod && sleep 2 && curl -fsS localhost:3120/api/health'
-git checkout HEAD -- apps/api/src
+scripts/deploy-api.sh dev  <good-sha>     # or prod
 ```
-Optional hardening (later): have the API deploy tar the current `src` to
-`/opt/tripkoach-v2/releases/api-src-<ts>.tgz` before rsync, so a restore doesn't
-depend on a laptop's git state. Noted as an automation candidate, not built now.
+- **Committed content only.** Ships `git archive <ref>` of `apps/api/{src,package.json,migrations}` —
+  never the dirty working tree, never a hand-edited host file. Refuses if `apps/api`
+  differs from the ref (unless `ALLOW_DIRTY=1`).
+- **Drift guard.** Reads `/opt/tripkoach-v2/DEPLOYED_REF` (the last deployed SHA) and
+  refuses if the host carries shadow `.bak`/`.pre-*` files (someone hand-edited),
+  unless `FORCE=1`. Records the new SHA to `DEPLOYED_REF` after a successful ship.
+- **Auto-rollback.** Snapshots `src` → `releases/api-src-<ts>.tgz` before shipping;
+  restores it + restarts if health or the smoke gate fails.
+- **Security smoke gate.** Runs `scripts/security-smoke.sh` after restart and FAILS
+  the deploy (auto-rollback) if a control is missing — asserts login returns 429
+  after N attempts, the hardening headers are present, and the webhook rejects a bad
+  HMAC. Runnable standalone: `scripts/security-smoke.sh <dev|prod>` (exit non-zero on
+  any missing control) — use it as a post-deploy check and in CI.
 
-**Guardrail:** if the live host `src` is *ahead* of your branch (dev carries
-1054/1056/1061-style fixes not yet reconciled), do NOT wholesale-rsync — diff
-host-vs-local and patch only changed lines (`dev-deploy-src-ahead-of-branch`).
+> **⚠ Reconciliation prerequisite (TRI-1057).** The live host `src` is currently an
+> UNRECONCILED superset — it carries `rate-gate.ts` + TRI-1054/1055/1061/1062/1079
+> patches that are **not yet in `origin/main`**. Deploying `origin/main` today would
+> REVERT those controls, so `deploy-api.sh` is not yet CI-wired to main. First import
+> the host superset into git (child of TRI-1165), *then* pin deploys to that ref. The
+> smoke gate is the backstop: even a wrong ref that drops a control fails the deploy.
+
+### API rollback
+
+`deploy-api.sh` auto-rolls back on a failed gate. To revert manually, restore the
+pre-deploy snapshot on the host, or redeploy the previous good commit:
+
+```bash
+# fast: restore the snapshot the deploy took
+ssh root@168.119.117.136 'cd /opt/tripkoach-v2 && rm -rf apps/api/src && \
+  tar xzf releases/api-src-<ts>.tgz && systemctl restart tripkoach-api-prod && \
+  sleep 2 && curl -fsS localhost:3120/api/health'
+# or redeploy a known-good commit through the gated path:
+scripts/deploy-api.sh prod <good-sha>
+```
+
+**Guardrail:** the host `src` may be *ahead* of `origin/main` (dev carries
+1054/1056/1061-style fixes not yet reconciled). Never wholesale-rsync a branch over
+it (`dev-deploy-src-ahead-of-branch`); pin the deploy to a ref that INCLUDES those
+controls and let the smoke gate confirm.
 
 ## Database migrations — reversibility inventory
 

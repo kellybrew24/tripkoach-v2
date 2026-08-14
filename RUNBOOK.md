@@ -77,20 +77,25 @@ scripts/deploy-rollback.sh rollback admin prod
 
 ## 3. Roll back a bad **API** push
 
-Symptom: 5xx spike / health failing right after an API deploy. The API deploy is
-`rsync apps/api/src` + `systemctl restart tripkoach-api-prod`. To revert:
+Symptom: 5xx spike / health failing right after an API deploy. The API deploys via
+`scripts/deploy-api.sh <dev|prod> <ref>` (git-pinned, TRI-1165), which snapshots the
+current `src` to `releases/api-src-<ts>.tgz` and **auto-rolls-back** if health or the
+security smoke gate fails. To revert manually:
 
 ```bash
-# Preferred: redeploy the previous good commit's src (git is the source of truth).
-cd /home/iamsk/work/tripkoach-v2 && git log --oneline -10        # find last-good sha
-git checkout <good-sha> -- apps/api/src
-rsync -az apps/api/src/ root@168.119.117.136:/opt/tripkoach-v2/apps/api/src/
-ssh root@168.119.117.136 'systemctl restart tripkoach-api-prod && sleep 2 && curl -fsS localhost:3120/api/health'
-git checkout HEAD -- apps/api/src     # restore your working tree
+# Fast: restore the snapshot the last deploy took (find the newest tgz).
+ssh root@168.119.117.136 'ls -t /opt/tripkoach-v2/releases/api-src-*.tgz | head -1'
+ssh root@168.119.117.136 'cd /opt/tripkoach-v2 && rm -rf apps/api/src && \
+  tar xzf releases/api-src-<ts>.tgz && systemctl restart tripkoach-api-prod && \
+  sleep 2 && curl -fsS localhost:3120/api/health'
+# Or redeploy a known-good commit through the gated path:
+cd /home/iamsk/work/tripkoach-v2 && scripts/deploy-api.sh prod <good-sha>
 ```
-- **Never wholesale-rsync `src/`** if the live host carries fixes ahead of your
-  branch — diff host-vs-local first and patch only changed lines
-  (`dev-deploy-src-ahead-of-branch` lesson). For prod this is less likely, but check.
+- **Never hand-edit host `src` or wholesale-rsync a working tree.** That is how
+  TRI-1160 H-1 silently reverted a landed control. Pin the deploy to a ref that
+  INCLUDES the live host's landed controls (the superset is not yet in `origin/main`
+  — see `docs/rollback.md` reconciliation note) and let the smoke gate confirm.
+- After any manual API restore, re-run the gate: `scripts/security-smoke.sh prod`.
 - If the bad push also ran a **migration**, code rollback alone is not enough — see §DB.
 
 ## 4. Where the logs live
