@@ -94,6 +94,7 @@ DNS/infra as noted. All items DONE on dev unless flagged.
 - [ ] TRI-1097 — fix broken table sort (`tkSortRows` across Bookings/Tours/Customers/Guides) — FE, C `48fdb75`
 - [ ] TRI-1114 — SEO & shareability: per-route meta/OG/JSON-LD + real anchor links — FE, C `12cfe2b`. **At cutover set `SITE_URL` (see env checklist above) before `build:prod`.** Admin dist now ships `noindex,nofollow`.
 - [ ] TRI-1119 — a11y (skip-to-content link + `<main>` landmark, keyboard-operable blog cards) + DS logo lockup spec + logo asset consolidation (removed duplicate `uploads/logo-badge.png`) — FE + DS docs, NO mig, C `f55209b`.
+- [ ] TRI-1120 — credentialed admin console UX pass: added 4 missing DS icon glyphs (`smartphone` in the self-serve 2FA drawer, `circle`+`repeat` in the audit timeline, `refresh-cw` in the Resend-invite menu — all previously rendered as empty boxes) to `Icon.jsx`+`_ds_bundle.js`; made the auth aside context-aware so the accept-invite/reset-password first-run screens drop the "Welcome back / pick up where you left off" copy (invite → "Welcome to the team"). FE + DS, NO mig, C `8de711d`. **Rebuild admin dist (`build:admin`) at cutover — `apps/admin/dist` is git-ignored.**
 
 ### D. UX / content cleanups
 
