@@ -1511,4 +1511,7 @@ function ReviewsAdmin({ go }) {
   );
 }
 
-Object.assign(window, { CustomersAdmin, PaymentsAdmin, PromosAdmin, UsersAdmin, SettingsAdmin, Forbidden, AccountProfileAdmin, PreferencesAdmin, GuidesAdmin, ReviewsAdmin });
+// TRI-1183: expose the portal-based row menu so other screens (e.g. the Requests
+// inbox, screens-requests.jsx) can reuse the same overflow-escaping dropdown
+// instead of the DS <RowMenu>, whose absolute menu is clipped by .tk-tablewrap.
+Object.assign(window, { CustomersAdmin, PaymentsAdmin, PromosAdmin, UsersAdmin, SettingsAdmin, Forbidden, AccountProfileAdmin, PreferencesAdmin, GuidesAdmin, ReviewsAdmin, PortalRowMenu });

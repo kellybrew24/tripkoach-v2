@@ -54,6 +54,13 @@ function copyText(t) {
 function digits(s) { return String(s || "").replace(/[^0-9]/g, ""); }
 
 function RequestsAdmin({ go }) {
+  // TRI-1183: the DS <RowMenu> renders its dropdown position:absolute inside the
+  // row, so it's clipped by .tk-tablewrap{overflow:hidden} (and the .tk-shell__main
+  // scroll region) — its options got cut off / stacked behind the neighbouring
+  // buttons, the board's z-index bug. Reuse the portal-based menu the rest of the
+  // admin already uses (TRI-978); it renders through <body> with position:fixed,
+  // escaping every overflow ancestor. Fall back to the DS menu if it's unavailable.
+  const RowMenuC = window.PortalRowMenu || RowMenu;
   const A = window.TK_ADMIN || {};
   const all = A.requests || [];
   const [q, setQ] = React.useState("");
@@ -186,7 +193,7 @@ function RequestsAdmin({ go }) {
           ]}
           rows={rows} getRowId={(r) => r.id}
           onRowClick={(r) => setDetail(r)}
-          rowActions={(r) => <span onClick={(e) => e.stopPropagation()}><RowMenu label={"Actions for " + r.customerName} items={rowMenu(r)} /></span>}
+          rowActions={(r) => <span onClick={(e) => e.stopPropagation()}><RowMenuC label={"Actions for " + r.customerName} items={rowMenu(r)} /></span>}
           empty={<EmptyState icon="message-square" title={q || statusF ? "No matching requests" : "No custom-date requests yet"} body={q || statusF ? "Try a different search or status filter." : "When a traveller asks for a date that isn't scheduled, it shows up here."} />} />
       </div>
 
