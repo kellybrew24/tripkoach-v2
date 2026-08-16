@@ -1,10 +1,11 @@
 // TRI-943 · Customer avatar upload + image moderation service (parent TRI-942 → TRI-857).
 //
-// Board posture — Option A "show-then-moderate": a valid avatar goes LIVE the moment it clears the hardened
-// automated gate; a customer report or an admin action auto-hides it into the moderation queue. v1's gate
-// is the hardened validation in the media pipeline (magic-byte + type allow-list + size + dimension caps)
-// plus the moderateImage() seam below, which returns { allowed:true } in v1. The paid image classifier is a
-// fast-follow that swaps that seam's body — no caller changes.
+// Board posture — TRI-1185 Option B "approve-before-visible" (default): a valid avatar lands 'pending' and
+// is NOT public until an admin approves it via the moderation queue. It still clears the hardened automated
+// gate (magic-byte + type allow-list + size + dimension caps in the media pipeline) plus the moderateImage()
+// seam below (returns { allowed:true } in v1; a future paid classifier swaps that seam's body — no caller
+// changes). Setting env AVATAR_APPROVE_BEFORE_VISIBLE=false restores the v1 Option A "show-then-moderate"
+// behaviour byte-for-byte (a valid avatar goes LIVE immediately; report/admin action hides it).
 //
 // Storage is NOT re-invented here: the upload rides the TRI-918 media pipeline (validate → SHA-256 dedupe →
 // SigV4 PUT to Cloudflare R2 → immutable cdn.tripkoach.com URL, recorded in media_asset). This service owns
@@ -43,8 +44,16 @@ export class AvatarError extends Error {
 
 export interface AvatarActor { id: string; ip: string | null }
 
-// An avatar is served publicly only when it is not admin-hidden. rejected/hidden ⇒ null (FE shows default).
-const isVisible = (status: string | null | undefined) => status === 'approved' || status === 'pending';
+// TRI-1185 board posture — Option B "approve-before-visible" (default): an avatar is served publicly ONLY
+// once an admin has approved it. A freshly-uploaded avatar sits 'pending' and the FE renders the default DS
+// placeholder until an admin approves; rejected/hidden ⇒ null as before. Setting the env
+// AVATAR_APPROVE_BEFORE_VISIBLE=false restores the v1 Option A "show-then-moderate" behaviour byte-for-byte
+// (a 'pending' avatar is served immediately). Read once at module load so avatarUrlFor() (used standalone by
+// the /me serializer) and the upload gate below agree without threading a flag through every caller.
+export const AVATAR_APPROVE_BEFORE_VISIBLE =
+  (process.env.AVATAR_APPROVE_BEFORE_VISIBLE ?? 'true').toLowerCase() !== 'false';
+const isVisible = (status: string | null | undefined) =>
+  AVATAR_APPROVE_BEFORE_VISIBLE ? status === 'approved' : status === 'approved' || status === 'pending';
 export function avatarUrlFor(status: string | null | undefined, url: string | null | undefined): string | null {
   return isVisible(status) ? (url ?? null) : null;
 }
@@ -86,9 +95,24 @@ export function createAvatarService(db: Db, cfg: Config, media: MediaService) {
       { maxBytes: AVATAR_MAX_BYTES, maxDimension: AVATAR_MAX_DIMENSION, allowedTypes: AVATAR_ALLOWED_TYPES },
     );
 
-    // Option A gate: v1 auto-approves on a clean automated pass → the avatar is live immediately.
+    // TRI-1185 gate. Option B (default, AVATAR_APPROVE_BEFORE_VISIBLE): a clean automated pass lands
+    // 'pending' and enters the admin moderation queue — the avatar is NOT public until an admin approves;
+    // a future classifier reject (seam returning allowed:false) auto-rejects. Option A (flag off) preserves
+    // v1 exactly: clean ⇒ 'approved' (live immediately), classifier reject ⇒ 'pending'.
     const gate = await moderateImage(asset.id);
-    const status = gate.allowed ? 'approved' : 'pending';
+    const status = AVATAR_APPROVE_BEFORE_VISIBLE
+      ? (gate.allowed ? 'pending' : 'rejected')
+      : (gate.allowed ? 'approved' : 'pending');
+    // Audit-trail row that matches the resulting status. Under Option A this collapses to the original
+    // approve/auto_flag pair (byte-identical); Option B adds the "submitted for review" pending row.
+    const logMeta: { action: 'approve' | 'reject' | 'auto_flag'; reason: string } =
+      status === 'approved'
+        ? { action: 'approve', reason: 'auto-approved (hardened validation passed)' }
+        : status === 'rejected'
+          ? { action: 'reject', reason: `auto-rejected: ${gate.labels.join(',')}` }
+          : { action: 'auto_flag', reason: gate.allowed
+              ? 'submitted for review — pending admin approval (approve-before-visible)'
+              : `auto-flagged: ${gate.labels.join(',')}` };
 
     await db.tx(async (q) => {
       await q.query(
@@ -96,8 +120,8 @@ export function createAvatarService(db: Db, cfg: Config, media: MediaService) {
         [userId, asset.id, status]);
       await logAction(q, {
         userId, mediaId: asset.id,
-        action: gate.allowed ? 'approve' : 'auto_flag', actorType: 'system', actorId: null,
-        reason: gate.allowed ? 'auto-approved (hardened validation passed)' : `auto-flagged: ${gate.labels.join(',')}`,
+        action: logMeta.action, actorType: 'system', actorId: null,
+        reason: logMeta.reason,
       });
     });
     await audit(db, { actorType: 'user', actorId: userId, action: 'user.avatar_upload', targetType: 'user_account', targetId: userId, after: { mediaId: asset.id, status }, ip: actor.ip });
