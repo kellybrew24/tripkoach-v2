@@ -20,7 +20,7 @@
     "clean": "rm -rf apps/web/dist apps/admin/dist"
   },
   "devDependencies": {
-    "esbuild": "^0.24.2",
+    "esbuild": "^0.28.2",
     "jsdom": "^30.0.1"
   }
 }
